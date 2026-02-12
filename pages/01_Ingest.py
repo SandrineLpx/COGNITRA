@@ -1,0 +1,78 @@
+import streamlit as st
+from src.storage import append_record, new_record_id, save_pdf_bytes, utc_now_iso
+from src.pdf_extract import extract_text_robust
+from src.context_pack import build_context_pack
+from src.render_brief import render_intelligence_brief
+from src.model_router import route_and_extract
+from src.postprocess import postprocess_record
+
+st.set_page_config(page_title="Ingest", layout="wide")
+st.title("Ingest")
+
+with st.sidebar:
+    provider = st.selectbox("Model", ["auto","gemini","claude","chatgpt"], index=0)
+    st.caption("Strict routing: fallback only on schema failure.")
+
+uploaded = st.file_uploader("Upload a PDF", type=["pdf"])
+title = st.text_input("Title (optional)", value="")
+original_url_input = st.text_input("Original URL (optional)", value="")
+
+manual_override = st.checkbox("Paste text manually (override extraction)", value=False)
+pasted = st.text_area("Paste text here", height=200, disabled=not manual_override)
+
+if uploaded is not None:
+    pdf_bytes = uploaded.read()
+
+    extracted_text = ""
+    method = ""
+    if not manual_override:
+        extracted_text, method = extract_text_robust(pdf_bytes)
+        st.caption(f"Extraction method: {method} • chars: {len(extracted_text)}")
+
+    preview_text = pasted if manual_override else extracted_text
+    st.subheader("Text preview")
+    st.text_area("Preview", preview_text[:6000], height=220)
+
+    run = st.button("Run pipeline", type="primary")
+    if run:
+        if not preview_text.strip():
+            st.error("No text available. Paste text manually and try again.")
+            st.stop()
+
+        record_id = new_record_id()
+        pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
+
+        watch_terms = []      # optional: load from spec/company-watchlist_final.md later
+        country_terms = []    # optional: seed with common countries later
+
+        context_pack = build_context_pack(title or uploaded.name, preview_text, watch_terms, country_terms)
+
+        rec, router_log = route_and_extract(context_pack, provider_choice=provider)
+
+        if rec is None:
+            st.error("All models failed strict validation. Use manual paste and try again.")
+            st.json(router_log)
+            st.stop()
+
+        try:
+            rec = postprocess_record(rec)
+        except Exception as e:
+            st.warning(f"Postprocess skipped due to error: {e}")
+
+        if original_url_input.strip():
+            rec["original_url"] = original_url_input.strip()
+
+        rec["record_id"] = record_id
+        rec["created_at"] = utc_now_iso()
+        rec["source_pdf_path"] = pdf_path
+        rec.setdefault("review_status", "Not Reviewed")
+        rec["_router_log"] = router_log
+
+        append_record(rec)
+
+        st.success("Record saved.")
+        st.subheader("JSON record")
+        st.json(rec)
+
+        st.subheader("Rendered Intelligence Brief")
+        st.code(render_intelligence_brief(rec), language="markdown")
