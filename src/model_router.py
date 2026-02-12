@@ -26,19 +26,9 @@ def record_response_schema() -> Dict[str, Any]:
         "properties": {
             "title": {"type": "STRING"},
             "source_type": {"type": "STRING", "enum": sorted(ALLOWED_SOURCE_TYPES)},
-            "publish_date": {
-                "anyOf": [
-                    {"type": "STRING", "pattern": r"^\d{4}-\d{2}-\d{2}$"},
-                    {"type": "NULL"},
-                ]
-            },
+            "publish_date": {"type": "STRING", "nullable": True, "pattern": r"^\d{4}-\d{2}-\d{2}$"},
             "publish_date_confidence": {"type": "STRING", "enum": sorted(ALLOWED_CONF)},
-            "original_url": {
-                "anyOf": [
-                    {"type": "STRING"},
-                    {"type": "NULL"},
-                ]
-            },
+            "original_url": {"type": "STRING", "nullable": True},
             "actor_type": {"type": "STRING", "enum": sorted(ALLOWED_ACTOR_TYPES)},
             "government_entities": {"type": "ARRAY", "items": {"type": "STRING"}},
             "companies_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}},
@@ -58,12 +48,7 @@ def record_response_schema() -> Dict[str, Any]:
             "evidence_bullets": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
             "key_insights": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
             "strategic_implications": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
-            "recommended_actions": {
-                "anyOf": [
-                    {"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 6},
-                    {"type": "NULL"},
-                ]
-            },
+            "recommended_actions": {"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 6, "nullable": True},
             "review_status": {"type": "STRING", "enum": sorted(ALLOWED_REVIEW)},
             "notes": {"type": "STRING"},
         },

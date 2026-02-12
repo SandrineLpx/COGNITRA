@@ -110,6 +110,10 @@ Everything else is deterministic:
 ### 4.1 Components
 
 * **Ingestion:** PDF upload / text input
+* **Duplicate detection layer:**
+  * Exact title match detection (blocking at ingest)
+  * Similar story detection (fuzzy matching with similarity threshold 0.88)
+  * Automatic "better source" selection when duplicates detected
 * **Local processing (non-AI):**
 
   * PDF → text extraction
@@ -126,12 +130,21 @@ Everything else is deterministic:
   * “fix JSON only” repair prompt (single retry)
 * **Storage:**
 
-  * SQLite (or JSONL) for records and review status
-* **Presentation:**
+  * JSONL for records and review status
+  * Separate JSONL files for duplicates (marked with duplicate metadata)
+  * Bulk deduplication via CLI script (`scripts/dedupe_jsonl.py`)
+* **Briefing pipeline:**
+  * Weekly candidate selection (recent records, exclude duplicates by default)
+  * Share-ready detection (High priority + High confidence)
+  * Markdown brief and executive email generation
+  * Analyst-driven item selection with one-click suggestions
+* **Analytics & Presentation:**
 
-  * Inbox table with filters
+  * Inbox table with filters (priority, source, review status, company search)
   * Detail view with edits and review status
-  * Export to CSV for Power BI
+  * Dashboard with canonical/all-records toggle
+  * Export to CSV for Power BI (canonical and all records support)
+  * Weekly Brief page for digest drafting & email templates
 
 ### 4.2 Human-in-the-loop gating
 
@@ -199,31 +212,48 @@ Each record includes 2–4 evidence bullets:
 * Storage: [SQLite / JSONL]
 * Reporting: [Power BI optional]
 
-For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion, record review, and analytics in a lightweight interface. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. For reporting and downstream analysis, the app includes an optional CSV export (e.g., exporting “Approved” records only) to support tools like Power BI and other spreadsheet-based workflows.
+For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion, duplicate detection, record review, analytics, and weekly briefing workflows in a lightweight interface. The app includes six main pages: (1) Home, (2) Ingest with duplicate blocking, (3) Inbox for filtering/browsing, (4) Record detail for editing/approval, (5) Dashboard with canonical toggle, (6) Weekly Brief for digest drafting, and (7) Export/Admin for bulk export and deduplication. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). For reporting and downstream analysis, the app includes:
+
+- CSV export of canonical records (or all records) filtered by approval status
+- JSONL export of both canonical and duplicate records for analysis
+- Dashboard with toggle to view analytics on canonical vs. all records  
+- Weekly Brief page for drafting digest summaries and executable email templates
+- CLI script (`scripts/dedupe_jsonl.py`) for off-app bulk deduplication with diagnostic stats
 
 ### 7.2 Processing pipeline (step-by-step)
 
 1. User uploads PDF (with optional manual URL field for provenance)
-2. Extract text locally
-3. Split into paragraphs
-4. Score paragraphs:
+2. **Duplicate detection:**
+   * Check exact title match against existing records → block if duplicate
+   * Check similar title (fuzzy match, threshold 0.88) → flag if similar
+   * If similar, compare source quality and mark weaker as duplicate
+3. Extract text locally
+4. Split into paragraphs
+5. Score paragraphs:
 
    * company watchlist matches
    * closure keyword hits
    * country mentions
-5. Build context pack (cap length)
-6. Call LLM to output strict JSON (using Gemini-compatible schema)
-7. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, remove invalid regulator entities)
-8. Validate JSON against schema and retry once if needed
-9. Store record
-10. Render Intelligence Brief from JSON
-11. Human review edits + approve
+6. Build context pack (cap length)
+7. Call LLM to output strict JSON (using Gemini-compatible schema)
+8. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, remove invalid regulator entities)
+9. Validate JSON against schema and retry once if needed
+10. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed
+11. Render Intelligence Brief from JSON
+12. Human review edits + approve
+13. **Weekly briefing (separate workflow):**
+    * Select candidates from last N days (exclude duplicates by default)
+    * Prioritize share-ready items (High priority + High confidence)
+    * Render Markdown brief + executive email template
+    * Analyst can select/deselect items before sharing
 
 ### 7.3 Token control strategy
 
+* Duplicate detection is deterministic (no LLM calls)
 * Fixed cap on context pack size
-* One LLM call per document (plus optional single repair call)
-* No second call for “Intelligence Brief” (rendered deterministically)
+* One LLM call per unique document (plus optional single repair call)
+* No second call for "Intelligence Brief" (rendered deterministically)
+* No additional calls for deduplication or weekly briefing (all deterministic post-processing)
 
 ### 7.4 Error handling and resilience
 
@@ -300,6 +330,10 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * Evidence bullets improved trust and made review faster.
 * Context pack selection controlled token usage without losing key signals.
 * HITL gating made the workflow realistic for organizational adoption.
+* Duplicate detection layer (both exact and fuzzy) prevented noise in executive reporting while maintaining flexibility.
+* Publisher ranking system (deterministic scoring: S&P=100 > Bloomberg=90 > Reuters=80 > ... > Other=50) ensured that when multiple sources covered the same story, the highest-quality source was automatically selected.
+* Weekly briefing workflow with share-ready detection (High priority + High confidence) and executive email templating made it easy for analysts to draft weekly digests with minimal manual work.
+* Deduplication and briefing modules were entirely deterministic (no additional LLM calls), keeping token costs and latency predictable.
 
 ### 10.2 What was challenging
 
@@ -318,11 +352,14 @@ This iteration also reduced repository complexity by removing scripts that were 
 
 ### 10.3 Future improvements
 
-* Add retrieval/chunking to improve evidence precision
-* Expand watchlist and synonyms gradually based on real overrides
-* Add a lightweight “weekly digest builder” that compiles only Approved items
-* Integrate with enterprise tools (SharePoint/Teams) as Phase 2
-* Add earnings analysis
+* Add retrieval/chunking to improve evidence precision (e.g., retrieve nearest chunks for specific claims)
+* Expand watchlist and synonyms gradually based on real analyst overrides
+* Tune similarity threshold and deduplication criteria based on analyst feedback from real workflows
+* Build reporting dashboard showing dedup rates and publisher distribution trends over time
+* Integrate with Power BI for interactive executive dashboards
+* Extend publisher scoring with recency and completeness weighting for time-sensitive events
+* Add earnings analysis module for financial signal extraction
+* Integrate with enterprise tools (SharePoint/Teams) for scheduled email dispatch as Phase 2
 
 ## 11. Conclusion
 
@@ -330,30 +367,83 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ---
 
-# Questions for you (to shape the final technical report)
+# Implementation Summary (v2.3 - Final)
 
-## A) Product and scope
+**Version:** 2.3 (production-ready MVP)  
+**Completion Date:** February 12, 2026
 
-1. What is the exact MVP you will demo: PDF upload only, or PDF + pasted text/URL too?
-2. Do you want the report to frame this as a “closure systems intelligence tool” only, or “industry-agnostic with a closure-focused demo”?
+## Key Features Delivered
 
-## B) Technical choices (important for the report)
+1. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
+   - Exact title matching (blocking at ingest)
+   - Fuzzy story detection (threshold 0.88)
+   - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, ... Other=50)
+   - Confidence and completeness scoring for tie-breaking
 
-3. Which model will you use in the final build (Gemini vs Claude vs ChatGPT), and why (structured JSON reliability vs writing quality vs ease of use)?
-4. Which UI will you use: Streamlit, Lovable, or something else?
+2. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
+   - Candidate selection from last N days (auto-excludes duplicates)
+   - Share-ready detection (High priority + High confidence)
+   - Markdown brief + executive email template generation
+   - Analyst-driven item selection with one-click suggestions
 
-## C) Evaluation (what’s realistic)
+3. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
+   - Standalone JSONL deduplication with CSV export
+   - Diagnostic stats (duplicate rate, canonical count)
+   - Supports large datasets outside Streamlit UI
 
-5. How many documents do you think you can realistically process for evaluation (5, 10, 20)?
-6. Do you want to track “override rate” (how often you changed AI tags), or keep evaluation simpler?
+4. **Streamlit Integration**
+   - Dashboard: canonical/all-records toggle with analytics
+   - Export/Admin: bulk export button + metrics dashboard
+   - 7-page app (Home, Ingest, Inbox, Record, Dashboard, Weekly Brief, Export/Admin)
 
-## D) Evidence and trust
+5. **Testing & Validation** (`test_scenarios.py`)
+   - 25+ test cases covering all workflows
+   - Publisher ranking hierarchy validation
+   - Weekly briefing logic verification
+   - Exact and fuzzy duplicate detection tests
 
-7. Do you want evidence bullets to include paragraph indices (e.g., “P7: …”) or just quote fragments?
-8. Should the report include a short section on hallucination risk and mitigation (schema validation + evidence + HITL)?
+## Technical Stack
 
-## E) Reporting
+- **Model:** Gemini 2.5-flash via `google-genai` with structured JSON schema
+- **UI:** Streamlit (7-page multi-page app)
+- **Storage:** JSONL (JSON Lines format)
+- **Language:** Python 3.9+
+- **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, google-genai, pytest
 
-9. Will you include Power BI in the demo/report as the “scalability story,” or keep everything inside the app?
+---
 
-If you answer these, I can update this draft into a tighter version 0.2 with your decisions baked in and add a 2–3 page “Implementation + Evaluation” core that reads like a polished final report.
+# Design Decisions Finalized
+
+## A) Product & Scope ✓
+
+- **MVP features:** PDF upload, text paste, duplicate detection, weekly briefing, executive email generation
+- **Duplicate detection:** Exact title block + similar story auto-ranking by source quality
+- **Deduplication logic:** Publisher ranking (S&P > Bloomberg > Reuters > ... > Other) + confidence + completeness
+
+## B) Technical Choices ✓
+
+- **Model:** Gemini for structured JSON reliability and deterministic output
+- **UI:** Streamlit 7-page app for lightweight, interactive workflows
+- **Storage:** JSONL for simplicity and scalability without database overhead
+
+## C) Evaluation ✓
+
+- **Test coverage:** 25+ scenario tests (duplicate detection, ranking, briefing)
+- **Quality gates:** Schema validation, evidence requirement, review gating, duplicate suppression
+- **Regression prevention:** Comprehensive test suite for all new features
+
+## D) Evidence & Trust ✓
+
+- **Evidence source:** Quote fragments with schema validation, URL provenance via HITL input
+- **Hallucination mitigation:** URL captured as manual input (not model extraction), duplicates prevent repeated signals, evidence + validation + review gating
+
+## E) Reporting ✓
+
+- **Exports:** CSV (canonical and all) ready for Power BI; JSONL (canonical + dups) for analysis
+- **In-app:** Dashboard with filters, Weekly Brief with email draft, Admin metrics
+- **CLI:** Standalone bulk deduplication script with diagnostic output
+
+---
+
+**Report version:** 0.2  
+**Status:** Production MVP complete; ready for deployment and evaluation

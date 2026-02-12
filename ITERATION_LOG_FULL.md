@@ -1,4 +1,7 @@
-# Iteration Log
+# Iteration Log (Full / Historical)
+
+This file preserves detailed step-by-step history, including superseded intermediate fixes.
+Use `ITERATION_LOG.md` as the current authoritative milestone log.
 
 Use this file to track changes by iteration in a concise way.
 

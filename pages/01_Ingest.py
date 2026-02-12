@@ -1,10 +1,11 @@
 import streamlit as st
-from src.storage import append_record, new_record_id, save_pdf_bytes, utc_now_iso
+from src.storage import load_records, new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
 from src.pdf_extract import extract_text_robust
 from src.context_pack import build_context_pack
 from src.render_brief import render_intelligence_brief
 from src.model_router import route_and_extract
 from src.postprocess import postprocess_record
+from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
 
 st.set_page_config(page_title="Ingest", layout="wide")
 st.title("Ingest")
@@ -39,6 +40,16 @@ if uploaded is not None:
             st.error("No text available. Paste text manually and try again.")
             st.stop()
 
+        records = load_records()
+        proposed_title = (title or uploaded.name).strip()
+        dupe = find_exact_title_duplicate(records, proposed_title)
+        if dupe:
+            st.error("Duplicate detected: an article with the same title already exists. Skipping ingestion.")
+            st.caption(
+                f"Existing record: {dupe.get('record_id')} • {dupe.get('created_at','') or 'Unknown date'}"
+            )
+            st.stop()
+
         record_id = new_record_id()
         pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
 
@@ -54,21 +65,49 @@ if uploaded is not None:
             st.json(router_log)
             st.stop()
 
+        if original_url_input.strip():
+            rec["original_url"] = original_url_input.strip()
+
         try:
             rec = postprocess_record(rec)
         except Exception as e:
             st.warning(f"Postprocess skipped due to error: {e}")
-
-        if original_url_input.strip():
-            rec["original_url"] = original_url_input.strip()
 
         rec["record_id"] = record_id
         rec["created_at"] = utc_now_iso()
         rec["source_pdf_path"] = pdf_path
         rec.setdefault("review_status", "Not Reviewed")
         rec["_router_log"] = router_log
+        rec.setdefault("exclude_from_brief", False)
 
-        append_record(rec)
+        similar = find_similar_title_records(records, rec.get("title", ""), threshold=0.88)
+        if similar:
+            best = rec
+            best_score = score_source_quality(rec)
+            for existing, _ratio in similar:
+                s = score_source_quality(existing)
+                if s > best_score:
+                    best = existing
+                    best_score = s
+
+            if best is rec:
+                rec["story_primary"] = True
+                for existing, _ratio in similar:
+                    existing["exclude_from_brief"] = True
+                    existing["duplicate_story_of"] = record_id
+                    existing["story_primary"] = False
+                st.warning("Similar story detected. This source looks stronger, so duplicates will be suppressed.")
+                overwrite_records(records + [rec])
+            else:
+                rec["exclude_from_brief"] = True
+                rec["duplicate_story_of"] = best.get("record_id")
+                rec["story_primary"] = False
+                st.warning(
+                    "Similar story detected. A stronger source already exists, so this one will be excluded from briefs."
+                )
+                overwrite_records(records + [rec])
+        else:
+            overwrite_records(records + [rec])
 
         st.success("Record saved.")
         st.subheader("JSON record")

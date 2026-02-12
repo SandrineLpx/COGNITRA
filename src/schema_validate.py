@@ -57,7 +57,7 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
     topics = rec["topics"]
     if not isinstance(topics, list) or not (1 <= len(topics) <= 3):
-        errs.append("topics must be a list of 1–3 items")
+        errs.append("topics must be a list of 1-3 items")
     else:
         bad = [t for t in topics if t not in CANON_TOPICS]
         if bad:
@@ -65,19 +65,19 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
 
     kw = rec["keywords"]
     if not isinstance(kw, list) or not (5 <= len(kw) <= 12):
-        errs.append("keywords must be a list of 5–12 items")
+        errs.append("keywords must be a list of 5-12 items")
 
     ev = rec["evidence_bullets"]
     if not isinstance(ev, list) or not (2 <= len(ev) <= 4):
-        errs.append("evidence_bullets must be a list of 2–4 items")
+        errs.append("evidence_bullets must be a list of 2-4 items")
 
     ki = rec["key_insights"]
     if not isinstance(ki, list) or not (2 <= len(ki) <= 4):
-        errs.append("key_insights must be a list of 2–4 items")
+        errs.append("key_insights must be a list of 2-4 items")
 
     si = rec["strategic_implications"]
     if not isinstance(si, list) or not (2 <= len(si) <= 4):
-        errs.append("strategic_implications must be a list of 2–4 items")
+        errs.append("strategic_implications must be a list of 2-4 items")
 
     ra = rec["recommended_actions"]
     if ra is not None and (not isinstance(ra, list) or len(ra) > 6):

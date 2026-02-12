@@ -1,15 +1,30 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 from src.storage import load_records
+from src.dedupe import dedupe_records
 
 st.set_page_config(page_title="Dashboard", layout="wide")
 st.title("Dashboard")
 
+# Sidebar toggle for canonical vs all records
+with st.sidebar:
+    st.subheader("Data Mode")
+    show_canonical_only = st.checkbox("Show canonical stories only", value=False)
+    st.caption("Canonical: deduplicated (one story per source group). All: includes duplicates.")
+
+# Load records
 records = load_records()
 if not records:
     st.info("No records yet.")
     st.stop()
+
+# Apply deduplication filter if requested
+if show_canonical_only:
+    canonical, _ = dedupe_records(records)
+    records = canonical
+    st.info(f"Showing {len(records)} canonical records (deduplicated)")
 
 df = pd.json_normalize(records)
 
