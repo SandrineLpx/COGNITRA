@@ -5,7 +5,7 @@ from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
 from src.model_router import route_and_extract
 from src.postprocess import postprocess_record
-from src.text_cleanup import clean_text_for_llm
+from src.clean_text import clean_extracted_text
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
 
 st.set_page_config(page_title="Ingest", layout="wide")
@@ -21,7 +21,6 @@ original_url_input = st.text_input("Original URL (optional)", value="")
 
 manual_override = st.checkbox("Paste text manually (override extraction)", value=False)
 pasted = st.text_area("Paste text here", height=200, disabled=not manual_override)
-clean_extracted_text = st.checkbox("Clean extracted text (recommended for noisy PDFs)", value=True)
 show_selected_chunks = st.checkbox("Show selected chunks", value=False)
 
 if uploaded is not None:
@@ -34,7 +33,7 @@ if uploaded is not None:
         st.caption(f"Extraction method: {method} • chars: {len(extracted_text)}")
 
     preview_text = pasted if manual_override else extracted_text
-    cleaned_text = clean_text_for_llm(preview_text) if clean_extracted_text else preview_text
+    cleaned_text = clean_extracted_text(preview_text)
 
     raw_len = len(preview_text)
     cleaned_len = len(cleaned_text)
@@ -44,10 +43,10 @@ if uploaded is not None:
     col_raw, col_clean = st.columns(2)
     with col_raw:
         st.caption(f"Raw chars: {raw_len}")
-        st.text_area("Raw preview", preview_text[:3000], height=220)
+        st.text_area("Raw preview", preview_text[:2000], height=220)
     with col_clean:
         st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
-        st.text_area("Cleaned preview", cleaned_text[:3000], height=220)
+        st.text_area("Cleaned preview", cleaned_text[:6000], height=220)
 
     run = st.button("Run pipeline", type="primary")
     if run:
@@ -108,7 +107,7 @@ if uploaded is not None:
             st.json(router_log)
             st.stop()
 
-        if original_url_input.strip():
+        if original_url_input.strip() and not rec.get("original_url"):
             rec["original_url"] = original_url_input.strip()
 
         try:

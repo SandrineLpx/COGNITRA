@@ -8,6 +8,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Tuple
 
 # Publisher ranking (higher = better source)
@@ -228,3 +229,52 @@ def dedupe_records(records: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
                     dups.append(rec)
     
     return canonical, dups
+
+
+def score_source_quality(rec: Dict) -> Tuple[int, int, int]:
+    """
+    Composite quality score for choosing the stronger source.
+
+    Ordering:
+    1. publisher_score
+    2. confidence_score
+    3. completeness_score
+    """
+    return (
+        publisher_score(rec.get("source_type")),
+        confidence_score(rec.get("confidence")),
+        completeness_score(rec),
+    )
+
+
+def find_exact_title_duplicate(records: List[Dict], title: str) -> Optional[Dict]:
+    """Return an existing record when normalized title matches exactly."""
+    title_fp = _title_fingerprint(title or "")
+    if not title_fp:
+        return None
+    for rec in records:
+        if _title_fingerprint(rec.get("title") or "") == title_fp:
+            return rec
+    return None
+
+
+def find_similar_title_records(
+    records: List[Dict], title: str, threshold: float = 0.88
+) -> List[Tuple[Dict, float]]:
+    """
+    Return records with title similarity >= threshold.
+    Uses deterministic SequenceMatcher on normalized title fingerprints.
+    """
+    out: List[Tuple[Dict, float]] = []
+    title_fp = _title_fingerprint(title or "")
+    if not title_fp:
+        return out
+    for rec in records:
+        other_fp = _title_fingerprint(rec.get("title") or "")
+        if not other_fp:
+            continue
+        ratio = SequenceMatcher(None, title_fp, other_fp).ratio()
+        if ratio >= threshold:
+            out.append((rec, ratio))
+    out.sort(key=lambda x: x[1], reverse=True)
+    return out
