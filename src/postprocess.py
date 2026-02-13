@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from datetime import datetime
 import re
 from src.constants import FOOTPRINT_REGIONS
 
@@ -91,6 +92,95 @@ def _normalize_regions(regions: List[str]) -> List[str]:
         out.append(REGION_ALIASES.get(key, r0))
     return _dedupe_keep_order(out)
 
+def _record_text(rec: Dict[str, Any], source_text: Optional[str] = None) -> str:
+    parts: List[str] = []
+    if isinstance(source_text, str) and source_text.strip():
+        parts.append(source_text)
+    for k in ("title", "notes"):
+        v = rec.get(k)
+        if isinstance(v, str):
+            parts.append(v)
+    for k in ("keywords", "evidence_bullets", "key_insights", "strategic_implications"):
+        v = rec.get(k)
+        if isinstance(v, list):
+            parts.extend(str(x) for x in v)
+    return " ".join(parts)
+
+_DATE_PATTERNS = [
+    (re.compile(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b"), "dmy"),
+    (re.compile(r"\b([A-Za-z]{3,9})\.?\s+(\d{1,2}),\s*(\d{4})\b"), "mdy"),
+]
+
+_MONTHS = {
+    "jan": 1, "january": 1,
+    "feb": 2, "february": 2,
+    "mar": 3, "march": 3,
+    "apr": 4, "april": 4,
+    "may": 5,
+    "jun": 6, "june": 6,
+    "jul": 7, "july": 7,
+    "aug": 8, "august": 8,
+    "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10,
+    "nov": 11, "november": 11,
+    "dec": 12, "december": 12,
+}
+
+
+def _parse_month(token: str) -> Optional[int]:
+    return _MONTHS.get(token.strip().lower().rstrip("."))
+
+
+def extract_publish_date_iso(text: str) -> Optional[str]:
+    # Prefer explicit ISO date when present.
+    m_iso = re.search(r"\b(\d{4})-(\d{2})-(\d{2})\b", text)
+    if m_iso:
+        try:
+            return datetime(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))).strftime("%Y-%m-%d")
+        except ValueError:
+            pass
+
+    for pat, mode in _DATE_PATTERNS:
+        m = pat.search(text)
+        if not m:
+            continue
+        try:
+            if mode == "dmy":
+                day = int(m.group(1))
+                month = _parse_month(m.group(2))
+                year = int(m.group(3))
+            else:
+                month = _parse_month(m.group(1))
+                day = int(m.group(2))
+                year = int(m.group(3))
+            if not month:
+                continue
+            return datetime(year, month, day).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def infer_publisher(text: str) -> Optional[str]:
+    t = text.lower()
+
+    if (
+        "s&p global" in t
+        or "s&p global mobility" in t
+        or "autointelligence | headline analysis" in t
+    ):
+        return "S&P"
+    if "marklines" in t:
+        return "MarkLines"
+    if "automotive news" in t:
+        return "Automotive News"
+
+    # Keep Reuters conservative: accept only when it appears header-like.
+    if re.search(r"(?:^|\n)\s*reuters\b", text, flags=re.IGNORECASE):
+        return "Reuters"
+
+    return None
+
 def _record_text_for_region_hints(rec: Dict[str, Any]) -> str:
     parts: List[str] = []
     for k in ("title", "notes"):
@@ -124,7 +214,7 @@ def derive_regions_relevant_to_kiekert(country_mentions: List[str]) -> List[str]
     regions = [r for r in _dedupe_keep_order(regions) if r in FOOTPRINT_REGIONS]
     return regions
 
-def postprocess_record(rec: Dict[str, Any]) -> Dict[str, Any]:
+def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -> Dict[str, Any]:
     """
     Mutates as little as possible:
     - canonicalizes/dedupes country_mentions + regions_mentioned
@@ -140,6 +230,18 @@ def postprocess_record(rec: Dict[str, Any]) -> Dict[str, Any]:
         rec["original_url"] = u if re.match(r"^https?://\S+$", u) else None
     elif url == "":
         rec["original_url"] = None
+
+    combined_text = _record_text(rec, source_text=source_text)
+
+    if not rec.get("publish_date"):
+        parsed_date = extract_publish_date_iso(combined_text)
+        if parsed_date:
+            rec["publish_date"] = parsed_date
+            rec["publish_date_confidence"] = "High"
+
+    inferred_source = infer_publisher(combined_text)
+    if inferred_source:
+        rec["source_type"] = inferred_source
 
     countries = rec.get("country_mentions") or []
     if isinstance(countries, list):

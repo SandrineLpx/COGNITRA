@@ -1,10 +1,11 @@
 import streamlit as st
 from src.storage import load_records, new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
 from src.pdf_extract import extract_text_robust
-from src.context_pack import build_context_pack
+from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
 from src.model_router import route_and_extract
 from src.postprocess import postprocess_record
+from src.text_cleanup import clean_text_for_llm
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
 
 st.set_page_config(page_title="Ingest", layout="wide")
@@ -20,6 +21,8 @@ original_url_input = st.text_input("Original URL (optional)", value="")
 
 manual_override = st.checkbox("Paste text manually (override extraction)", value=False)
 pasted = st.text_area("Paste text here", height=200, disabled=not manual_override)
+clean_extracted_text = st.checkbox("Clean extracted text (recommended for noisy PDFs)", value=True)
+show_selected_chunks = st.checkbox("Show selected chunks", value=False)
 
 if uploaded is not None:
     pdf_bytes = uploaded.read()
@@ -31,8 +34,20 @@ if uploaded is not None:
         st.caption(f"Extraction method: {method} • chars: {len(extracted_text)}")
 
     preview_text = pasted if manual_override else extracted_text
+    cleaned_text = clean_text_for_llm(preview_text) if clean_extracted_text else preview_text
+
+    raw_len = len(preview_text)
+    cleaned_len = len(cleaned_text)
+    removed_pct = (100.0 * (raw_len - cleaned_len) / raw_len) if raw_len > 0 else 0.0
+
     st.subheader("Text preview")
-    st.text_area("Preview", preview_text[:6000], height=220)
+    col_raw, col_clean = st.columns(2)
+    with col_raw:
+        st.caption(f"Raw chars: {raw_len}")
+        st.text_area("Raw preview", preview_text[:3000], height=220)
+    with col_clean:
+        st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
+        st.text_area("Cleaned preview", cleaned_text[:3000], height=220)
 
     run = st.button("Run pipeline", type="primary")
     if run:
@@ -54,9 +69,37 @@ if uploaded is not None:
         pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
 
         watch_terms = []      # optional: load from spec/company-watchlist_final.md later
-        country_terms = []    # optional: seed with common countries later
+        topic_terms = [
+            "tariff", "plant", "capacity", "joint venture", "platform", "EV", "battery",
+            "latch", "door handle", "supplier", "production", "recall", "regulation",
+        ]
 
-        context_pack = build_context_pack(title or uploaded.name, preview_text, watch_terms, country_terms)
+        selected = select_context_chunks(
+            title or uploaded.name,
+            cleaned_text,
+            watch_terms,
+            topic_terms,
+        )
+        context_pack = selected["context_pack"]
+        if original_url_input.strip():
+            context_pack = f"{context_pack}\n\nORIGINAL_URL: {original_url_input.strip()}"
+
+        if show_selected_chunks:
+            st.subheader("Selected Header Chunks")
+            if selected["header_chunks"]:
+                for i, h in enumerate(selected["header_chunks"], 1):
+                    st.markdown(f"**H{i}** score={h['score']} flags={', '.join(h['flags']) or '[none]'}")
+                    st.code(h["chunk"])
+            else:
+                st.caption("No header chunks selected.")
+
+            st.subheader("Selected Body Chunks")
+            if selected["body_chunks"]:
+                for i, b in enumerate(selected["body_chunks"], 1):
+                    st.markdown(f"**B{i}** score={b['score']} flags={', '.join(b['flags']) or '[none]'}")
+                    st.code(b["chunk"])
+            else:
+                st.caption("No body chunks selected.")
 
         rec, router_log = route_and_extract(context_pack, provider_choice=provider)
 
@@ -69,7 +112,7 @@ if uploaded is not None:
             rec["original_url"] = original_url_input.strip()
 
         try:
-            rec = postprocess_record(rec)
+            rec = postprocess_record(rec, source_text=context_pack)
         except Exception as e:
             st.warning(f"Postprocess skipped due to error: {e}")
 
