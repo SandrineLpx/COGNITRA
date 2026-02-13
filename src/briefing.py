@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Dict, Iterable, List, Optional, Tuple
 
 from src.dedupe import score_source_quality
+from src.dedup_rank import dedup_and_rank
 
 
 def _parse_date(value: Optional[str]) -> Optional[date]:
@@ -48,8 +49,10 @@ def select_weekly_candidates(
     days: int = 7,
     include_excluded: bool = False,
 ) -> List[Dict]:
+    kept, excluded = dedup_and_rank(records)
+    merged = kept + excluded
     items = []
-    for r in records:
+    for r in merged:
         if not include_excluded and r.get("exclude_from_brief"):
             continue
         if within_last_days(r, days):

@@ -81,9 +81,11 @@ AI is used only where it provides high leverage:
 Everything else is deterministic:
 
 * PDF text extraction
-* paragraph selection
+* noisy-PDF cleaning and chunking
+* paragraph selection and context pack assembly
 * schema validation and error handling
 * brief formatting from JSON
+* deduplication and weekly briefing
 
 ## 3. Design Requirements
 
@@ -116,18 +118,21 @@ Everything else is deterministic:
   * Automatic "better source" selection when duplicates detected
 * **Local processing (non-AI):**
 
-  * PDF → text extraction
-  * paragraph segmentation
-  * keyword/watchlist/country hit scoring
-  * creation of a short “context pack”
-* **AI inference (single call per doc):**
+  * PDF → text extraction (PyMuPDF with pdfplumber fallback)
+  * Noisy-PDF cleaning: deterministic removal of ads, nav menus, paywall prompts, social sharing blocks, link farms, repeated headers/footers, photo credits, and symbol-heavy lines (`src/text_clean_chunk.py`)
+  * Chunking: cleaned text split into overlapping model-ready chunks (~9K chars, 800-char overlap) with detected-title propagation
+  * Context pack assembly: keyword/watchlist/country hit scoring with bounded size
+* **AI inference (two-pass model strategy):**
 
-  * strict JSON extraction (schema-defined)
-  * evidence bullets + insights + implications
+  * **Pass 1 — Gemini Flash-Lite:** runs extraction cheaply on every document (most are "easy enough")
+  * **Quality gate:** schema validation + heuristic checks (missing publish_date, wrong source_type, generic evidence)
+  * **Pass 2 — Gemini Flash (fallback):** re-runs extraction only when pass 1 fails validation or quality checks, spending more tokens only on hard/noisy documents
+  * Token usage logging per call (prompt/output/total tokens, model used)
 * **Validation layer:**
 
-  * JSON schema validation
-  * “fix JSON only” repair prompt (single retry)
+  * JSON schema validation against controlled vocabularies
+  * Repair prompt includes specific validation errors for targeted fixes
+  * Selective escalation: only schema/structural failures trigger strong-model retry
 * **Storage:**
 
   * JSONL for records and review status
@@ -227,19 +232,26 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
    * Check exact title match against existing records → block if duplicate
    * Check similar title (fuzzy match, threshold 0.88) → flag if similar
    * If similar, compare source quality and mark weaker as duplicate
-3. Extract text locally
-4. Split into paragraphs
-5. Score paragraphs:
-
-   * company watchlist matches
-   * closure keyword hits
-   * country mentions
-6. Build context pack (cap length)
-7. Call LLM to output strict JSON (using Gemini-compatible schema)
-8. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, remove invalid regulator entities)
-9. Validate JSON against schema and retry once if needed
-10. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed
-11. Render Intelligence Brief from JSON
+3. **Extract text locally** (PyMuPDF → pdfplumber fallback)
+4. **Clean and chunk** (`src/text_clean_chunk.py`):
+   * Fix hyphen line breaks, normalize whitespace
+   * Remove noise lines (nav, promo, paywall, social, link-heavy, repeated headers/footers, photo credits, all-caps menu items)
+   * Deduplicate paragraph blocks
+   * Split into overlapping chunks (~9K chars, 800-char overlap) with detected-title header
+   * Surface removal diagnostics (removed line count, pattern breakdown) in UI
+5. **Two extraction modes** (user-selectable):
+   * **Chunked mode (default for long/noisy docs):** each chunk extracted independently via model, results merged with majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, and short-bullet filtering
+   * **Single-context mode:** score paragraphs (watchlist, keyword, country hits), build bounded context pack, single model call
+6. **Two-pass model strategy (Gemini):**
+   * **Pass 1 — Flash-Lite:** fast, cheap extraction for most documents
+   * **Quality gate:** schema validation + heuristic checks
+   * **Pass 2 — Flash (fallback):** only invoked when pass 1 fails; repair prompt includes specific validation errors
+   * Token usage logged per call (model, prompt/output/total tokens)
+7. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, infer publish_date and source_type from text patterns, remove invalid regulator entities)
+8. Validate JSON against schema; if invalid, repair prompt with error details → revalidate
+9. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed
+10. Display token usage summary (model used, prompt/output/total tokens)
+11. Render Intelligence Brief from JSON (deterministic, no LLM call)
 12. Human review edits + approve
 13. **Weekly briefing (separate workflow):**
     * Select candidates from last N days (exclude duplicates by default)
@@ -250,10 +262,13 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
 ### 7.3 Token control strategy
 
 * Duplicate detection is deterministic (no LLM calls)
-* Fixed cap on context pack size
-* One LLM call per unique document (plus optional single repair call)
-* No second call for "Intelligence Brief" (rendered deterministically)
+* Fixed cap on context pack size (12K chars) and chunk size (9K chars)
+* **Two-pass model strategy:** Flash-Lite handles easy docs cheaply; Flash is invoked only on failure, so most documents cost fewer tokens
+* One LLM call per unique document in the common case (plus optional single repair call on the stronger model)
+* In chunked mode: one call per chunk, but chunks are bounded and overlapping, so total tokens scale linearly with document length rather than exploding
+* No second call for "Intelligence Brief" (rendered deterministically from JSON)
 * No additional calls for deduplication or weekly briefing (all deterministic post-processing)
+* Per-call token usage is logged and displayed in the Ingest UI for cost tracking
 
 ### 7.4 Error handling and resilience
 
@@ -272,6 +287,80 @@ We resolved the issue by updating the schema definition to be compatible with th
 #### 7.4.3 Follow-up hardening: preventing URL hallucinations
 
 A secondary quality issue was that original_url could be hallucinated if it was not present in the PDF text. To prevent this, we moved URL capture to a human-in-the-loop input in the Streamlit ingest page (optional manual URL field). The model is instructed not to invent URLs; the pipeline overwrites original_url only if the user provides it or if a URL is deterministically extracted from text via regex. This keeps provenance accurate and reduces downstream trust risks in executive reporting.
+
+### 7.5 Key design decisions and rationale
+
+This section documents the three most impactful design decisions and the reasoning behind each.
+
+#### 7.5.1 Noisy-PDF cleaning + chunking (before the model)
+
+**Problem:** PDFs from premium sources (S&P Global, Bloomberg, Automotive News) often include ads, navigation menus, "related links" sidebars, repeated headers/footers, paywall prompts, social sharing blocks, photo credits, and messy line breaks. Feeding this raw text directly to an LLM increases hallucinations (wrong source_type, invented dates, phantom entities), produces incorrect field values, and can exceed token limits.
+
+**Approach chosen:** A deterministic, multi-stage cleanup pipeline (`src/text_clean_chunk.py`) runs before any model call:
+
+1. **Line normalization:** fix hyphen breaks across lines, normalize whitespace, remove empty lines.
+2. **Noise removal:** pattern-based detection of nav elements, promo blocks, paywall text, social links, link-heavy lines, photo credits, all-caps menu items, and symbol-heavy lines. Each removed line is categorized by pattern type for diagnostics.
+3. **Repeated-header suppression:** lines appearing more frequently than a dynamic threshold (based on document length) are removed, catching page headers/footers that repeat across multi-page PDFs.
+4. **Block deduplication:** paragraph-level exact-match dedup (ignoring whitespace) removes duplicated content blocks.
+5. **Chunking:** cleaned text is split into overlapping chunks (~9K chars each, 800-char overlap) with a detected-title header injected into each chunk. Overlap ensures entities/dates that fall on chunk boundaries are not lost.
+6. **Safety fallback:** if cleaning removes too aggressively (cleaned text < 2K chars when original was >= 2K), the original text is preserved.
+
+**Why this works:** The model receives higher-signal input with less noise, which directly improves extraction accuracy for source_type, publish_date, companies_mentioned, and evidence_bullets. The diagnostics (removed line count, top removal patterns) are surfaced in the Ingest UI so the analyst can verify the cleanup is working correctly and not over-cleaning.
+
+**Alternatives considered:** (a) Sending raw text and relying on the model to ignore noise — this failed in practice because the model would pick up ads/nav text as entities or misclassify publishers. (b) Using an LLM call for cleanup — this would double token cost and add latency with no clear quality advantage over deterministic rules for the noise patterns we observed.
+
+#### 7.5.2 Multi-publisher dedup + ranking
+
+**Problem:** The same story frequently appears across multiple sources. For example, a Reuters wire story about a Ford plant closure will appear in S&P Global's analysis, Bloomberg's coverage, and Automotive News, each with different framing but the same core facts. Without deduplication, the system stores multiple records for the same event, and the weekly executive brief double-counts signals — giving false impressions of signal density or urgency.
+
+**Approach chosen:** A two-layer deduplication system (`src/dedupe.py`) with deterministic publisher ranking:
+
+1. **Exact title match (blocking):** at ingest time, the system checks if a record with the same normalized title already exists. If so, ingestion is blocked entirely.
+2. **Fuzzy story detection (flagging):** if no exact match is found, the system searches for similar titles using `SequenceMatcher` with a 0.88 similarity threshold. When similar stories are found, the system automatically compares source quality using a composite scoring tuple:
+   - Publisher score: S&P=100 > Bloomberg=90 > Reuters=80 > Automotive News=75 > MarkLines=70 > Press Release=60 > Patent=55 > Other=50
+   - Confidence score: High=3 > Medium=2 > Low=1
+   - Completeness score: +1 for publish_date present, +1 for original_url present, +1 for regions_relevant non-empty, +1 for evidence_bullets count >= 3
+3. **Canonical selection:** the highest-scoring record becomes canonical; all others are marked with `exclude_from_brief=True` and `duplicate_story_of` pointing to the canonical record_id.
+4. **Brief suppression:** the weekly briefing workflow (`src/briefing.py`) excludes duplicates by default, so the executive digest shows only one version of each story.
+
+**Why this works:** The ranking is deterministic and repeatable — no LLM calls are needed. The publisher hierarchy reflects real-world source authority (S&P's analysis is generally more valuable than a raw Reuters wire). The completeness score ensures that when two sources have the same publisher tier, the more complete record wins.
+
+**Net effect on executive briefs:** no double-counting, no repeated signals, and the analyst always sees the strongest available version of each story.
+
+#### 7.5.3 Extraction prompt rules (schema + "publisher vs cited source" + evidence constraints)
+
+**Problem:** Early extraction runs revealed systematic errors:
+- **Publisher confusion:** the model set source_type to "Reuters" when an S&P Global article merely cited Reuters as a wire source. This happened because "Reuters" appeared prominently in the text.
+- **Overly long evidence bullets:** the model produced paragraph-length evidence bullets that were not scannable by analysts and exceeded schema constraints.
+- **Inconsistent list normalization:** lists contained variants like "US", "USA", and "U.S." as separate entries, causing duplicates in downstream analytics.
+- **Date format inconsistency:** the model sometimes returned dates in non-ISO formats ("Feb 4, 2026" instead of "2026-02-04") or hallucinated dates not present in the text.
+
+**Approach chosen:** The extraction prompt (`extraction_prompt()` in `src/model_router.py`) was rewritten with explicit, numbered rules:
+
+1. **Publisher identification rule:** "source_type is the PUBLISHER of the document. If 'S&P Global', 'S&P Global Mobility', 'AutoIntelligence | Headline Analysis', or '(c) S&P Global' appears, set source_type='S&P'. If Reuters or Bloomberg is only cited inside the article, do NOT set source_type to those unless they are clearly the publisher."
+2. **Date normalization rule:** "extract and normalize to YYYY-MM-DD when present. Handle patterns like '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null."
+3. **Evidence constraint:** "evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs."
+4. **List deduplication rule:** "Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form."
+5. **Closure topic guardrail:** "Only use 'Closure Technology & Innovation' when latch/door/handle/digital key/smart entry/cinch appears explicitly."
+
+In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the specific validation errors from the failed attempt, so the model can target its fixes rather than guessing what went wrong.
+
+**Why this works:** Explicit, rule-by-rule instructions reduce ambiguity for the model. The publisher-vs-cited-source distinction is the single highest-impact rule — it eliminated the most common misclassification. The evidence bullet length cap made outputs consistently scannable. Combined with the postprocessing layer that runs after extraction (country normalization, region roll-up, entity dedup), the prompt rules and code-side normalization form a two-layer defense against inconsistent outputs.
+
+#### 7.5.4 Two-pass model strategy (Flash-Lite → Flash)
+
+**Problem:** Using Gemini Flash for every document worked but was more expensive than necessary. Most PDFs are "easy enough" — clean text, obvious publisher markers, straightforward entities — and do not need the stronger model. However, some documents are noisy or ambiguous and benefit from the additional reasoning capability of Flash.
+
+**Approach chosen:** A two-pass strategy implemented in `try_one_provider()` in `src/model_router.py`:
+
+1. **Pass 1 — Gemini Flash-Lite (default):** runs extraction cheaply and fast. If the output passes schema validation and quality checks, it is accepted immediately.
+2. **Quality gate:** schema validation (`validate_record()`) plus heuristic checks. If the record fails validation or the heuristics flag quality issues (e.g., publish_date missing when dates clearly appear in text, source_type = "Other" when publisher markers are present, evidence bullets too long or generic), the system escalates.
+3. **Pass 2 — Gemini Flash (fallback):** re-runs extraction using the repair prompt with specific validation errors included. This spends more tokens only on hard/noisy documents where accuracy matters most.
+4. **Selective escalation:** the `_should_retry_strong()` function checks whether the error type warrants a strong-model retry (schema errors, structural failures) vs. a transient issue that would not benefit from a different model.
+
+**Why this works:** In practice, most documents pass on Flash-Lite (pass 1), keeping the average cost per document low. Only the hard cases — noisy PDFs, ambiguous publishers, missing dates — escalate to Flash. Token usage is logged per call (`_extract_usage()`) and displayed in the Ingest UI, so the analyst can see exactly when the system "upgraded" and how many tokens were consumed.
+
+**Cost impact:** For a typical batch of 10 documents, approximately 7-8 complete on Flash-Lite and 2-3 escalate to Flash. This reduces average token cost compared to running Flash on every document while maintaining extraction quality on difficult inputs.
 
 ## 8. Evaluation
 
@@ -334,6 +423,10 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * Publisher ranking system (deterministic scoring: S&P=100 > Bloomberg=90 > Reuters=80 > ... > Other=50) ensured that when multiple sources covered the same story, the highest-quality source was automatically selected.
 * Weekly briefing workflow with share-ready detection (High priority + High confidence) and executive email templating made it easy for analysts to draft weekly digests with minimal manual work.
 * Deduplication and briefing modules were entirely deterministic (no additional LLM calls), keeping token costs and latency predictable.
+* **Noisy-PDF cleaning** significantly improved extraction quality: removing ads, nav menus, paywall prompts, and repeated headers before the model sees the text eliminated the most common source of wrong source_type and phantom entity extraction.
+* **Two-pass model strategy** (Flash-Lite → Flash) reduced average token cost while maintaining extraction quality on hard documents. Most documents complete on the cheaper model; only failures escalate.
+* **Publisher-vs-cited-source prompt rule** was the single highest-impact prompt change — it fixed the most common misclassification (S&P articles being tagged as "Reuters" because Reuters was cited in the body).
+* **Token usage logging** provided visibility into cost per document and made it easy to identify which documents triggered the stronger model, enabling targeted improvements to the cleanup pipeline.
 
 ### 10.2 What was challenging
 
@@ -343,6 +436,9 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * Some articles have weak signal-to-noise; prioritization must remain conservative.
 * Provider-specific schema constraints required explicit compatibility work: the google-genai SDK enforces a Gemini-specific type system (single uppercase enum values like STRING, OBJECT, NULL) that differs from standard JSON Schema conventions (e.g., type: ["string","null"]). This gap was not surfaced until runtime and required rewriting the schema definition and reordering the postprocessing/validation pipeline.
 * URL hallucination risk emerged when the model was asked to extract original_url from PDFs that did not contain one; mitigating this required moving URL capture to a human-in-the-loop input rather than relying on model extraction.
+* **Publisher-vs-cited-source confusion** was a persistent extraction error that required explicit prompt rules to fix. The model would see "Reuters" in an S&P article body and set source_type="Reuters" despite S&P being the publisher. This was not fixable by postprocessing alone — it required changing the extraction prompt.
+* **Balancing cleanup aggressiveness:** too-aggressive text cleaning risks removing legitimate content (e.g., short lines that are actually article subheadings). The safety fallback (preserve original if cleaned text drops below 2K chars) and the diagnostic display in the UI help the analyst catch over-cleaning.
+* **Chunk boundary effects:** when a document is split into chunks, entities or dates that span a chunk boundary can be missed. The 800-char overlap mitigates this but does not eliminate it entirely.
 
 ### 10.2 Iterations and scope control (recommended addition)
 Early in development, the project included prototype scripts that generated narrative summaries and weekly briefs directly from raw text. During implementation, these were intentionally replaced with a JSON-first, schema-validated pipeline aligned with the project specification. This change improved reliability (consistent fields and controlled vocabularies), reduced hallucination risk (evidence bullets + validation), and made token usage more predictable (bounded context pack + one-call extraction in the common case). The final system therefore prioritizes structured intelligence records as the primary artifact, and renders human-readable briefs deterministically from those records rather than relying on additional model calls.
@@ -367,36 +463,63 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ---
 
-# Implementation Summary (v2.3 - Final)
+# Implementation Summary (v3.4)
 
-**Version:** 2.3 (production-ready MVP)  
-**Completion Date:** February 12, 2026
+**Version:** 3.4
+**Completion Date:** February 13, 2026
 
 ## Key Features Delivered
 
-1. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
+1. **Noisy-PDF Cleaning + Chunking** (`src/text_clean_chunk.py`)
+   - Unified cleanup pipeline: nav/promo/paywall/social/link-heavy/repeated-header removal
+   - Hyphen-break fixing, block deduplication, safety fallback against over-cleaning
+   - Overlapping model-ready chunks (~9K chars, 800-char overlap) with detected-title propagation
+   - Full removal diagnostics (line count, pattern breakdown) surfaced in Ingest UI
+
+2. **Two-Pass Model Strategy** (`src/model_router.py`)
+   - Pass 1: Gemini Flash-Lite (cheap, fast) for most documents
+   - Quality gate: schema validation + heuristic checks
+   - Pass 2: Gemini Flash (fallback) only on validation/quality failure
+   - Per-call token usage logging (prompt/output/total tokens, model name)
+   - Selective escalation: only schema/structural errors trigger strong-model retry
+
+3. **Hardened Extraction Prompt**
+   - Publisher-vs-cited-source rules (prevents S&P articles being tagged as "Reuters")
+   - Strict date normalization (multiple patterns → YYYY-MM-DD)
+   - Evidence bullet length cap (25 words max per bullet)
+   - List deduplication and normalization instructions
+   - Repair prompt includes specific validation errors for targeted fixes
+
+4. **Chunked Extraction Mode** (`pages/01_Ingest.py`)
+   - Each cleaned chunk extracted independently via model
+   - Results merged: majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, short-bullet filtering
+   - Handles long/noisy documents that exceed single-context limits
+
+5. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
    - Exact title matching (blocking at ingest)
    - Fuzzy story detection (threshold 0.88)
    - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, ... Other=50)
    - Confidence and completeness scoring for tie-breaking
 
-2. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
+6. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
    - Candidate selection from last N days (auto-excludes duplicates)
    - Share-ready detection (High priority + High confidence)
    - Markdown brief + executive email template generation
    - Analyst-driven item selection with one-click suggestions
 
-3. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
+7. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
    - Standalone JSONL deduplication with CSV export
    - Diagnostic stats (duplicate rate, canonical count)
    - Supports large datasets outside Streamlit UI
 
-4. **Streamlit Integration**
+8. **Streamlit Integration**
    - Dashboard: canonical/all-records toggle with analytics
    - Export/Admin: bulk export button + metrics dashboard
    - 7-page app (Home, Ingest, Inbox, Record, Dashboard, Weekly Brief, Export/Admin)
+   - Token usage display after each ingest (model, prompt/output/total)
+   - Cleanup diagnostics display (removed lines, pattern breakdown)
 
-5. **Testing & Validation** (`test_scenarios.py`)
+9. **Testing & Validation** (`test_scenarios.py`)
    - 25+ test cases covering all workflows
    - Publisher ranking hierarchy validation
    - Weekly briefing logic verification
@@ -404,7 +527,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ## Technical Stack
 
-- **Model:** Gemini 2.5-flash via `google-genai` with structured JSON schema
+- **Models:** Gemini 2.5-flash-lite (primary) + Gemini 2.5-flash (fallback) via `google-genai` with structured JSON schema
 - **UI:** Streamlit (7-page multi-page app)
 - **Storage:** JSONL (JSON Lines format)
 - **Language:** Python 3.9+
@@ -414,36 +537,39 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 # Design Decisions Finalized
 
-## A) Product & Scope ✓
+## A) Product & Scope
 
-- **MVP features:** PDF upload, text paste, duplicate detection, weekly briefing, executive email generation
+- **MVP features:** PDF upload, text paste, noisy-PDF cleanup, chunked extraction, duplicate detection, weekly briefing, executive email generation
 - **Duplicate detection:** Exact title block + similar story auto-ranking by source quality
 - **Deduplication logic:** Publisher ranking (S&P > Bloomberg > Reuters > ... > Other) + confidence + completeness
 
-## B) Technical Choices ✓
+## B) Technical Choices
 
-- **Model:** Gemini for structured JSON reliability and deterministic output
+- **Model strategy:** Two-pass (Flash-Lite → Flash) for cost-efficient extraction with quality escalation
+- **Cleanup:** Deterministic noisy-PDF cleaning before model calls (not relying on model to ignore noise)
+- **Chunking:** Overlapping chunks for long documents with per-chunk extraction and merge
 - **UI:** Streamlit 7-page app for lightweight, interactive workflows
 - **Storage:** JSONL for simplicity and scalability without database overhead
 
-## C) Evaluation ✓
+## C) Evaluation
 
 - **Test coverage:** 25+ scenario tests (duplicate detection, ranking, briefing)
 - **Quality gates:** Schema validation, evidence requirement, review gating, duplicate suppression
+- **Token tracking:** Per-call usage logging for cost monitoring and optimization
 - **Regression prevention:** Comprehensive test suite for all new features
 
-## D) Evidence & Trust ✓
+## D) Evidence & Trust
 
 - **Evidence source:** Quote fragments with schema validation, URL provenance via HITL input
-- **Hallucination mitigation:** URL captured as manual input (not model extraction), duplicates prevent repeated signals, evidence + validation + review gating
+- **Hallucination mitigation:** noisy-PDF cleanup (cleaner inputs → fewer hallucinations), URL captured as manual input (not model extraction), publisher-vs-cited-source prompt rules, duplicates prevent repeated signals, evidence + validation + review gating
 
-## E) Reporting ✓
+## E) Reporting
 
 - **Exports:** CSV (canonical and all) ready for Power BI; JSONL (canonical + dups) for analysis
-- **In-app:** Dashboard with filters, Weekly Brief with email draft, Admin metrics
+- **In-app:** Dashboard with filters, Weekly Brief with email draft, Admin metrics, token usage display
 - **CLI:** Standalone bulk deduplication script with diagnostic output
 
 ---
 
-**Report version:** 0.2  
-**Status:** Production MVP complete; ready for deployment and evaluation
+**Report version:** 0.3
+**Status:** Production MVP complete with two-pass model strategy, noisy-PDF cleaning, and chunked extraction; ready for deployment and evaluation

@@ -144,6 +144,7 @@ def select_context_chunks(
     text: str,
     watch_terms: List[str],
     topic_terms: List[str],
+    user_provided_url: str = "",
     header_k: int = 2,
     body_k: int = 6,
     max_chars: int = 12000,
@@ -182,6 +183,9 @@ def select_context_chunks(
     def render_pack(headers: List[Dict[str, Any]], bodies: List[Dict[str, Any]]) -> str:
         lines: List[str] = []
         lines.append(f"TITLE: {title}\n")
+        if user_provided_url.strip():
+            lines.append(f"USER_PROVIDED_URL: {user_provided_url.strip()}")
+            lines.append("")
         lines.append("DOC_HEADER_CHUNKS:")
         for i, r in enumerate(headers, 1):
             lines.append(f"[H{i}] {r['chunk']}")
@@ -216,6 +220,7 @@ def build_context_pack(
     text: str,
     watch_terms: List[str],
     topic_terms: List[str],
+    user_provided_url: str = "",
     header_k: int = 2,
     body_k: int = 6,
     max_chars: int = 12000,
@@ -225,6 +230,7 @@ def build_context_pack(
         text=text,
         watch_terms=watch_terms,
         topic_terms=topic_terms,
+        user_provided_url=user_provided_url,
         header_k=header_k,
         body_k=body_k,
         max_chars=max_chars,
