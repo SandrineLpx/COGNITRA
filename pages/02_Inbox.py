@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 from src.storage import load_records, overwrite_records
 from src.schema_validate import ALLOWED_SOURCE_TYPES
 from src.constants import _LEGACY_REVIEW_MAP
@@ -48,6 +49,16 @@ if q.strip():
         return (qq in t) or (qq in comps.lower())
 
     fdf = fdf[fdf.apply(hit, axis=1)]
+
+# Default sort: latest first (created_at preferred, else publish_date)
+if "created_at" in fdf.columns:
+    fdf["_sort_dt"] = pd.to_datetime(fdf["created_at"], errors="coerce")
+elif "publish_date" in fdf.columns:
+    fdf["_sort_dt"] = pd.to_datetime(fdf["publish_date"], errors="coerce")
+else:
+    fdf["_sort_dt"] = pd.NaT
+
+fdf = fdf.sort_values(by="_sort_dt", ascending=False, na_position="last").drop(columns=["_sort_dt"])
 
 filtered_ids = fdf["record_id"].tolist()
 filtered_records = [r for r in records if r.get("record_id") in set(filtered_ids)]

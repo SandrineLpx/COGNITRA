@@ -43,7 +43,7 @@ if not records:
 
 c1, c2, c3 = st.columns(3)
 with c1:
-    days = st.number_input("Days back", min_value=3, max_value=30, value=7, step=1)
+    days = st.number_input("Days back", min_value=3, max_value=90, value=30, step=1)
 with c2:
     include_excluded = st.checkbox("Include duplicates", value=False)
 with c3:

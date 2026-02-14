@@ -27,10 +27,12 @@ if df.empty:
     st.info("No records after filters.")
     st.stop()
 
-df["publish_date_dt"] = pd.to_datetime(df.get("publish_date"), errors="coerce")
-df["created_at_dt"] = pd.to_datetime(df.get("created_at"), errors="coerce")
-df["event_date"] = df["publish_date_dt"].fillna(df["created_at_dt"]).dt.date
-df["event_day"] = pd.to_datetime(df["event_date"], errors="coerce")
+publish_dt = pd.to_datetime(df.get("publish_date"), errors="coerce", utc=True).dt.tz_convert(None)
+created_dt = pd.to_datetime(df.get("created_at"), errors="coerce", utc=True).dt.tz_convert(None)
+event_ts = publish_dt.combine_first(created_dt)
+df["publish_date_dt"] = publish_dt
+df["created_at_dt"] = created_dt
+df["event_day"] = event_ts.dt.normalize()
 
 today = pd.Timestamp.today().normalize()
 default_from = (today - pd.Timedelta(days=30)).date()
