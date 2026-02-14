@@ -140,6 +140,43 @@ def _call_gemini(prompt: str, schema: Dict[str, Any], model: str) -> Tuple[str, 
     return text, _extract_usage(resp, model)
 
 
+def _call_gemini_text(prompt: str, model: str) -> Tuple[str, Dict[str, Any]]:
+    """Call Gemini for plain-text output (no JSON schema constraint)."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        try:
+            import streamlit as st
+
+            api_key = st.secrets.get("GEMINI_API_KEY")
+        except Exception:
+            api_key = None
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set. Set it in .streamlit/secrets.toml or as an environment variable.")
+
+    try:
+        from google import genai
+        from google.genai import types
+    except Exception as e:
+        raise RuntimeError("google-genai is not installed. Install it with: pip install google-genai") from e
+
+    client = genai.Client(api_key=api_key)
+    try:
+        resp = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="text/plain",
+            ),
+        )
+    except Exception as e:
+        raise RuntimeError(f"Gemini API call failed: {e}") from e
+
+    text = (resp.text or "").strip()
+    if not text:
+        raise RuntimeError("Gemini API returned empty response text.")
+    return text, _extract_usage(resp, model)
+
+
 def _should_retry_strong(error_message: str) -> bool:
     m = (error_message or "").lower()
     markers = [

@@ -5,8 +5,8 @@ from pathlib import Path
 from src.storage import load_records, overwrite_records, RECORDS_PATH
 from src.dedupe import dedupe_records
 
-st.set_page_config(page_title="Export/Admin", layout="wide")
-st.title("Export / Admin")
+st.set_page_config(page_title="Admin", layout="wide")
+st.title("Admin")
 
 records = load_records()
 if not records:

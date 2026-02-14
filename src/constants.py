@@ -18,7 +18,9 @@ ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Pr
 ALLOWED_ACTOR_TYPES = {"oem", "supplier", "tech_partner", "government", "regulator", "industry_group", "media", "other"}
 ALLOWED_PRIORITY = {"High", "Medium", "Low"}
 ALLOWED_CONF = {"High", "Medium", "Low"}
-ALLOWED_REVIEW = {"Not Reviewed", "Reviewed", "Approved"}
+ALLOWED_REVIEW = {"Pending", "Approved", "Disapproved"}
+# Legacy compat: old records may have "Not Reviewed" or "Reviewed" — treat as "Pending".
+_LEGACY_REVIEW_MAP = {"Not Reviewed": "Pending", "Reviewed": "Pending"}
 
 REQUIRED_KEYS = [
     "title","source_type","publish_date","publish_date_confidence","original_url",

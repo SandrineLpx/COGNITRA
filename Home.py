@@ -3,7 +3,7 @@ import streamlit as st
 st.set_page_config(page_title="Auto Intelligence (MVP)", layout="wide")
 
 st.title("Automotive Market Intelligence (MVP)")
-st.caption("Multi-page app: Ingest → Inbox → Record → Dashboard → Export/Admin")
+st.caption("Multi-page app: Ingest -> Inbox -> Record -> Dashboard -> Weekly Brief -> Admin")
 
 st.markdown("""
 Use the left sidebar to navigate pages.
@@ -11,5 +11,6 @@ Use the left sidebar to navigate pages.
 - **Inbox**: filter and browse saved records
 - **Record**: view/edit one record and update review status
 - **Dashboard**: analytics over saved records
-- **Export/Admin**: export CSV, clear demo data
+- **Weekly Brief**: curate approved items, generate/save/send weekly executive brief
+- **Admin**: export CSV, dedupe exports, clear demo data
 """)

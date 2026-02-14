@@ -107,7 +107,7 @@ def _merge_chunk_records(chunk_records):
         "key_insights": _dedupe_keep_order(x for r in chunk_records for x in (r.get("key_insights") or []))[:4],
         "strategic_implications": _dedupe_keep_order(x for r in chunk_records for x in (r.get("strategic_implications") or []))[:4],
         "recommended_actions": _dedupe_keep_order(x for r in chunk_records for x in (r.get("recommended_actions") or []))[:6] or None,
-        "review_status": "Not Reviewed",
+        "review_status": "Pending",
         "notes": f"Merged from {len(chunk_records)} chunk extractions.",
     }
 
@@ -310,9 +310,17 @@ if uploaded is not None:
         rec["record_id"] = record_id
         rec["created_at"] = utc_now_iso()
         rec["source_pdf_path"] = pdf_path
-        rec.setdefault("review_status", "Not Reviewed")
         rec["_router_log"] = router_log
         rec.setdefault("exclude_from_brief", False)
+
+        # Auto-approve heuristic: if extraction looks clean, skip manual review.
+        _auto = (
+            rec.get("confidence") in ("High", "Medium")
+            and bool(rec.get("publish_date"))
+            and rec.get("source_type", "Other") != "Other"
+            and len(rec.get("evidence_bullets") or []) >= 2
+        )
+        rec["review_status"] = "Approved" if _auto else "Pending"
 
         similar = find_similar_title_records(records, rec.get("title", ""), threshold=0.88)
         if similar:
@@ -343,7 +351,10 @@ if uploaded is not None:
         else:
             overwrite_records(records + [rec])
 
-        st.success("Record saved.")
+        if rec["review_status"] == "Approved":
+            st.success("Record saved and auto-approved (clean extraction).")
+        else:
+            st.success("Record saved as Pending (needs manual review).")
         usage_summary = _extract_usage_summary(router_log)
         if usage_summary:
             st.caption(

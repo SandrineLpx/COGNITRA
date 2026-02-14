@@ -10,6 +10,7 @@ from src.constants import (
     ALLOWED_PRIORITY,
     ALLOWED_CONF,
     ALLOWED_REVIEW,
+    _LEGACY_REVIEW_MAP,
     REQUIRED_KEYS,
 )
 
@@ -52,7 +53,10 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
     if rec["confidence"] not in ALLOWED_CONF:
         errs.append(f"confidence must be one of {sorted(ALLOWED_CONF)}")
 
-    if rec["review_status"] not in ALLOWED_REVIEW:
+    rs = rec["review_status"]
+    if rs in _LEGACY_REVIEW_MAP:
+        rs = _LEGACY_REVIEW_MAP[rs]
+    if rs not in ALLOWED_REVIEW:
         errs.append(f"review_status must be one of {sorted(ALLOWED_REVIEW)}")
 
     topics = rec["topics"]
