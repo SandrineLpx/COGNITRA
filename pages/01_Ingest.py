@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 from collections import Counter
@@ -6,11 +7,12 @@ from src.storage import load_records, new_record_id, overwrite_records, save_pdf
 from src.pdf_extract import extract_text_robust
 from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
-from src.model_router import route_and_extract
+from src.model_router import route_and_extract, extract_single_pass
 from src.postprocess import postprocess_record
 from src.schema_validate import validate_record
 from src.text_clean_chunk import clean_and_chunk
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
+from src.quota_tracker import get_usage, reset_date
 
 st.set_page_config(page_title="Ingest", layout="wide")
 st.title("Ingest")
@@ -18,6 +20,21 @@ st.title("Ingest")
 with st.sidebar:
     provider = st.selectbox("Model", ["auto","gemini","claude","chatgpt"], index=0)
     st.caption("Strict routing: fallback only on schema failure.")
+
+    # ── API Quota display ──────────────────────────────────────────────
+    st.divider()
+    st.subheader("API Quota (today)")
+    st.caption(f"Resets midnight PT — tracking date: {reset_date()}")
+    usage = get_usage()
+    for model_name, info in usage.items():
+        short = model_name.replace("gemini-", "").replace("2.5-", "").replace("2.0-", "")
+        used = info["used"]
+        quota = info["quota"]
+        remaining = info["remaining"]
+        pct = used / max(quota, 1)
+        st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
+    if not usage:
+        st.caption("No calls recorded yet today.")
 
 uploaded_files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
 
@@ -47,6 +64,27 @@ if not has_upload and not manual_override:
 
 
 # ── Helper functions ──────────────────────────────────────────────────────
+
+# Noise thresholds (tune as needed)
+_NOISE_HIGH_RATIO = 0.18
+_NOISE_HIGH_LINES = 250
+_NOISE_HIGH_PATTERNS = {"ocr", "table", "header", "footer", "page"}
+_NOISE_LOW_RATIO = 0.08
+_NOISE_LOW_LINES = 80
+
+
+def _classify_noise(meta: dict) -> str:
+    """Classify document noise from clean_and_chunk meta -> 'low' | 'normal' | 'high'."""
+    raw = max(meta.get("raw_chars", 1), 1)
+    ratio = meta.get("removed_chars", 0) / raw
+    lines = meta.get("removed_line_count", 0)
+    patterns = {p.lower() for p, _ in (meta.get("top_removed_patterns") or [])}
+    if ratio > _NOISE_HIGH_RATIO or lines > _NOISE_HIGH_LINES or (patterns & _NOISE_HIGH_PATTERNS):
+        return "high"
+    if ratio < _NOISE_LOW_RATIO and lines < _NOISE_LOW_LINES:
+        return "low"
+    return "normal"
+
 
 def _dedupe_keep_order(values):
     out = []
@@ -217,23 +255,52 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
     ]
 
     if use_chunked and cleaned_chunks:
-        chunk_records = []
+        cleaned_meta = cleaned["meta"]
+        noise = _classify_noise(cleaned_meta)
+        lite_model = os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
+        strong_model = os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
+        initial_model = strong_model if noise == "high" else lite_model
+        used_lite = (initial_model == lite_model)
+
+        # Phase 1: all chunks with initial model
+        chunk_records = {}   # idx -> rec
         chunk_logs = []
-        for idx, chunk in enumerate(cleaned_chunks, 1):
-            rec_i, log_i = route_and_extract(chunk, provider_choice=provider_choice)
-            chunk_logs.append({"chunk_id": f"{idx}/{len(cleaned_chunks)}", "router_log": log_i})
+        failed_idxs = []
+        for idx, chunk in enumerate(cleaned_chunks):
+            rec_i, log_i = extract_single_pass(chunk, model=initial_model)
+            log_i["chunk_id"] = f"{idx + 1}/{len(cleaned_chunks)}"
+            log_i["phase"] = "initial"
+            chunk_logs.append(log_i)
             if rec_i is not None:
-                chunk_records.append(rec_i)
+                chunk_records[idx] = rec_i
+            else:
+                failed_idxs.append(idx)
+
+        # Phase 2: retry ONLY failed chunks with strong model (if lite was used)
+        if failed_idxs and used_lite:
+            for idx in failed_idxs:
+                rec_i, log_i = extract_single_pass(cleaned_chunks[idx], model=strong_model)
+                log_i["chunk_id"] = f"{idx + 1}/{len(cleaned_chunks)}"
+                log_i["phase"] = "repair"
+                chunk_logs.append(log_i)
+                if rec_i is not None:
+                    chunk_records[idx] = rec_i
 
         if not chunk_records:
             return None, None, "Failed: all chunk extractions failed validation"
 
-        rec = _merge_chunk_records(chunk_records)
+        rec = _merge_chunk_records(list(chunk_records.values()))
         router_log = {
             "provider_choice": provider_choice,
             "chunked_mode": True,
+            "noise_level": noise,
+            "initial_model": initial_model,
+            "removed_ratio": round(cleaned_meta.get("removed_chars", 0) / max(cleaned_meta.get("raw_chars", 1), 1), 3),
+            "removed_line_count": cleaned_meta.get("removed_line_count", 0),
             "chunks_total": len(cleaned_chunks),
-            "chunks_succeeded": len(chunk_records),
+            "chunks_succeeded_initial": len(cleaned_chunks) - len(failed_idxs),
+            "chunks_repaired": len(chunk_records) - (len(cleaned_chunks) - len(failed_idxs)),
+            "chunks_failed_final": len(cleaned_chunks) - len(chunk_records),
             "chunk_logs": chunk_logs,
         }
         if override_url and not rec.get("original_url"):
@@ -340,11 +407,32 @@ if has_upload and not is_bulk:
     with col_clean:
         st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
         st.text_area("Cleaned preview", cleaned_text[:6000], height=220)
+    n_chunks = cleaned_meta.get("chunks_count", 0)
     st.caption(
         "Chunks: "
-        f"{cleaned_meta.get('chunks_count', 0)} | Removed lines: {cleaned_meta.get('removed_line_count', 0)} | "
+        f"{n_chunks} | Removed lines: {cleaned_meta.get('removed_line_count', 0)} | "
         f"Top removed patterns: {cleaned_meta.get('top_removed_patterns', [])[:3]}"
     )
+
+    # Smart chunk mode recommendation
+    if n_chunks <= 1 and chunked_mode:
+        st.info(
+            f"Clean article ({cleaned_len:,} chars, {n_chunks} chunk) — "
+            "chunked mode adds no benefit here (1 API call either way)."
+        )
+    elif n_chunks > 1 and chunked_mode:
+        _usage = get_usage()
+        _lite = "gemini-2.5-flash-lite"
+        _left = _usage.get(_lite, {}).get("remaining", "?")
+        st.warning(
+            f"Chunked mode: **{n_chunks} API calls** for this document. "
+            f"Remaining {_lite.replace('gemini-', '')}: {_left} today."
+        )
+    elif n_chunks > 1 and not chunked_mode:
+        st.warning(
+            f"Document has {n_chunks} chunks but chunked mode is OFF — "
+            "only partial text will be sent. Consider enabling for better coverage."
+        )
 
     run = st.button("Run pipeline", type="primary")
     if run:
@@ -409,6 +497,22 @@ if has_upload and not is_bulk:
 elif is_bulk:
     st.info(f"{len(uploaded_files)} PDFs queued for bulk extraction (1 record per document).")
     st.caption("Title and URL will be extracted automatically from each PDF.")
+
+    # Quota estimate for bulk
+    _bulk_usage = get_usage()
+    _lite_model = "gemini-2.5-flash-lite"
+    _lite_remaining = _bulk_usage.get(_lite_model, {}).get("remaining", 0)
+    if chunked_mode:
+        st.warning(
+            f"Chunked mode ON: each document may use 1-4 API calls depending on length. "
+            f"Remaining {_lite_model.replace('gemini-', '')}: **{_lite_remaining}** calls today. "
+            f"For {len(uploaded_files)} files, worst case ~{len(uploaded_files) * 3} calls."
+        )
+    else:
+        st.caption(
+            f"Non-chunked mode: ~1 API call per document. "
+            f"Remaining {_lite_model.replace('gemini-', '')}: {_lite_remaining} calls today."
+        )
 
     run_bulk = st.button("Run bulk pipeline", type="primary")
     if run_bulk:

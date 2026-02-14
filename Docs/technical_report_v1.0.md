@@ -60,8 +60,10 @@ A lightweight tool that takes an input document (PDF/text) and generates:
 
 1. **Structured intelligence record (JSON)**
 2. **Readable Intelligence Brief** formatted from that JSON
-3. A filterable “inbox” view for analysts (priority/topic/region/company)
-4. Human review controls (Reviewed/Approved) to gate inclusion into executive digests
+3. A filterable "inbox" view for analysts (priority/topic/region/company)
+4. Human review controls (Pending/Approved/Disapproved) with auto-approve heuristics at ingest
+5. **AI-generated Weekly Executive Brief** synthesized across multiple records using Gemini Flash, following a structured executive report template (executive summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions)
+6. **Trend analysis dashboard** with topic momentum, company mention tracking, and priority distribution over time
 
 ### 2.2 Target users
 
@@ -122,12 +124,16 @@ Everything else is deterministic:
   * Noisy-PDF cleaning: deterministic removal of ads, nav menus, paywall prompts, social sharing blocks, link farms, repeated headers/footers, photo credits, and symbol-heavy lines (`src/text_clean_chunk.py`)
   * Chunking: cleaned text split into overlapping model-ready chunks (~9K chars, 800-char overlap) with detected-title propagation
   * Context pack assembly: keyword/watchlist/country hit scoring with bounded size
-* **AI inference (two-pass model strategy):**
+* **AI inference (meta-based model routing + two-phase chunk repair):**
 
-  * **Pass 1 — Gemini Flash-Lite:** runs extraction cheaply on every document (most are "easy enough")
+  * **Noise classification:** cleanup meta (removed_ratio, removed_line_count, top_removed_patterns) classifies each document as low/normal/high noise
+  * **Model selection:** high-noise documents route directly to Gemini Flash (stronger model), bypassing Flash-Lite to avoid wasting quota on expected failures; low/normal-noise documents start on Flash-Lite
+  * **Phase 1 — initial model:** all chunks extracted with the chosen model via `extract_single_pass()`
+  * **Phase 2 — repair only failures:** only chunks that failed Phase 1 are retried with the stronger model (if Flash-Lite was the initial model); successful chunks are not re-extracted
   * **Quality gate:** schema validation + heuristic checks (missing publish_date, wrong source_type, generic evidence)
-  * **Pass 2 — Gemini Flash (fallback):** re-runs extraction only when pass 1 fails validation or quality checks, spending more tokens only on hard/noisy documents
+  * **Non-chunked fallback:** single-context documents still use the original two-pass strategy (Flash-Lite → Flash) via `route_and_extract()`
   * Token usage logging per call (prompt/output/total tokens, model used)
+  * **API quota tracking** (`src/quota_tracker.py`): per-model RPD usage persisted to `data/api_usage.json`, resets midnight Pacific Time, sidebar display with progress bars and remaining-call estimates
 * **Validation layer:**
 
   * JSON schema validation against controlled vocabularies
@@ -139,25 +145,41 @@ Everything else is deterministic:
   * Separate JSONL files for duplicates (marked with duplicate metadata)
   * Bulk deduplication via CLI script (`scripts/dedupe_jsonl.py`)
 * **Briefing pipeline:**
-  * Weekly candidate selection (recent records, exclude duplicates by default)
+  * Weekly candidate selection (recent records within configurable date range up to 90 days, exclude duplicates by default)
   * Share-ready detection (High priority + High confidence)
-  * Markdown brief and executive email generation
+  * Deterministic Markdown brief and executive email generation
+  * **AI-generated Weekly Executive Brief:** LLM synthesis (Gemini Flash) across up to 20 selected records, following structured executive report template (executive summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions); token usage displayed
   * Analyst-driven item selection with one-click suggestions
+* **Priority classification:**
+  * LLM prompt rules define High/Medium/Low criteria with Kiekert-specific signals
+  * Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
+  * Auto-approve heuristic at ingest: confidence not Low, publish_date present, source_type not Other, 2+ evidence bullets → auto-Approved; otherwise Pending for manual review
+* **Bulk PDF ingest:**
+  * Multi-file uploader with progress bar and per-file extraction loop
+  * Deduplication checks both filename and extracted title against existing records and within the batch
+  * Summary table showing saved/skipped/failed counts per file
+  * Pre-run quota estimate (worst-case API calls vs remaining quota)
 * **Analytics & Presentation:**
 
-  * Inbox table with filters (priority, source, review status, company search)
-  * Detail view with edits and review status
-  * Dashboard with canonical/all-records toggle
+  * Inbox with title-first expandable cards, inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
+  * Record detail with Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
+  * Dashboard with canonical/all-records toggle and three trend analysis charts:
+    * **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
+    * **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
+    * **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
+  * **Original Documents library** (`pages/07_Documents.py`): filterable document index with date range, topic, company, review status, priority, and text search; link fallback chain (`original_url` > `source_pdf_path` > "No link"); expandable cards with evidence bullets, notes, and router usage summary
   * Export to CSV for Power BI (canonical and all records support)
-  * Weekly Brief page for digest drafting & email templates
+  * Weekly Brief page for digest drafting, email templates, and AI brief generation
 
 ### 4.2 Human-in-the-loop gating
 
 Review statuses:
 
-* Not Reviewed → Reviewed → Approved
+* **Pending** → **Approved** or **Disapproved**
 
-Recommended gating rules (for approval requirement):
+Auto-approve heuristic (applied deterministically at ingest): records are automatically set to Approved when all of the following hold: confidence is not Low, publish_date is present, source_type is not Other, and at least 2 evidence bullets are extracted. Records that fail any of these criteria start as Pending for manual review. Legacy records with old statuses ("Not Reviewed", "Reviewed") are normalized transparently to "Pending".
+
+Recommended gating rules (records that should always require manual review):
 
 * priority is High, or
 * confidence is Low, or
@@ -211,18 +233,22 @@ Each record includes 2–4 evidence bullets:
 
 ### 7.1 Technology stack
 
-* UI: [Streamlit / Lovable / other]
-* Local extraction: [pdfplumber / pymupdf / other]
-* LLM provider: [Gemini / Claude / ChatGPT]
-* Storage: [SQLite / JSONL]
-* Reporting: [Power BI optional]
+* **UI:** Streamlit (8-page multi-page app)
+* **Local extraction:** PyMuPDF with pdfplumber fallback
+* **LLM provider:** Gemini 2.5-flash-lite (primary) + Gemini 2.5-flash (fallback/repair) via `google-genai` with structured JSON schema
+* **Storage:** JSONL (JSON Lines format)
+* **Charting:** Altair (Topic Momentum interactive charts), matplotlib (other charts), pandas aggregations
+* **Reporting:** Power BI optional (CSV export ready)
+* **Language:** Python 3.9+
+* **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, altair, google-genai, pytest
 
-For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion, duplicate detection, record review, analytics, and weekly briefing workflows in a lightweight interface. The app includes six main pages: (1) Home, (2) Ingest with duplicate blocking, (3) Inbox for filtering/browsing, (4) Record detail for editing/approval, (5) Dashboard with canonical toggle, (6) Weekly Brief for digest drafting, and (7) Export/Admin for bulk export and deduplication. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). For reporting and downstream analysis, the app includes:
+For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion (single and bulk), duplicate detection, record review, analytics, trend analysis, weekly briefing workflows, and a document library in a lightweight interface. The app includes eight main pages: (1) Home, (2) Ingest with duplicate blocking and bulk PDF upload, (3) Inbox with title-first expandable cards and batch actions, (4) Record detail with sequential navigation and Quick Approve, (5) Dashboard with trend analysis charts, (6) Weekly Brief for digest drafting and AI-generated executive brief, (7) Export/Admin for bulk export and deduplication, and (8) Original Documents library. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). API usage is tracked per-model in `data/api_usage.json` with midnight Pacific Time reset. For reporting and downstream analysis, the app includes:
 
 - CSV export of canonical records (or all records) filtered by approval status
 - JSONL export of both canonical and duplicate records for analysis
-- Dashboard with toggle to view analytics on canonical vs. all records  
-- Weekly Brief page for drafting digest summaries and executable email templates
+- Dashboard with toggle to view analytics on canonical vs. all records, plus Topic Momentum, Company Mentions, and Priority Distribution trend charts
+- Weekly Brief page for drafting deterministic digest summaries, AI-generated executive briefs, and executable email templates
+- Original Documents page for browsing/filtering source files with evidence previews
 - CLI script (`scripts/dedupe_jsonl.py`) for off-app bulk deduplication with diagnostic stats
 
 ### 7.2 Processing pipeline (step-by-step)

@@ -299,4 +299,69 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
                 fixed.append(c0)
         rec["companies_mentioned"] = _dedupe_keep_order(fixed)
 
+    # ── Deterministic priority boost ──────────────────────────────────────
+    rec = _boost_priority(rec)
+
+    return rec
+
+
+# ── Priority override logic ──────────────────────────────────────────────
+
+_CLOSURE_KEYWORDS = re.compile(
+    r"\b(latch|latches|door\s*system|door\s*handle|handle|digital\s*key|smart\s*entry|cinch|striker|closure)\b",
+    re.IGNORECASE,
+)
+
+_KEY_OEMS = {
+    "vw", "volkswagen", "bmw", "hyundai", "kia", "ford", "gm",
+    "general motors", "stellantis", "toyota", "mercedes", "mercedes-benz",
+    "audi", "porsche", "nissan", "honda", "renault", "peugeot",
+    "tata", "mahindra", "byd", "geely", "chery", "great wall",
+}
+
+
+def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Deterministic upgrade to High when hard signals are present."""
+    if rec.get("priority") == "High":
+        return rec
+
+    # Signal 1: mentions_our_company
+    if rec.get("mentions_our_company"):
+        rec["priority"] = "High"
+        return rec
+
+    # Signal 2: footprint region + closure-tech topic
+    regions = rec.get("regions_relevant_to_kiekert") or []
+    topics = rec.get("topics") or []
+    topics_lower = {t.lower() for t in topics if isinstance(t, str)}
+    has_footprint = bool(regions)
+    has_closure_topic = "closure technology & innovation" in topics_lower
+
+    if has_footprint and has_closure_topic:
+        rec["priority"] = "High"
+        return rec
+
+    # Signal 3: closure keyword in evidence/insights text
+    text_parts = []
+    for field in ("evidence_bullets", "key_insights", "strategic_implications"):
+        v = rec.get(field)
+        if isinstance(v, list):
+            text_parts.extend(str(x) for x in v)
+    title = rec.get("title") or ""
+    full_text = title + " " + " ".join(text_parts)
+    has_closure_keyword = bool(_CLOSURE_KEYWORDS.search(full_text))
+
+    if has_footprint and has_closure_keyword:
+        rec["priority"] = "High"
+        return rec
+
+    # Signal 4: key OEM + footprint region
+    companies = rec.get("companies_mentioned") or []
+    companies_lower = {c.lower() for c in companies if isinstance(c, str)}
+    has_key_oem = bool(companies_lower & _KEY_OEMS)
+
+    if has_footprint and has_key_oem:
+        rec["priority"] = "High"
+        return rec
+
     return rec

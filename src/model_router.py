@@ -13,6 +13,7 @@ from src.constants import (
     ALLOWED_CONF,
     ALLOWED_REVIEW,
 )
+from src.quota_tracker import record_call
 from src.schema_validate import validate_record
 from src.postprocess import postprocess_record
 from src.storage import utc_now_iso
@@ -134,6 +135,7 @@ def _call_gemini(prompt: str, schema: Dict[str, Any], model: str) -> Tuple[str, 
     except Exception as e:
         raise RuntimeError(f"Gemini API call failed: {e}") from e
 
+    record_call(model)
     text = (resp.text or "").strip()
     if not text:
         raise RuntimeError("Gemini API returned empty response text.")
@@ -171,6 +173,7 @@ def _call_gemini_text(prompt: str, model: str) -> Tuple[str, Dict[str, Any]]:
     except Exception as e:
         raise RuntimeError(f"Gemini API call failed: {e}") from e
 
+    record_call(model)
     text = (resp.text or "").strip()
     if not text:
         raise RuntimeError("Gemini API returned empty response text.")
@@ -204,9 +207,47 @@ def extraction_prompt(context_pack: str) -> str:
         "5) Only use 'Closure Technology & Innovation' when latch/door/handle/digital key/smart entry/cinch appears explicitly.\n"
         "6) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.\n"
         "7) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.\n"
+        "8) priority classification (apply strictly):\n"
+        "   - High: directly impacts Kiekert operations, footprint regions (India, China, Europe, Africa, US, Mexico, Thailand), "
+        "or closure technology (latches, door systems, handles, digital key, smart entry, cinch); "
+        "regulatory changes affecting automotive suppliers; major M&A, plant closures, or production shifts involving "
+        "direct competitors or key OEM customers (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota); "
+        "mentions_our_company is true.\n"
+        "   - Low: tangential mentions with no direct supplier or closure-tech relevance; "
+        "broad macroeconomic news; consumer reviews; motorsports.\n"
+        "   - Medium: everything else (general automotive trends, OEM strategy in non-footprint regions, "
+        "supply chain news without direct Kiekert connection).\n"
+        "   When in doubt between High and Medium, prefer High if any footprint region or closure-tech keyword appears.\n"
         "Use only the provided text.\n\nINPUT (context pack):\n"
         + context_pack
     )
+
+
+def extract_single_pass(context_pack: str, model: str) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    """One-shot extraction with a specific model. No fallback/repair."""
+    log: Dict[str, Any] = {"model": model, "attempted_at": utc_now_iso(), "errors": []}
+    schema = record_response_schema()
+    prompt = extraction_prompt(context_pack)
+    try:
+        raw, usage = _call_gemini(prompt, schema, model=model)
+        log["usage"] = usage
+    except Exception as e:
+        log["errors"].append(f"call_error: {e}")
+        return None, log
+    try:
+        rec = json.loads(raw)
+    except Exception as e:
+        log["errors"].append(f"json_parse: {e}")
+        return None, log
+    if not isinstance(rec, dict):
+        log["errors"].append("not_a_dict")
+        return None, log
+    rec = postprocess_record(rec, source_text=context_pack)
+    ok, errs = validate_record(rec)
+    if ok:
+        return rec, log
+    log["errors"].extend(errs)
+    return None, log
 
 
 def fix_json_prompt(broken: str, validation_errors: List[str]) -> str:
