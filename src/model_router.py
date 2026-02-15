@@ -147,7 +147,7 @@ def _call_gemini(prompt: str, schema: Dict[str, Any], model: str) -> Tuple[str, 
     return text, _extract_usage(resp, model)
 
 
-def _call_gemini_text(prompt: str, model: str) -> Tuple[str, Dict[str, Any]]:
+def _call_gemini_text(prompt: str, model: str, use_google_search: bool = False) -> Tuple[str, Dict[str, Any]]:
     """Call Gemini for plain-text output (no JSON schema constraint)."""
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -168,12 +168,17 @@ def _call_gemini_text(prompt: str, model: str) -> Tuple[str, Dict[str, Any]]:
 
     client = genai.Client(api_key=api_key)
     try:
+        config_kwargs: Dict[str, Any] = {"response_mime_type": "text/plain"}
+        if use_google_search:
+            try:
+                config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+            except Exception as e:
+                raise RuntimeError(f"Gemini web grounding setup failed: {e}") from e
+
         resp = client.models.generate_content(
             model=model,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="text/plain",
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
     except Exception as e:
         raise RuntimeError(f"Gemini API call failed: {e}") from e
@@ -182,7 +187,9 @@ def _call_gemini_text(prompt: str, model: str) -> Tuple[str, Dict[str, Any]]:
     text = (resp.text or "").strip()
     if not text:
         raise RuntimeError("Gemini API returned empty response text.")
-    return text, _extract_usage(resp, model)
+    usage = _extract_usage(resp, model)
+    usage["web_check_enabled"] = bool(use_google_search)
+    return text, usage
 
 
 def _should_retry_strong(error_message: str) -> bool:

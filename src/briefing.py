@@ -204,6 +204,9 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
 def synthesize_weekly_brief_llm(
     records: List[Dict],
     week_range: str,
+    provider: str = "gemini",
+    web_check: bool = False,
+    model_override: Optional[str] = None,
 ) -> Tuple[str, Dict[str, Any]]:
     """Generate an LLM-synthesized weekly executive brief from approved records.
 
@@ -227,6 +230,21 @@ def synthesize_weekly_brief_llm(
         )[:_MAX_RECORDS_FOR_SYNTHESIS]
 
     prompt = _build_synthesis_prompt(records, week_range)
-    model = os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
-    brief_text, usage = _call_gemini_text(prompt, model=model)
-    return brief_text, usage
+    if provider == "gemini":
+        model = model_override or os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
+        if web_check:
+            prompt += (
+                "\n\nCOHERENCE CHECK:\n"
+                "- Verify major claims against current public web sources.\n"
+                "- If a claim cannot be corroborated, mark it as unverified.\n"
+                "- Keep output in the same report structure.\n"
+            )
+        brief_text, usage = _call_gemini_text(prompt, model=model, use_google_search=web_check)
+        usage["provider"] = "gemini"
+        return brief_text, usage
+
+    if provider == "claude":
+        raise RuntimeError("Claude weekly synthesis is not wired yet. Add SDK/API integration and ANTHROPIC_API_KEY.")
+    if provider == "chatgpt":
+        raise RuntimeError("ChatGPT weekly synthesis is not wired yet. Add SDK/API integration and OPENAI_API_KEY.")
+    raise RuntimeError(f"Unsupported provider for weekly synthesis: {provider}")

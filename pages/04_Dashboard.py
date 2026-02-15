@@ -139,8 +139,9 @@ with f4:
 t1, t2 = st.columns(2)
 with t1:
     all_topics = sorted(
-        pd.Series(df.get("topics", pd.Series(dtype=object))).explode().dropna().astype(str).unique().tolist()
+        pd.Series(df.get("topics", pd.Series(dtype=object))).apply(_safe_list).explode().dropna().astype(str).unique().tolist()
     )
+    all_topics = [t for t in all_topics if t and t not in ("", "None", "nan")]
     sel_topics = st.multiselect("Topics", all_topics, default=all_topics)
 with t2:
     only_brief_included = st.checkbox("Exclude suppressed/duplicate records", value=True)
@@ -152,11 +153,12 @@ if sel_status and "review_status" in df:
 if sel_sources and "source_type" in df:
     mask = mask & df["source_type"].astype(str).isin(sel_sources)
 if only_brief_included:
-    mask = mask & (~df.get("exclude_from_brief", False).fillna(False))
+    excl = df["exclude_from_brief"].fillna(False) if "exclude_from_brief" in df.columns else pd.Series(False, index=df.index)
+    mask = mask & (~excl)
 if sel_topics:
     topic_set = set(sel_topics)
     topic_hit = pd.Series(
-        [bool(set(x or []) & topic_set) if isinstance(x, list) else False for x in df.get("topics", [])],
+        [bool(set(_safe_list(x)) & topic_set) for x in df.get("topics", [])],
         index=df.index,
     )
     mask = mask & topic_hit
@@ -194,6 +196,8 @@ else:
 st.subheader("Region x Topic Heatmap")
 if "regions_relevant_to_kiekert" in fdf and "topics" in fdf:
     hm = fdf[["regions_relevant_to_kiekert", "topics"]].copy()
+    hm["regions_relevant_to_kiekert"] = hm["regions_relevant_to_kiekert"].apply(_safe_list)
+    hm["topics"] = hm["topics"].apply(_safe_list)
     hm = hm.explode("regions_relevant_to_kiekert").explode("topics").dropna()
     if not hm.empty:
         ct = pd.crosstab(hm["regions_relevant_to_kiekert"], hm["topics"])
@@ -215,9 +219,15 @@ st.subheader("Topic Momentum")
 st.caption("Weighted topic frequency change: recent half vs prior half of date range.")
 dated_rows = fdf.dropna(subset=["event_day"])
 if not dated_rows.empty and "topics" in dated_rows:
-    midpoint = dated_rows["event_day"].min() + (dated_rows["event_day"].max() - dated_rows["event_day"].min()) / 2
+    date_min = dated_rows["event_day"].min()
+    date_max = dated_rows["event_day"].max()
+    midpoint = date_min + (date_max - date_min) / 2
     prior_df = dated_rows[dated_rows["event_day"] < midpoint]
     recent_df = dated_rows[dated_rows["event_day"] >= midpoint]
+    st.caption(
+        f"Prior: {date_min.strftime('%b %d')} – {(midpoint - pd.Timedelta(days=1)).strftime('%b %d')}  |  "
+        f"Recent: {midpoint.strftime('%b %d')} – {date_max.strftime('%b %d')}"
+    )
 
     # Weighted explode: each record contributes weight 1 split across its topics
     prior_w = weighted_explode(prior_df, "topics")

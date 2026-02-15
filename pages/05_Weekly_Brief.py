@@ -94,21 +94,38 @@ st.caption(
     "Uses Gemini to synthesize a structured executive brief from the selected records. "
     "Follows the Weekly Executive Report template."
 )
+ai_c1, ai_c2, ai_c3 = st.columns(3)
+with ai_c1:
+    brief_provider = st.selectbox("AI model provider", ["gemini", "claude", "chatgpt"], index=0)
+with ai_c2:
+    web_check_enabled = st.checkbox("Web coherence check (Gemini)", value=False)
+with ai_c3:
+    model_override = st.text_input("Model override (optional)", value="")
+if brief_provider != "gemini" and web_check_enabled:
+    st.info("Web coherence check currently applies to Gemini only.")
 
 if st.button("Generate AI Brief", type="primary", disabled=not selected_records):
     with st.spinner("Synthesizing executive brief..."):
         try:
-            brief_text, usage = synthesize_weekly_brief_llm(selected_records, week_range)
+            brief_text, usage = synthesize_weekly_brief_llm(
+                selected_records,
+                week_range,
+                provider=brief_provider,
+                web_check=bool(web_check_enabled and brief_provider == "gemini"),
+                model_override=(model_override.strip() or None),
+            )
         except Exception as e:
             st.error(f"Synthesis failed: {e}")
             st.stop()
 
     if usage:
         st.caption(
+            f"Provider: {usage.get('provider', brief_provider)} | "
             f"Model: {usage.get('model', 'unknown')} | "
             f"prompt={usage.get('prompt_tokens', '?')} "
             f"output={usage.get('output_tokens', '?')} "
-            f"total={usage.get('total_tokens', '?')}"
+            f"total={usage.get('total_tokens', '?')} | "
+            f"web_check={usage.get('web_check_enabled', False)}"
         )
 
     st.code(brief_text, language="markdown")
