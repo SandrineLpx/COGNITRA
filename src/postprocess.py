@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from collections import Counter
 from datetime import datetime
 import re
-from src.constants import ALLOWED_CONF, ALLOWED_SOURCE_TYPES, FIELD_POLICY, FOOTPRINT_REGIONS
+from src.constants import ALLOWED_ACTOR_TYPES, ALLOWED_CONF, ALLOWED_SOURCE_TYPES, FIELD_POLICY, FOOTPRINT_REGIONS
 
 # Minimal canonicalization maps (extend as you see patterns)
 COUNTRY_ALIASES = {
@@ -124,6 +124,8 @@ def _is_missing_value(value: Any) -> bool:
 def _is_invalid_llm_value(field: str, value: Any) -> bool:
     if field == "source_type":
         return value not in ALLOWED_SOURCE_TYPES
+    if field == "actor_type":
+        return value not in ALLOWED_ACTOR_TYPES
     if field == "publish_date_confidence":
         return value not in ALLOWED_CONF
     if field == "publish_date":
@@ -131,6 +133,15 @@ def _is_invalid_llm_value(field: str, value: Any) -> bool:
     if field == "original_url":
         return not (value in (None, "") or (isinstance(value, str) and re.match(r"^https?://\S+$", value)))
     return False
+
+
+_ACTOR_TYPE_ALIASES = {
+    "media": "industry",
+    "industry_group": "industry",
+    "tech_partner": "other",
+    "government": "other",
+    "regulator": "other",
+}
 
 
 def _apply_field_policy(
@@ -247,6 +258,11 @@ def extract_publish_date_iso(text: str) -> Optional[str]:
     return None
 
 
+def parse_publish_date_from_text(text: str) -> Optional[str]:
+    """Parse document publish date from free text and return ISO date only."""
+    return extract_publish_date_iso(text)
+
+
 def infer_publisher(text: str) -> Optional[str]:
     t = text.lower()
     if (
@@ -326,12 +342,22 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
         _apply_field_policy(rec, "original_url", None, source="postprocess", reason="empty_url_to_null")
 
     combined_text = _record_text(rec, source_text=source_text)
-    parsed_date = extract_publish_date_iso(combined_text)
+    parsed_date = parse_publish_date_from_text(combined_text)
     if parsed_date:
         if not rec.get("publish_date"):
-            _apply_field_policy(rec, "publish_date", parsed_date, source="postprocess", reason="regex_fill_publish_date_when_missing")
             _apply_field_policy(
-                rec, "publish_date_confidence", "High", source="postprocess", reason="regex_fill_publish_date_when_missing"
+                rec,
+                "publish_date",
+                parsed_date,
+                source="rule:regex_publish_date",
+                reason="publish_date_missing_backfill",
+            )
+            _apply_field_policy(
+                rec,
+                "publish_date_confidence",
+                "High",
+                source="rule:regex_publish_date",
+                reason="publish_date_missing_backfill",
             )
         else:
             _apply_field_policy(rec, "event_date", parsed_date, source="postprocess", reason="regex_detected_event_date")
@@ -339,6 +365,13 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
     inferred_source = infer_publisher(combined_text)
     if inferred_source:
         _apply_field_policy(rec, "source_type", inferred_source, source="postprocess", reason="publisher_marker_inference")
+
+    actor = str(rec.get("actor_type") or "").strip().lower()
+    if actor:
+        actor = _ACTOR_TYPE_ALIASES.get(actor, actor)
+        if actor not in ALLOWED_ACTOR_TYPES:
+            actor = "other"
+        _apply_field_policy(rec, "actor_type", actor, source="postprocess", reason="actor_type_normalization")
 
     countries = rec.get("country_mentions") or []
     if isinstance(countries, list):

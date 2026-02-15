@@ -178,19 +178,25 @@ k4.metric("Disapproved", int((fdf.get("review_status") == "Disapproved").sum()) 
 k5.metric("Excluded", int(fdf.get("exclude_from_brief", pd.Series(False)).fillna(False).sum()))
 k6.metric("High Priority", int((fdf.get("priority") == "High").sum()) if "priority" in fdf else 0)
 
-# ── 30-Day Trend ──────────────────────────────────────────────────────────
-st.subheader("30-Day Trend")
-trend = (
-    fdf.dropna(subset=["event_day"])
-    .groupby(["event_day", "source_type"], dropna=False)
-    .size()
-    .reset_index(name="count")
-)
-if not trend.empty:
-    pivot_trend = trend.pivot(index="event_day", columns="source_type", values="count").fillna(0)
-    st.line_chart(pivot_trend)
+# ── Monthly Histogram ──────────────────────────────────────────────────────
+st.subheader("Monthly Record Volume (Histogram)")
+monthly = fdf.dropna(subset=["event_day"]).copy()
+if not monthly.empty:
+    monthly["event_month"] = monthly["event_day"].dt.to_period("M").dt.to_timestamp()
+    monthly_hist = monthly.groupby("event_month").size().reset_index(name="count")
+    chart = (
+        alt.Chart(monthly_hist)
+        .mark_bar(color="#1565c0")
+        .encode(
+            x=alt.X("event_month:T", title="Month"),
+            y=alt.Y("count:Q", title="Records"),
+            tooltip=["event_month:T", "count:Q"],
+        )
+        .properties(height=280)
+    )
+    st.altair_chart(chart, use_container_width=True)
 else:
-    st.caption("No dated records for trend chart.")
+    st.caption("No dated records for monthly histogram.")
 
 # ── Region x Topic Heatmap ────────────────────────────────────────────────
 st.subheader("Region x Topic Heatmap")

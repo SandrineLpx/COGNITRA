@@ -15,7 +15,7 @@ CANON_TOPICS = [
 FOOTPRINT_REGIONS = ["India", "China", "Europe (including Russia)", "Africa", "US", "Mexico", "Thailand"]
 
 ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Other"}
-ALLOWED_ACTOR_TYPES = {"oem", "supplier", "tech_partner", "government", "regulator", "industry_group", "media", "other"}
+ALLOWED_ACTOR_TYPES = {"oem", "supplier", "industry", "other"}
 ALLOWED_PRIORITY = {"High", "Medium", "Low"}
 ALLOWED_CONF = {"High", "Medium", "Low"}
 ALLOWED_REVIEW = {"Pending", "Approved", "Disapproved"}
