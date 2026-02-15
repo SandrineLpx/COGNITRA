@@ -35,7 +35,9 @@ def render_intelligence_brief(rec: dict) -> str:
     md.append("Geography\n")
     md.append(f"Countries Mentioned: {', '.join(rec.get('country_mentions', [])) or '[None]'}\n")
     md.append(f"Regions Relevant (Footprint): {', '.join(rec.get('regions_relevant_to_kiekert', [])) or '[None]'}\n")
-    md.append(f"Region Signal Type: {rec.get('region_signal_type')}\n")
+    rst = rec.get("region_signal_type")
+    if rst:
+        md.append(f"Region Signal Type: {rst}\n")
     sfh = rec.get("supply_flow_hint") or ""
     if sfh:
         md.append(f"Supply Flow Hint: {sfh}\n")
@@ -54,8 +56,10 @@ def render_intelligence_brief(rec: dict) -> str:
     md.append("Key Insights (interpretation)\n")
     md.append(_list(rec.get("key_insights", [])) + "\n")
 
-    md.append("Strategic Implications (closure systems supplier lens)\n")
-    md.append(_list(rec.get("strategic_implications", [])) + "\n")
+    si = rec.get("strategic_implications") or []
+    if si:
+        md.append("Strategic Implications (closure systems supplier lens)\n")
+        md.append(_list(si) + "\n")
 
     ra = rec.get("recommended_actions") or []
     if ra:

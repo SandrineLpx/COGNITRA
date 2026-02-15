@@ -9,7 +9,6 @@ from src.constants import (
     FOOTPRINT_REGIONS,
     ALLOWED_SOURCE_TYPES,
     ALLOWED_ACTOR_TYPES,
-    ALLOWED_PRIORITY,
     ALLOWED_CONF,
     ALLOWED_REVIEW,
 )
@@ -56,19 +55,8 @@ def record_response_schema() -> Dict[str, Any]:
                 "type": "ARRAY",
                 "items": {"type": "STRING", "enum": FOOTPRINT_REGIONS},
             },
-            "region_signal_type": {"type": "STRING"},
-            "supply_flow_hint": {"type": "STRING"},
-            "priority": {"type": "STRING", "enum": sorted(ALLOWED_PRIORITY)},
-            "confidence": {"type": "STRING", "enum": sorted(ALLOWED_CONF)},
             "evidence_bullets": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
             "key_insights": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
-            "strategic_implications": {
-                "type": "ARRAY",
-                "items": {"type": "STRING"},
-                "minItems": 2,
-                "maxItems": 4,
-            },
-            "recommended_actions": _nullable({"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 6}),
             "review_status": {"type": "STRING", "enum": sorted(ALLOWED_REVIEW)},
             "notes": {"type": "STRING"},
         },
@@ -257,22 +245,6 @@ def extraction_prompt(context_pack: str) -> str:
         "5) Only use 'Closure Technology & Innovation' when latch/door/handle/digital key/smart entry/cinch appears explicitly.\n"
         "6) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.\n"
         "7) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.\n"
-        "8) priority classification (apply strictly):\n"
-        "   - High: directly impacts Kiekert operations, footprint regions (India, China, Europe, Africa, US, Mexico, Thailand), "
-        "or closure technology (latches, door systems, handles, digital key, smart entry, cinch); "
-        "regulatory changes affecting automotive suppliers; major M&A, plant closures, or production shifts involving "
-        "direct competitors or key OEM customers (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota); "
-        "mentions_our_company is true.\n"
-        "   - Low: tangential mentions with no direct supplier or closure-tech relevance; "
-        "broad macroeconomic news; consumer reviews; motorsports.\n"
-        "   - Medium: everything else (general automotive trends, OEM strategy in non-footprint regions, "
-        "supply chain news without direct Kiekert connection).\n"
-        "   When in doubt between High and Medium, prefer High if any footprint region or closure-tech keyword appears.\n"
-        "9) confidence classification (how certain the extraction is):\n"
-        "   - High: all key fields (publish_date, source_type, actor_type) clearly stated in text; "
-        "at least 2 evidence bullets directly quotable from the source.\n"
-        "   - Medium: some fields require inference or are ambiguous; partial evidence available.\n"
-        "   - Low: significant ambiguity; most fields inferred; sparse or unclear source text.\n"
         "Use only the provided text.\n\nINPUT (context pack):\n"
         + context_pack
     )

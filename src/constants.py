@@ -26,16 +26,15 @@ REQUIRED_KEYS = [
     "title","source_type","publish_date","publish_date_confidence","original_url",
     "actor_type","government_entities","companies_mentioned","mentions_our_company",
     "topics","keywords","country_mentions","regions_mentioned","regions_relevant_to_kiekert",
-    "region_signal_type","supply_flow_hint","priority","confidence","evidence_bullets",
-    "key_insights","strategic_implications","recommended_actions","review_status","notes"
+    "priority","confidence","evidence_bullets",
+    "key_insights","review_status","notes"
 ]
 
 FIELD_POLICY = {
     "llm": [
         "title", "actor_type", "mentions_our_company", "topics", "keywords",
-        "region_signal_type", "supply_flow_hint",
-        "confidence", "evidence_bullets", "key_insights", "strategic_implications",
-        "recommended_actions", "review_status", "notes",
+        "evidence_bullets", "key_insights",
+        "review_status", "notes",
     ],
     "python": [
         "regions_mentioned", "regions_relevant_to_kiekert", "event_date",

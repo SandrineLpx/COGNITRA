@@ -366,6 +366,48 @@ if not dated_rows.empty and "priority" in dated_rows:
 else:
     st.caption("Not enough dated records for priority chart.")
 
+# ── Confidence Distribution + LLM Override Rate ─────────────────────────
+st.subheader("Confidence Distribution (Computed)")
+st.caption("Extraction quality trend based on computed confidence scores.")
+if not dated_rows.empty and "confidence" in dated_rows:
+    conf_weekly = dated_rows.copy()
+    conf_weekly["week"] = week_start(conf_weekly["event_day"])
+    cw = conf_weekly.groupby(["week", "confidence"]).size().reset_index(name="count")
+    if not cw.empty:
+        pivot_conf = cw.pivot(index="week", columns="confidence", values="count").fillna(0)
+        for col in ["High", "Medium", "Low"]:
+            if col not in pivot_conf.columns:
+                pivot_conf[col] = 0
+        pivot_conf = pivot_conf[["High", "Medium", "Low"]]
+
+        fig_conf, ax_conf = plt.subplots(figsize=(8, 3))
+        pivot_conf.plot.bar(stacked=True, ax=ax_conf, color={"High": "#2e7d32", "Medium": "#f9a825", "Low": "#d32f2f"})
+        ax_conf.set_xlabel("Week")
+        ax_conf.set_ylabel("Records")
+        ax_conf.set_title("Computed Confidence by Week")
+        ax_conf.set_xticklabels([d.strftime("%b %d") for d in pivot_conf.index], rotation=35, ha="right", fontsize=8)
+        ax_conf.legend(title="Confidence")
+        fig_conf.tight_layout()
+        st.pyplot(fig_conf)
+
+        # LLM override summary (how many records had confidence changed)
+        detail_col = "_confidence_detail.llm_original"
+        if detail_col in fdf.columns:
+            has_detail = fdf[detail_col].notna()
+            if has_detail.any():
+                detail_df = fdf[has_detail].copy()
+                overridden = detail_df[detail_col] != detail_df["confidence"]
+                total_with_detail = len(detail_df)
+                n_overridden = int(overridden.sum())
+                ov1, ov2, ov3 = st.columns(3)
+                ov1.metric("Records with computed confidence", total_with_detail)
+                ov2.metric("LLM overridden", n_overridden)
+                ov3.metric("Override rate", f"{100 * n_overridden / max(total_with_detail, 1):.0f}%")
+    else:
+        st.caption("Not enough data for confidence chart.")
+else:
+    st.caption("Not enough dated records for confidence chart.")
+
 # ── Drilldown ─────────────────────────────────────────────────────────────
 st.subheader("Drilldown")
 show_cols = [

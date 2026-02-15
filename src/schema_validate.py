@@ -79,14 +79,6 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
     if not isinstance(ki, list) or not (2 <= len(ki) <= 4):
         errs.append("key_insights must be a list of 2-4 items")
 
-    si = rec["strategic_implications"]
-    if not isinstance(si, list) or not (2 <= len(si) <= 4):
-        errs.append("strategic_implications must be a list of 2-4 items")
-
-    ra = rec["recommended_actions"]
-    if ra is not None and (not isinstance(ra, list) or len(ra) > 6):
-        errs.append("recommended_actions must be a list (or null) and should be short")
-
     rm = rec["regions_mentioned"]
     if not isinstance(rm, list):
         errs.append("regions_mentioned must be a list")

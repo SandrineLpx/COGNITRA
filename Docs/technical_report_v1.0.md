@@ -157,11 +157,12 @@ Everything else is deterministic:
 * **Analytics & Presentation:**
 
   * Inbox with title-first expandable cards, inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
-  * Record detail with Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
-  * Dashboard with canonical/all-records toggle and three trend analysis charts:
+  * Record detail with Next/Previous navigation, title+metrics header, Quick Approve with auto-advance, and computed confidence detail breakdown (per-signal score, LLM override indicator)
+  * Dashboard with canonical/all-records toggle and four trend analysis charts:
     * **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     * **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
     * **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
+    * **Confidence Distribution (Computed):** weekly stacked bars showing extraction quality trend, plus LLM override rate metrics (total computed, count overridden, override %)
   * **Original Documents library** (`pages/07_Documents.py`): filterable document index with date range, topic, company, review status, priority, and text search; link fallback chain (`original_url` > `source_pdf_path` > "No link"); expandable cards with evidence bullets, notes, and router usage summary
   * Export to CSV for Power BI (canonical and all records support)
   * Weekly Brief page for digest drafting, email templates, and AI brief generation
@@ -226,7 +227,7 @@ Each record includes 2–4 evidence bullets:
 
 ### 7.1 Technology stack
 
-* **UI:** Streamlit (8-page multi-page app)
+* **UI:** Streamlit (9-page multi-page app)
 * **Local extraction:** PyMuPDF with pdfplumber fallback
 * **LLM provider:** Gemini 2.5-flash-lite (primary) + Gemini 2.5-flash (fallback/repair) via `google-genai` with structured JSON schema
 * **Storage:** JSONL (JSON Lines format)
@@ -235,7 +236,7 @@ Each record includes 2–4 evidence bullets:
 * **Language:** Python 3.9+
 * **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, altair, google-genai, pytest
 
-For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion (single and bulk), duplicate detection, record review, analytics, trend analysis, weekly briefing workflows, and a document library in a lightweight interface. The app includes eight main pages: (1) Home, (2) Ingest with duplicate blocking and bulk PDF upload, (3) Inbox with title-first expandable cards and batch actions, (4) Record detail with sequential navigation and Quick Approve, (5) Dashboard with trend analysis charts, (6) Weekly Brief for digest drafting and AI-generated executive brief, (7) Export/Admin for bulk export and deduplication, and (8) Original Documents library. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). API usage is tracked per-model in `data/api_usage.json` with midnight Pacific Time reset. For reporting and downstream analysis, the app includes:
+For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion (single and bulk), duplicate detection, record review, analytics, trend analysis, weekly briefing workflows, and a document library in a lightweight interface. The app includes nine main pages: (1) Home, (2) Ingest with duplicate blocking and bulk PDF upload, (3) Inbox with title-first expandable cards and batch actions, (4) Record detail with sequential navigation, Quick Approve, and confidence detail breakdown, (5) Dashboard with trend analysis charts including confidence distribution, (6) Weekly Brief for digest drafting and AI-generated executive brief, (7) Review Brief for inspecting saved briefs and approving/excluding source records, (8) Original Documents library, and (9) Admin for bulk export and deduplication. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). API usage is tracked per-model in `data/api_usage.json` with midnight Pacific Time reset. For reporting and downstream analysis, the app includes:
 
 - CSV export of canonical records (or all records) filtered by approval status
 - JSONL export of both canonical and duplicate records for analysis
@@ -660,6 +661,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 9. **Bulk PDF Ingest** (`pages/01_Ingest.py`)
    - Multi-file uploader with progress bar and per-file extraction loop
    - Deduplication checks filename and extracted title against existing records and within the batch
+   - Incremental checkpoint persistence: each successfully extracted record is written immediately, so a mid-run freeze/failure does not lose earlier completed files
    - Summary table showing saved/skipped/failed counts per file
    - Pre-run quota estimate (worst-case API calls vs remaining quota)
 
@@ -673,12 +675,14 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
     - **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     - **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
     - **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
+    - **Confidence Distribution (Computed):** weekly stacked bars showing extraction quality trend (High green, Medium yellow, Low red); LLM override rate metrics (total records with computed confidence, count overridden, override %)
     - Canonical/all-records toggle for all analytics
     - Unit-testable helpers: `weighted_explode`, `explode_list_column`, `classify_topic_momentum`, `canonicalize_company`, `week_start`, `get_effective_date`
 
 12. **Redesigned Review UX** (`pages/02_Inbox.py`, `pages/03_Record.py`)
     - Inbox: title-first expandable cards with inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
     - Record: Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
+    - **Confidence detail breakdown:** expandable section showing computed score, per-signal contributions (publish date, source type, evidence bullets, key insights, kiekert regions, rule corrections, date backfill), and LLM override indicator; auto-expands when LLM confidence was overridden
     - Simplified review model: Pending/Approved/Disapproved with auto-approve heuristic at ingest
     - Legacy status normalization ("Not Reviewed"/"Reviewed" → "Pending")
 
@@ -702,7 +706,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 ## Technical Stack
 
 - **Models:** Gemini 2.5-flash-lite (primary, 10 RPM / 20 RPD) + Gemini 2.5-flash (fallback/repair/AI brief, 5 RPM / 20 RPD) via `google-genai` with structured JSON schema; both $0 on free tier
-- **UI:** Streamlit (8-page multi-page app)
+- **UI:** Streamlit (9-page multi-page app)
 - **Charting:** Altair (Topic Momentum interactive charts), matplotlib (other charts), pandas aggregations
 - **Storage:** JSONL (JSON Lines format) + `data/api_usage.json` for quota tracking
 - **Language:** Python 3.9+
@@ -712,14 +716,15 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 | # | Page | File | Purpose |
 |---|------|------|---------|
-| 1 | Home | `Home.py` | Landing page with project overview |
+| 1 | Home | `Home.py` | Landing page with navigation guide for all 9 pages |
 | 2 | Ingest | `pages/01_Ingest.py` | Single + bulk PDF upload, extraction, noise routing, quota display |
 | 3 | Inbox | `pages/02_Inbox.py` | Title-first cards, inline approve, batch actions, newest-first sort |
-| 4 | Record | `pages/03_Record.py` | Detail view, edit fields, Next/Previous, Quick Approve |
-| 5 | Dashboard | `pages/04_Dashboard.py` | Trend charts, canonical toggle, topic/company/priority analytics |
+| 4 | Record | `pages/03_Record.py` | Detail view, edit fields, confidence detail breakdown, Next/Previous, Quick Approve |
+| 5 | Dashboard | `pages/04_Dashboard.py` | Trend charts, canonical toggle, topic/company/priority/confidence analytics |
 | 6 | Weekly Brief | `pages/05_Weekly_Brief.py` | Candidate selection, deterministic + AI-generated briefs, email template |
-| 7 | Export/Admin | `pages/06_Export_Admin.py` | Bulk CSV/JSONL export, dedup metrics |
+| 7 | Review Brief | `pages/06_Review_Brief.py` | Inspect saved brief, compare to previous, approve/exclude source records |
 | 8 | Documents | `pages/07_Documents.py` | Source file library with filters and evidence previews |
+| 9 | Admin | `pages/08_Admin.py` | Bulk CSV/JSONL export, dedup metrics, demo reset |
 
 ---
 
@@ -738,7 +743,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 - **Cleanup:** Deterministic noisy-PDF cleaning before model calls (not relying on model to ignore noise)
 - **Chunking:** Overlapping chunks for long documents with per-chunk extraction and merge
 - **Quota management:** File-based RPD tracker with midnight PT reset, sidebar display, smart chunk recommendations
-- **UI:** Streamlit 8-page app for lightweight, interactive workflows
+- **UI:** Streamlit 9-page app for lightweight, interactive workflows
 - **Charting:** Altair for interactive Topic Momentum; matplotlib + pandas for other charts
 - **Storage:** JSONL for simplicity and scalability without database overhead
 

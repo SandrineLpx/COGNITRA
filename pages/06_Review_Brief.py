@@ -460,11 +460,11 @@ with right:
             for item in insights:
                 st.markdown(f"- {item}")
         if implications:
-            st.markdown("**Strategic Implications**")
+            st.markdown("**Strategic Implications** _(legacy)_")
             for item in implications:
                 st.markdown(f"- {item}")
         if not insights and not implications:
-            st.caption("No key insights or strategic implications.")
+            st.caption("No key insights available.")
 
     with st.expander("Mutations & Provenance", expanded=False):
         st.markdown("**_mutations**")

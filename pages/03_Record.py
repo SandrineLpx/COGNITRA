@@ -61,6 +61,22 @@ m3.metric("Source", rec.get("source_type", "-"))
 m4.metric("Publish Date", rec.get("publish_date") or "-")
 m5.metric("Status", current_status)
 
+# ── Confidence detail (computed score breakdown) ──────────────────────────
+conf_detail = rec.get("_confidence_detail")
+if isinstance(conf_detail, dict):
+    llm_orig = conf_detail.get("llm_original", "-")
+    computed = conf_detail.get("computed", "-")
+    score = conf_detail.get("score", "-")
+    signals = conf_detail.get("signals", {})
+    changed = llm_orig != computed
+    label = f"Computed **{computed}** (score {score})"
+    if changed:
+        label += f" — LLM said **{llm_orig}**, overridden"
+    with st.expander(f"Confidence detail: {label}", expanded=changed):
+        sig_cols = st.columns(len(signals)) if signals else []
+        for col, (sig_name, sig_val) in zip(sig_cols, signals.items()):
+            col.metric(sig_name.replace("_", " ").title(), sig_val)
+
 st.divider()
 
 # ── Two-column view ───────────────────────────────────────────────────────

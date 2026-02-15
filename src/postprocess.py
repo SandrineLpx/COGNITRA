@@ -197,7 +197,7 @@ def _record_text(rec: Dict[str, Any], source_text: Optional[str] = None) -> str:
         v = rec.get(k)
         if isinstance(v, str):
             parts.append(v)
-    for k in ("keywords", "evidence_bullets", "key_insights", "strategic_implications"):
+    for k in ("keywords", "evidence_bullets", "key_insights"):
         v = rec.get(k)
         if isinstance(v, list):
             parts.extend(str(x) for x in v)
@@ -321,6 +321,8 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
     - logs provenance/mutations for rule-based edits
     """
     _ensure_meta(rec)
+    rec.setdefault("priority", "Medium")
+    rec.setdefault("confidence", "Medium")
     original_publish_date = rec.get("publish_date")
     original_priority = rec.get("priority")
     set_field(rec, "priority_llm", original_priority, source="llm", reason="raw_model_priority")
@@ -563,7 +565,7 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
         return rec
 
     text_parts = []
-    for field in ("evidence_bullets", "key_insights", "strategic_implications"):
+    for field in ("evidence_bullets", "key_insights"):
         v = rec.get(field)
         if isinstance(v, list):
             text_parts.extend(str(x) for x in v)

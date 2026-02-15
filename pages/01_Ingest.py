@@ -179,13 +179,9 @@ def _merge_chunk_records(chunk_records):
         "country_mentions": _dedupe_keep_order(x for r in chunk_records for x in (r.get("country_mentions") or [])),
         "regions_mentioned": _dedupe_keep_order(x for r in chunk_records for x in (r.get("regions_mentioned") or [])),
         "regions_relevant_to_kiekert": _dedupe_keep_order(x for r in chunk_records for x in (r.get("regions_relevant_to_kiekert") or [])),
-        "region_signal_type": next((str(r.get("region_signal_type")).strip() for r in chunk_records if str(r.get("region_signal_type") or "").strip()), "mixed"),
-        "supply_flow_hint": next((str(r.get("supply_flow_hint")).strip() for r in chunk_records if str(r.get("supply_flow_hint") or "").strip()), ""),
-        "priority": next((str(r.get("priority")).strip() for r in chunk_records if str(r.get("priority") or "").strip()), "Medium"),
-        "confidence": next((str(r.get("confidence")).strip() for r in chunk_records if str(r.get("confidence") or "").strip()), "Medium"),
+        "priority": "Medium",
+        "confidence": "Medium",
         "key_insights": _dedupe_keep_order(x for r in chunk_records for x in (r.get("key_insights") or []))[:4],
-        "strategic_implications": _dedupe_keep_order(x for r in chunk_records for x in (r.get("strategic_implications") or []))[:4],
-        "recommended_actions": _dedupe_keep_order(x for r in chunk_records for x in (r.get("recommended_actions") or []))[:6] or None,
         "review_status": "Pending",
         "notes": f"Merged from {len(chunk_records)} chunk extractions.",
     }
@@ -546,7 +542,6 @@ elif is_bulk:
     if run_bulk:
         records = load_records()
         results = []  # list of dicts for summary table
-        new_records = []
         progress = st.progress(0, text="Starting bulk extraction...")
 
         for file_idx, uploaded in enumerate(uploaded_files):
@@ -560,7 +555,7 @@ elif is_bulk:
 
             # Exact-title dedupe against existing + already-processed in this batch
             proposed_title = uploaded.name.strip()
-            all_records_so_far = records + new_records
+            all_records_so_far = records
             dupe = find_exact_title_duplicate(all_records_so_far, proposed_title)
             if dupe:
                 results.append({
@@ -609,7 +604,22 @@ elif is_bulk:
             record_id = new_record_id()
             pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
             rec, save_status = _finalize_record(rec, router_log, record_id, pdf_path, all_records_so_far)
-            new_records.append(rec)
+
+            # Checkpoint persistence: save each successful record immediately.
+            # This avoids losing already-processed files if the run stops mid-batch.
+            try:
+                records.append(rec)
+                overwrite_records(records)
+            except Exception as e:
+                if records and records[-1] is rec:
+                    records.pop()
+                results.append({
+                    "File": uploaded.name,
+                    "Title": rec.get("title", "Untitled"),
+                    "Status": f"Error saving checkpoint: {e}",
+                    "Review": "-",
+                })
+                continue
 
             results.append({
                 "File": uploaded.name,
@@ -617,10 +627,6 @@ elif is_bulk:
                 "Status": save_status,
                 "Review": rec.get("review_status", "?"),
             })
-
-        # Save all new records at once
-        if new_records:
-            overwrite_records(records + new_records)
 
         progress.progress(1.0, text="Done!")
 
