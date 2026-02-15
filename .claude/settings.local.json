@@ -6,7 +6,8 @@
       "Bash(python -m pytest:*)",
       "Bash(.venv/Scripts/python -m pytest --tb=short -q)",
       "Bash(ls:*)",
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

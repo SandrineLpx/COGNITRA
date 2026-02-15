@@ -30,38 +30,45 @@ def _nullable(schema: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def record_response_schema() -> Dict[str, Any]:
-    return {
-        "type": "OBJECT",
-        "properties": {
-            "title": {"type": "STRING"},
-            "source_type": {"type": "STRING", "enum": sorted(ALLOWED_SOURCE_TYPES)},
-            "publish_date": _nullable({"type": "STRING", "pattern": r"^\d{4}-\d{2}-\d{2}$"}),
-            "publish_date_confidence": {"type": "STRING", "enum": sorted(ALLOWED_CONF)},
-            "original_url": _nullable({"type": "STRING"}),
-            "actor_type": {"type": "STRING", "enum": sorted(ALLOWED_ACTOR_TYPES)},
-            "government_entities": {"type": "ARRAY", "items": {"type": "STRING"}},
-            "companies_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}},
-            "mentions_our_company": {"type": "BOOLEAN"},
-            "topics": {
-                "type": "ARRAY",
-                "items": {"type": "STRING", "enum": CANON_TOPICS},
-                "minItems": 1,
-                "maxItems": 3,
-            },
-            "keywords": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 5, "maxItems": 12},
-            "country_mentions": {"type": "ARRAY", "items": {"type": "STRING"}},
-            "regions_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 15},
-            "regions_relevant_to_kiekert": {
-                "type": "ARRAY",
-                "items": {"type": "STRING", "enum": FOOTPRINT_REGIONS},
-            },
-            "evidence_bullets": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
-            "key_insights": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
-            "review_status": {"type": "STRING", "enum": sorted(ALLOWED_REVIEW)},
-            "notes": {"type": "STRING"},
+    properties = {
+        "title": {"type": "STRING"},
+        "source_type": {"type": "STRING", "enum": sorted(ALLOWED_SOURCE_TYPES)},
+        "publish_date": _nullable({"type": "STRING", "pattern": r"^\d{4}-\d{2}-\d{2}$"}),
+        "publish_date_confidence": {"type": "STRING", "enum": sorted(ALLOWED_CONF)},
+        "original_url": _nullable({"type": "STRING"}),
+        "actor_type": {"type": "STRING", "enum": sorted(ALLOWED_ACTOR_TYPES)},
+        "government_entities": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "companies_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "mentions_our_company": {"type": "BOOLEAN"},
+        "topics": {
+            "type": "ARRAY",
+            "items": {"type": "STRING", "enum": CANON_TOPICS},
+            "minItems": 1,
+            "maxItems": 3,
         },
-        "required": REQUIRED_KEYS,
+        "keywords": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 5, "maxItems": 12},
+        "country_mentions": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "regions_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 15},
+        "regions_relevant_to_kiekert": {
+            "type": "ARRAY",
+            "items": {"type": "STRING", "enum": FOOTPRINT_REGIONS},
+        },
+        "evidence_bullets": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
+        "key_insights": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 2, "maxItems": 4},
+        "review_status": {"type": "STRING", "enum": sorted(ALLOWED_REVIEW)},
+        "notes": {"type": "STRING"},
     }
+    # Fields added by postprocess, not the LLM — intentionally absent from schema.
+    _COMPUTED_FIELDS = {"priority", "confidence"}
+    # Guardrail: any REQUIRED_KEY missing from both properties AND the
+    # known-computed set is a bug — fail loud at import time.
+    unexpected = set(REQUIRED_KEYS) - set(properties.keys()) - _COMPUTED_FIELDS
+    if unexpected:
+        raise RuntimeError(
+            f"Schema misalignment: required keys missing in properties: {sorted(unexpected)}"
+        )
+    required = [k for k in REQUIRED_KEYS if k in properties]
+    return {"type": "OBJECT", "properties": properties, "required": required}
 
 
 def call_model(provider: str, prompt: str, schema: Dict[str, Any]) -> str:
