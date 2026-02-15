@@ -19,6 +19,11 @@ from src.postprocess import postprocess_record
 from src.storage import utc_now_iso
 
 AUTO_ORDER = ["gemini", "claude", "chatgpt"]
+_NOISE_HIGH_RATIO = 0.18
+_NOISE_HIGH_LINES = 250
+_NOISE_HIGH_PATTERNS = {"ocr", "table", "header", "footer", "page"}
+_NOISE_LOW_RATIO = 0.08
+_NOISE_LOW_LINES = 80
 
 
 def _nullable(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -193,6 +198,43 @@ def _should_retry_strong(error_message: str) -> bool:
     return any(x in m for x in markers)
 
 
+def choose_extraction_strategy(meta: Dict[str, Any]) -> Dict[str, Any]:
+    raw = max(int(meta.get("raw_chars", 1) or 1), 1)
+    removed = int(meta.get("removed_chars", 0) or 0)
+    removed_ratio = removed / raw
+    removed_lines = int(meta.get("removed_line_count", 0) or 0)
+    chunks_count = int(meta.get("chunks_count", 0) or 0)
+    patterns = {str(p).lower() for p, _ in (meta.get("top_removed_patterns") or [])}
+
+    if removed_ratio > _NOISE_HIGH_RATIO or removed_lines > _NOISE_HIGH_LINES or (patterns & _NOISE_HIGH_PATTERNS):
+        noise_level = "high"
+    elif removed_ratio < _NOISE_LOW_RATIO and removed_lines < _NOISE_LOW_LINES:
+        noise_level = "low"
+    else:
+        noise_level = "normal"
+
+    lite_model = os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
+    strong_model = os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
+    primary_model = strong_model if noise_level == "high" else lite_model
+    fallback_model = strong_model
+    chunked_mode = chunks_count > 1
+    routing_reason = "high_noise_use_strong" if noise_level == "high" else "default_lite_then_strong"
+
+    return {
+        "primary_model": primary_model,
+        "fallback_model": fallback_model,
+        "chunked_mode": chunked_mode,
+        "routing_reason": routing_reason,
+        "routing_metrics": {
+            "noise_level": noise_level,
+            "chunks_count": chunks_count,
+            "removed_ratio": round(removed_ratio, 3),
+            "removed_line_count": removed_lines,
+            "top_removed_patterns": meta.get("top_removed_patterns", []),
+        },
+    }
+
+
 def extraction_prompt(context_pack: str) -> str:
     return (
         "Return JSON only matching the schema. Follow these rules strictly:\n"
@@ -262,7 +304,12 @@ def fix_json_prompt(broken: str, validation_errors: List[str]) -> str:
     )
 
 
-def try_one_provider(provider: str, context_pack: str) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+def try_one_provider(
+    provider: str,
+    context_pack: str,
+    primary_model: Optional[str] = None,
+    fallback_model: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     log: Dict[str, Any] = {
         "provider": provider,
         "attempted_at": utc_now_iso(),
@@ -317,8 +364,8 @@ def try_one_provider(provider: str, context_pack: str) -> Tuple[Optional[Dict[st
         return None, log
 
     # Gemini 2-stage strategy: flash-lite then flash.
-    lite_model = os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
-    strong_model = os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
+    lite_model = primary_model or os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
+    strong_model = fallback_model or os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
     log["model_strategy"] = [lite_model, strong_model]
     log["calls"] = []
 
@@ -390,12 +437,22 @@ def try_one_provider(provider: str, context_pack: str) -> Tuple[Optional[Dict[st
     return None, log
 
 
-def route_and_extract(context_pack: str, provider_choice: str = "auto") -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+def route_and_extract(
+    context_pack: str,
+    provider_choice: str = "auto",
+    primary_model: Optional[str] = None,
+    fallback_model: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     chain = AUTO_ORDER if provider_choice == "auto" else [provider_choice]
     router_log: Dict[str, Any] = {"provider_choice": provider_choice, "providers_tried": [], "fallback_used": False}
 
     for idx, prov in enumerate(chain):
-        rec, log = try_one_provider(prov, context_pack)
+        rec, log = try_one_provider(
+            prov,
+            context_pack,
+            primary_model=primary_model,
+            fallback_model=fallback_model,
+        )
         router_log["providers_tried"].append(log)
         if rec is not None:
             router_log["fallback_used"] = idx > 0

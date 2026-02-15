@@ -1,4 +1,3 @@
-import os
 import streamlit as st
 import pandas as pd
 from collections import Counter
@@ -7,8 +6,8 @@ from src.storage import load_records, new_record_id, overwrite_records, save_pdf
 from src.pdf_extract import extract_text_robust
 from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
-from src.model_router import route_and_extract, extract_single_pass
-from src.postprocess import postprocess_record
+from src.model_router import route_and_extract, extract_single_pass, choose_extraction_strategy
+from src.postprocess import postprocess_record, summarize_rule_impact
 from src.schema_validate import validate_record
 from src.text_clean_chunk import clean_and_chunk
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
@@ -35,6 +34,22 @@ with st.sidebar:
         st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
     if not usage:
         st.caption("No calls recorded yet today.")
+    st.divider()
+    with st.expander("Overrides Applied", expanded=False):
+        run_impact = st.session_state.get("rule_impact_run", {})
+        if run_impact:
+            top_run = sorted(run_impact.items(), key=lambda x: x[1], reverse=True)[:10]
+            st.caption("This run (top rules)")
+            st.json(dict(top_run))
+        else:
+            st.caption("This run: no overrides yet.")
+        today = datetime.utcnow().date()
+        today_summary = summarize_rule_impact(load_records(), date_range=(today, today))
+        if today_summary.get("top_rules"):
+            st.caption("Today (stored records, top rules)")
+            st.json(today_summary.get("top_rules"))
+        else:
+            st.caption("Today: no persisted override metrics.")
 
 uploaded_files = st.file_uploader("Upload PDFs", type=["pdf"], accept_multiple_files=True)
 
@@ -65,25 +80,31 @@ if not has_upload and not manual_override:
 
 # ── Helper functions ──────────────────────────────────────────────────────
 
-# Noise thresholds (tune as needed)
-_NOISE_HIGH_RATIO = 0.18
-_NOISE_HIGH_LINES = 250
-_NOISE_HIGH_PATTERNS = {"ocr", "table", "header", "footer", "page"}
-_NOISE_LOW_RATIO = 0.08
-_NOISE_LOW_LINES = 80
+def _is_valid_iso_date(value):
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except Exception:
+        return False
 
 
-def _classify_noise(meta: dict) -> str:
-    """Classify document noise from clean_and_chunk meta -> 'low' | 'normal' | 'high'."""
-    raw = max(meta.get("raw_chars", 1), 1)
-    ratio = meta.get("removed_chars", 0) / raw
-    lines = meta.get("removed_line_count", 0)
-    patterns = {p.lower() for p, _ in (meta.get("top_removed_patterns") or [])}
-    if ratio > _NOISE_HIGH_RATIO or lines > _NOISE_HIGH_LINES or (patterns & _NOISE_HIGH_PATTERNS):
-        return "high"
-    if ratio < _NOISE_LOW_RATIO and lines < _NOISE_LOW_LINES:
-        return "low"
-    return "normal"
+def _postprocess_with_checks(rec, source_text):
+    before_publish = rec.get("publish_date")
+    rec = postprocess_record(rec, source_text=source_text)
+    if not isinstance(rec.get("_provenance"), dict):
+        rec["_provenance"] = {}
+    if not isinstance(rec.get("_mutations"), list):
+        rec["_mutations"] = []
+    if not isinstance(rec.get("_rule_impact"), dict):
+        rec["_rule_impact"] = {}
+    if _is_valid_iso_date(before_publish) and rec.get("publish_date") != before_publish:
+        raise ValueError("postprocess changed existing valid publish_date")
+    run_impact = st.session_state.setdefault("rule_impact_run", {})
+    for rule, count in rec.get("_rule_impact", {}).items():
+        run_impact[rule] = int(run_impact.get(rule, 0)) + int(count or 0)
+    return rec
 
 
 def _dedupe_keep_order(values):
@@ -247,6 +268,9 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
     cleaned = clean_and_chunk(extracted_text)
     cleaned_text = cleaned["clean_text"]
     cleaned_chunks = cleaned["chunks"]
+    cleaned_meta = cleaned.get("meta", {})
+    strategy = choose_extraction_strategy(cleaned_meta)
+    effective_chunked = bool(strategy.get("chunked_mode"))
 
     watch_terms = []
     topic_terms = [
@@ -254,13 +278,10 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
         "latch", "door handle", "supplier", "production", "recall", "regulation",
     ]
 
-    if use_chunked and cleaned_chunks:
-        cleaned_meta = cleaned["meta"]
-        noise = _classify_noise(cleaned_meta)
-        lite_model = os.getenv("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite")
-        strong_model = os.getenv("GEMINI_MODEL_STRONG", "gemini-2.5-flash")
-        initial_model = strong_model if noise == "high" else lite_model
-        used_lite = (initial_model == lite_model)
+    if effective_chunked and cleaned_chunks:
+        initial_model = strategy["primary_model"]
+        strong_model = strategy["fallback_model"]
+        used_lite = initial_model != strong_model
 
         # Phase 1: all chunks with initial model
         chunk_records = {}   # idx -> rec
@@ -293,10 +314,9 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
         router_log = {
             "provider_choice": provider_choice,
             "chunked_mode": True,
-            "noise_level": noise,
+            "routing_reason": strategy.get("routing_reason"),
+            "routing_metrics": strategy.get("routing_metrics", {}),
             "initial_model": initial_model,
-            "removed_ratio": round(cleaned_meta.get("removed_chars", 0) / max(cleaned_meta.get("raw_chars", 1), 1), 3),
-            "removed_line_count": cleaned_meta.get("removed_line_count", 0),
             "chunks_total": len(cleaned_chunks),
             "chunks_succeeded_initial": len(cleaned_chunks) - len(failed_idxs),
             "chunks_repaired": len(chunk_records) - (len(cleaned_chunks) - len(failed_idxs)),
@@ -305,7 +325,7 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
         }
         if override_url and not rec.get("original_url"):
             rec["original_url"] = override_url
-        rec = postprocess_record(rec, source_text=cleaned_text)
+        rec = _postprocess_with_checks(rec, source_text=cleaned_text)
         ok, errs = validate_record(rec)
         if not ok:
             return None, router_log, f"Failed: validation errors: {'; '.join(errs[:3])}"
@@ -318,14 +338,22 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
             user_provided_url=override_url,
         )
         context_pack = selected["context_pack"]
-        rec, router_log = route_and_extract(context_pack, provider_choice=provider_choice)
+        rec, router_log = route_and_extract(
+            context_pack,
+            provider_choice=provider_choice,
+            primary_model=strategy["primary_model"],
+            fallback_model=strategy["fallback_model"],
+        )
+        router_log["routing_reason"] = strategy.get("routing_reason")
+        router_log["routing_metrics"] = strategy.get("routing_metrics", {})
+        router_log["chunked_mode"] = False
         if rec is None:
             return None, router_log, "Failed: all models failed strict validation"
 
         if override_url and not rec.get("original_url"):
             rec["original_url"] = override_url
         try:
-            rec = postprocess_record(rec, source_text=context_pack)
+            rec = _postprocess_with_checks(rec, source_text=context_pack)
         except Exception:
             pass
 
@@ -673,7 +701,7 @@ elif manual_override and has_paste:
             if original_url_input.strip() and not rec.get("original_url"):
                 rec["original_url"] = original_url_input.strip()
             try:
-                rec = postprocess_record(rec, source_text=selected["context_pack"])
+                rec = _postprocess_with_checks(rec, source_text=selected["context_pack"])
             except Exception:
                 pass
             rec["title"] = title.strip()

@@ -1,16 +1,10 @@
-Below is a starter **technical report draft** you can keep updating as you build. I wrote it to tell the full story (problem → design → build → evaluation → learnings), and I embedded placeholders so you can drop in screenshots, metrics, and implementation details later.
-
-At the end, I list targeted questions to help you decide what else to include.
-
----
-
-# Technical Report Draft
+# Technical Report
 
 **Project:** Minimal-Token AI Market Intelligence for Automotive Closure Systems
 **Course:** MSIS 549 – Generative AI Technologies
 **Author:** Sandrine Lepesqueux
-**Date:** [fill]
-**Version:** 0.1 (living document)
+**Date:** February 14, 2026
+**Version:** 1.0
 
 ## Executive Summary
 
@@ -229,8 +223,6 @@ Each record includes 2–4 evidence bullets:
 
 ## 7. Implementation Details
 
-*(Fill this section as you build.)*
-
 ### 7.1 Technology stack
 
 * **UI:** Streamlit (8-page multi-page app)
@@ -265,35 +257,50 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
    * Deduplicate paragraph blocks
    * Split into overlapping chunks (~9K chars, 800-char overlap) with detected-title header
    * Surface removal diagnostics (removed line count, pattern breakdown) in UI
-5. **Two extraction modes** (user-selectable):
-   * **Chunked mode (default for long/noisy docs):** each chunk extracted independently via model, results merged with majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, and short-bullet filtering
-   * **Single-context mode:** score paragraphs (watchlist, keyword, country hits), build bounded context pack, single model call
-6. **Two-pass model strategy (Gemini):**
-   * **Pass 1 — Flash-Lite:** fast, cheap extraction for most documents
-   * **Quality gate:** schema validation + heuristic checks
-   * **Pass 2 — Flash (fallback):** only invoked when pass 1 fails; repair prompt includes specific validation errors
-   * Token usage logged per call (model, prompt/output/total tokens)
+5. **Noise classification** (`_classify_noise()` in `pages/01_Ingest.py`):
+   * Uses cleanup meta (removed_ratio, removed_line_count, top_removed_patterns) to classify document as low/normal/high noise
+   * Thresholds: high if removed_ratio > 0.18 or removed_lines > 250 or OCR/table/header patterns detected; low if removed_ratio < 0.08 and removed_lines < 80
+6. **Two extraction modes** (user-selectable):
+   * **Chunked mode (default for long/noisy docs):** meta-based model routing with two-phase chunk repair:
+     * **Model selection:** high-noise → Flash directly (skip Flash-Lite); low/normal-noise → Flash-Lite
+     * **Phase 1:** all chunks extracted with initial model via `extract_single_pass()`
+     * **Phase 2:** only failed chunks retried with stronger model (if Flash-Lite was initial); successful chunks untouched
+     * **Merge:** majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, short-bullet filtering
+   * **Single-context mode:** score paragraphs (watchlist, keyword, country hits), build bounded context pack, single model call with two-pass strategy (Flash-Lite → Flash fallback)
 7. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, infer publish_date and source_type from text patterns, remove invalid regulator entities)
-8. Validate JSON against schema; if invalid, repair prompt with error details → revalidate
-9. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed
-10. Display token usage summary (model used, prompt/output/total tokens)
-11. Render Intelligence Brief from JSON (deterministic, no LLM call)
-12. Human review edits + approve
-13. **Weekly briefing (separate workflow):**
-    * Select candidates from last N days (exclude duplicates by default)
+8. **Deterministic priority classification** (`_boost_priority()` in `src/postprocess.py`):
+   * Upgrades to High when: `mentions_our_company` is true, footprint region + closure topic/keyword, or footprint region + key OEM customer (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, etc.)
+   * LLM prompt also includes priority criteria (rule 8) for initial classification
+9. Validate JSON against schema; if invalid, repair prompt with error details → revalidate
+10. **Auto-approve heuristic:** confidence not Low + publish_date present + source_type not Other + 2+ evidence bullets → auto-Approved; otherwise Pending
+11. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed; update API quota tracker
+12. Display token usage summary (model used, prompt/output/total tokens, noise level, chunks succeeded/repaired/failed)
+13. Render Intelligence Brief from JSON (deterministic, no LLM call)
+14. Human review: Pending records require manual approval; Quick Approve with auto-advance to next unreviewed record
+15. **Bulk PDF ingest** (separate mode for multiple files):
+    * Multi-file uploader with progress bar and per-file extraction loop
+    * Pre-run quota estimate (worst-case API calls vs remaining quota)
+    * Deduplication checks filename and title against existing records and within batch
+    * Summary table showing saved/skipped/failed counts
+16. **Weekly briefing (separate workflow):**
+    * Select candidates from last N days (configurable, default 30, max 90; excludes duplicates by default)
     * Prioritize share-ready items (High priority + High confidence)
-    * Render Markdown brief + executive email template
+    * **Deterministic brief:** Markdown brief + executive email template (zero LLM cost)
+    * **AI-generated executive brief:** LLM synthesis (Gemini Flash) across up to 20 selected records following structured executive report template; token usage displayed
     * Analyst can select/deselect items before sharing
 
 ### 7.3 Token control strategy
 
 * Duplicate detection is deterministic (no LLM calls)
 * Fixed cap on context pack size (12K chars) and chunk size (9K chars)
-* **Two-pass model strategy:** Flash-Lite handles easy docs cheaply; Flash is invoked only on failure, so most documents cost fewer tokens
-* One LLM call per unique document in the common case (plus optional single repair call on the stronger model)
-* In chunked mode: one call per chunk, but chunks are bounded and overlapping, so total tokens scale linearly with document length rather than exploding
+* **Meta-based model routing:** noise classification from cleanup meta routes high-noise docs directly to Flash (avoiding wasted Flash-Lite calls that would fail); low/normal-noise docs start on Flash-Lite
+* **Two-phase chunk repair:** Phase 1 runs all chunks on the chosen model; Phase 2 retries only failed chunks with the stronger model — successful chunks are never re-extracted
+* One LLM call per unique document in the common case (single-context mode); in chunked mode, one call per chunk but only failures escalate
 * No second call for "Intelligence Brief" (rendered deterministically from JSON)
-* No additional calls for deduplication or weekly briefing (all deterministic post-processing)
+* Deduplication, priority classification, and deterministic weekly briefing require zero LLM calls
+* **AI-generated executive brief** is the only multi-record LLM call (one Gemini Flash call for up to 20 records); used only on analyst request
+* **API quota tracking** (`src/quota_tracker.py`): per-model RPD (Requests Per Day) usage persisted to `data/api_usage.json`, resets midnight Pacific Time (matching Google's billing window); sidebar shows live usage/remaining with progress bars; smart chunk mode recommendations warn when chunked mode would consume multiple calls on short documents
+* Gemini free-tier limits (as of Feb 2026): Flash-Lite = 10 RPM, 20 RPD, 250K TPM; Flash = 5 RPM, 20 RPD, 250K TPM — both $0 cost
 * Per-call token usage is logged and displayed in the Ingest UI for cost tracking
 
 ### 7.4 Error handling and resilience
@@ -388,6 +395,60 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Cost impact:** For a typical batch of 10 documents, approximately 7-8 complete on Flash-Lite and 2-3 escalate to Flash. This reduces average token cost compared to running Flash on every document while maintaining extraction quality on difficult inputs.
 
+#### 7.5.5 Priority classification — prompt rules + deterministic boost
+
+**Problem:** The model defaulted all records to Medium priority because no priority criteria were defined in the extraction prompt. This broke the Priority Distribution chart (all bars were "Medium"), the share-ready filtering in Weekly Brief (nothing qualified as High), and the overall value of the priority signal for analysts.
+
+**Approach chosen:** A two-layer priority classification system:
+
+1. **LLM prompt rule (rule 8 in `extraction_prompt()`):** Defines High/Medium/Low with Kiekert-specific criteria:
+   - **High:** directly impacts Kiekert operations, footprint regions (India, China, Europe, Africa, US, Mexico, Thailand), closure technology (latches, door systems, handles, digital key, smart entry, cinch), regulatory changes affecting automotive suppliers, major M&A/plant closures/production shifts involving direct competitors or key OEM customers, or `mentions_our_company` is true.
+   - **Low:** tangential mentions with no direct supplier or closure-tech relevance, broad macroeconomic news, consumer reviews, motorsports.
+   - **Medium:** everything else. "When in doubt between High and Medium, prefer High if any footprint region or closure-tech keyword appears."
+2. **Deterministic postprocess override (`_boost_priority()` in `src/postprocess.py`):** Runs after model extraction and upgrades to High when hard signals are present, regardless of what the model output:
+   - Signal 1: `mentions_our_company` is true
+   - Signal 2: footprint region + "Closure Technology & Innovation" topic
+   - Signal 3: footprint region + closure keyword (latch, door system, handle, digital key, smart entry, cinch, striker) found in title/evidence/insights
+   - Signal 4: footprint region + key OEM customer (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes, Nissan, Honda, Renault, Tata, Mahindra, BYD, Geely, Chery, Great Wall)
+
+**Why this works:** The prompt gives the model context to make reasonable initial priority judgments. The deterministic postprocess acts as a safety net — it catches cases where the model underestimates priority because it does not know Kiekert's specific business context (e.g., which OEMs are customers, which regions are manufacturing footprint). This two-layer approach ensures that business-critical signals are never missed, even when the model defaults to Medium.
+
+**Note:** Existing records ingested before v4.3 retain their original priority and need re-ingest to benefit from the new classification.
+
+#### 7.5.6 Meta-based model routing + per-chunk repair
+
+**Problem:** With 20 RPD (Requests Per Day) on both Flash-Lite and Flash under Gemini's free tier, every API call counts. The original chunked extraction ran each chunk through the full two-pass strategy (Flash-Lite → Flash) independently. For noisy documents, Flash-Lite consistently failed on every chunk, burning 2 calls per chunk (Flash-Lite attempt + Flash repair) — wasting half the daily quota on expected failures.
+
+**Approach chosen:** Use cleanup meta from `clean_and_chunk()` to choose the initial model upfront, then run all chunks with that model and batch-repair only the failures:
+
+1. **Noise classification (`_classify_noise()` in `pages/01_Ingest.py`):** Examines `removed_ratio`, `removed_line_count`, and `top_removed_patterns` from the cleanup stage. Classifies as:
+   - **high:** removed_ratio > 0.18, or removed_lines > 250, or OCR/table/header/footer/page patterns detected → route to Flash directly
+   - **low:** removed_ratio < 0.08 and removed_lines < 80 → route to Flash-Lite
+   - **normal:** everything else → route to Flash-Lite
+2. **Phase 1 — initial model:** All chunks are extracted with the chosen model via `extract_single_pass()` (one-shot extraction, no internal fallback).
+3. **Phase 2 — repair only failures:** Only chunks that failed Phase 1 are retried with the stronger model (Flash). Chunks that succeeded in Phase 1 are untouched. If Flash-Lite was not the initial model (i.e., high-noise routed directly to Flash), Phase 2 is skipped entirely.
+4. **Router logging:** Each chunk log includes `phase` ("initial" or "repair") and `chunk_id`. The aggregate router_log includes `noise_level`, `initial_model`, `removed_ratio`, `chunks_succeeded_initial`, `chunks_repaired`, `chunks_failed_final`.
+
+**Why this works:** Clean documents (the majority) complete on Flash-Lite in Phase 1 with zero wasted calls. Noisy documents skip Flash-Lite entirely, saving the wasted attempt. Only genuinely ambiguous chunks trigger the repair path. In practice, this cuts API call consumption by 30-50% compared to the per-chunk two-pass approach while maintaining the same extraction quality.
+
+**Non-chunked path unchanged:** Single-context documents still use `route_and_extract()` with its built-in two-pass (Flash-Lite → Flash). Meta-routing has no benefit for single calls.
+
+#### 7.5.7 API quota tracking + smart chunk recommendations
+
+**Problem:** The Gemini free tier imposes a hard 20 RPD limit per model (Flash-Lite and Flash each). With no visibility into consumption, analysts could unknowingly exhaust their daily quota mid-batch. Chunked mode on short documents wasted calls unnecessarily (a 5K-char article produces 1 chunk, so chunked mode adds overhead with no quality benefit).
+
+**Approach chosen:** A lightweight file-based quota tracker (`src/quota_tracker.py`) with UI integration:
+
+1. **Persistent tracking:** Each API call increments a per-model counter in `data/api_usage.json`. The tracker checks the stored date against the current Pacific Time date; if different, counts reset to zero (matching Google's midnight PT billing window).
+2. **Sidebar display:** The Ingest page sidebar shows live per-model usage/remaining with progress bars (e.g., "flash-lite: 8/20 used (12 left)").
+3. **Smart chunk mode recommendations:**
+   - If the document produces 1 chunk and chunked mode is ON: info message ("Clean article — chunked mode adds no benefit here")
+   - If the document produces N > 1 chunks and chunked mode is ON: warning with call count vs remaining quota
+   - If the document produces N > 1 chunks and chunked mode is OFF: warning that partial text will be sent
+4. **Bulk mode quota estimate:** Before running bulk extraction, shows worst-case API call count (files × ~3 chunks) vs remaining quota.
+
+**Why this works:** The tracker is zero-overhead (simple JSON file, no database) and resets deterministically. The sidebar display makes quota visible at all times. Smart recommendations help analysts make informed decisions about when to use chunked mode vs single-context mode, avoiding unnecessary API consumption on clean articles.
+
 ## 8. Evaluation
 
 *(Start simple; add rigor as you can.)*
@@ -453,6 +514,13 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Two-pass model strategy** (Flash-Lite → Flash) reduced average token cost while maintaining extraction quality on hard documents. Most documents complete on the cheaper model; only failures escalate.
 * **Publisher-vs-cited-source prompt rule** was the single highest-impact prompt change — it fixed the most common misclassification (S&P articles being tagged as "Reuters" because Reuters was cited in the body).
 * **Token usage logging** provided visibility into cost per document and made it easy to identify which documents triggered the stronger model, enabling targeted improvements to the cleanup pipeline.
+* **AI-generated Weekly Executive Brief** (v3.5) transformed the flagship deliverable from a static list of titles into a cross-record LLM synthesis following the executive report template. This is the single most valuable output for executive stakeholders, and it requires only one additional LLM call (Gemini Flash) for up to 20 records.
+* **Redesigned review UX** (v3.6-3.7) dramatically reduced review friction: title-first expandable cards with inline approve/review buttons, batch actions, Next/Previous navigation, and Quick Approve with auto-advance eliminated the need to open each record individually. The simplified review model (Pending/Approved/Disapproved with auto-approve) matches the single-analyst workflow.
+* **Bulk PDF ingest** (v3.8) enabled processing multiple articles in one session with progress tracking, per-file deduplication, and summary tables — critical for weekly batches of 10-20 articles from premium sources.
+* **Trend analysis charts** (v4.0-4.1) added the temporal dimension that makes a CI tool useful for spotting change over time: Topic Momentum with weighted counting and Emerging/Expanding/Fading/Stable classification, Top Company Mentions with canonicalization, and Priority Distribution with High-Ratio and Volatility Index. All computed deterministically (zero token cost) via pandas aggregations and Altair visualizations.
+* **Priority classification** (v4.3) — the two-layer approach (prompt rules + deterministic `_boost_priority()` postprocess) ensured that business-critical signals are never missed even when the model underestimates priority. The deterministic boost acts as a safety net that catches footprint-region + closure-tech or key-OEM combinations.
+* **Meta-based model routing** (v4.5) cut API consumption by 30-50% compared to the per-chunk two-pass approach. Noisy documents skip Flash-Lite entirely (avoiding wasted calls), while clean documents complete on Flash-Lite in a single pass. This was essential for staying within the 20 RPD free-tier limit during daily workflows.
+* **API quota tracking** (v4.4) with smart chunk recommendations gave analysts the visibility to manage their daily API budget. The sidebar progress bars and pre-run estimates prevent mid-batch quota exhaustion.
 
 ### 10.2 What was challenging
 
@@ -465,34 +533,38 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Publisher-vs-cited-source confusion** was a persistent extraction error that required explicit prompt rules to fix. The model would see "Reuters" in an S&P article body and set source_type="Reuters" despite S&P being the publisher. This was not fixable by postprocessing alone — it required changing the extraction prompt.
 * **Balancing cleanup aggressiveness:** too-aggressive text cleaning risks removing legitimate content (e.g., short lines that are actually article subheadings). The safety fallback (preserve original if cleaned text drops below 2K chars) and the diagnostic display in the UI help the analyst catch over-cleaning.
 * **Chunk boundary effects:** when a document is split into chunks, entities or dates that span a chunk boundary can be missed. The 800-char overlap mitigates this but does not eliminate it entirely.
+* **Priority defaulting to Medium:** without explicit priority criteria in the prompt, the model defaulted every record to "Medium" — a safe but useless classification. Fixing this required both prompt-side rules (defining what High/Medium/Low mean for Kiekert) and code-side deterministic overrides. The lesson is that business-specific classifications need explicit criteria; the model cannot infer domain-specific priority without guidance.
+* **API rate limits on free tier:** the Gemini free tier's 20 RPD per model constraint required rethinking the entire chunked extraction approach. The original per-chunk two-pass strategy (Flash-Lite → Flash for each chunk) could consume 6-8 calls for a single multi-chunk document. Meta-based routing and two-phase repair were necessary to stay within budget.
+* **Weighted counting for trend charts:** naive topic counting double-counts multi-topic records, inflating signals for broadly-tagged articles. Implementing 1/n weighted counting per topic (where n is the number of topics on a record) required restructuring the chart data pipeline and adopting Altair for interactive visualizations with classification labels.
+* **UTC-aware datetime handling:** mixing timezone-aware (from storage timestamps) and timezone-naive (from date inputs) datetimes caused Dashboard crashes. Required systematic UTC normalization across Dashboard, Inbox, and Weekly Brief pages.
 
 ### 10.2 Iterations and scope control (recommended addition)
 Early in development, the project included prototype scripts that generated narrative summaries and weekly briefs directly from raw text. During implementation, these were intentionally replaced with a JSON-first, schema-validated pipeline aligned with the project specification. This change improved reliability (consistent fields and controlled vocabularies), reduced hallucination risk (evidence bullets + validation), and made token usage more predictable (bounded context pack + one-call extraction in the common case). The final system therefore prioritizes structured intelligence records as the primary artifact, and renders human-readable briefs deterministically from those records rather than relying on additional model calls.
 
-Optional sentence if you want to be explicit:
 This iteration also reduced repository complexity by removing scripts that were no longer aligned with the final architecture.
 
 ### 10.3 Future improvements
 
-* Add retrieval/chunking to improve evidence precision (e.g., retrieve nearest chunks for specific claims)
 * Expand watchlist and synonyms gradually based on real analyst overrides
 * Tune similarity threshold and deduplication criteria based on analyst feedback from real workflows
-* Build reporting dashboard showing dedup rates and publisher distribution trends over time
-* Integrate with Power BI for interactive executive dashboards
+* Integrate with Power BI for interactive executive dashboards (CSV export already supports this)
 * Extend publisher scoring with recency and completeness weighting for time-sensitive events
 * Add earnings analysis module for financial signal extraction
 * Integrate with enterprise tools (SharePoint/Teams) for scheduled email dispatch as Phase 2
+* Move to Gemini paid tier when daily volume exceeds 20 RPD; the quota tracker already supports custom limits via `set_quota()`
+* Add re-ingest capability to apply updated priority rules and postprocess logic to existing records without re-extracting from the model
+* Explore embedding-based duplicate detection for better cross-language and paraphrase matching
 
 ## 11. Conclusion
 
-This project demonstrates that a minimal-token GenAI workflow can deliver real business value by converting unstructured automotive content into structured, evidence-backed intelligence. The solution is designed to scale through consistency (controlled vocabularies), reliability (validation + evidence), and adoption (human-in-the-loop review), while keeping cost predictable (one model call per document).
+This project demonstrates that a minimal-token GenAI workflow can deliver real business value by converting unstructured automotive content into structured, evidence-backed intelligence. The solution is designed to scale through consistency (controlled vocabularies), reliability (validation + evidence), and adoption (human-in-the-loop review), while keeping cost predictable through meta-based model routing, API quota tracking, and deterministic processing for all non-extraction workflows. The AI-generated Weekly Executive Brief provides the flagship deliverable — cross-record synthesis following a structured executive report template — while trend analysis charts enable analysts to spot temporal patterns without additional LLM cost.
 
 ---
 
-# Implementation Summary (v3.4)
+# Implementation Summary (v4.5)
 
-**Version:** 3.4
-**Completion Date:** February 13, 2026
+**Version:** 4.5
+**Completion Date:** February 14, 2026
 
 ## Key Features Delivered
 
@@ -502,62 +574,106 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
    - Overlapping model-ready chunks (~9K chars, 800-char overlap) with detected-title propagation
    - Full removal diagnostics (line count, pattern breakdown) surfaced in Ingest UI
 
-2. **Two-Pass Model Strategy** (`src/model_router.py`)
-   - Pass 1: Gemini Flash-Lite (cheap, fast) for most documents
-   - Quality gate: schema validation + heuristic checks
-   - Pass 2: Gemini Flash (fallback) only on validation/quality failure
-   - Per-call token usage logging (prompt/output/total tokens, model name)
-   - Selective escalation: only schema/structural errors trigger strong-model retry
+2. **Meta-Based Model Routing + Per-Chunk Repair** (`src/model_router.py`, `pages/01_Ingest.py`)
+   - Noise classification from cleanup meta (removed_ratio, line count, pattern types): low/normal → Flash-Lite, high → Flash directly
+   - `extract_single_pass()`: one-shot extraction with specific model, no internal fallback
+   - Phase 1: all chunks on initial model; Phase 2: retry only failed chunks with stronger model
+   - Router log: noise_level, initial_model, removed_ratio, chunks_succeeded_initial, chunks_repaired, chunks_failed_final
+   - Non-chunked path: original two-pass strategy (Flash-Lite → Flash) via `route_and_extract()` preserved for single-context documents
 
-3. **Hardened Extraction Prompt**
+3. **Hardened Extraction Prompt** (8 numbered rules)
    - Publisher-vs-cited-source rules (prevents S&P articles being tagged as "Reuters")
    - Strict date normalization (multiple patterns → YYYY-MM-DD)
    - Evidence bullet length cap (25 words max per bullet)
    - List deduplication and normalization instructions
+   - **Priority classification rules** (rule 8): High/Medium/Low with Kiekert-specific criteria (footprint regions, closure tech, key OEMs, regulatory impact)
    - Repair prompt includes specific validation errors for targeted fixes
 
-4. **Chunked Extraction Mode** (`pages/01_Ingest.py`)
+4. **Priority Classification** (`src/postprocess.py`)
+   - Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
+   - Runs after model extraction as safety net for business-critical signals
+
+5. **Chunked Extraction with Merge** (`pages/01_Ingest.py`)
    - Each cleaned chunk extracted independently via model
    - Results merged: majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, short-bullet filtering
    - Handles long/noisy documents that exceed single-context limits
 
-5. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
+6. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
    - Exact title matching (blocking at ingest)
    - Fuzzy story detection (threshold 0.88)
    - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, ... Other=50)
    - Confidence and completeness scoring for tie-breaking
 
-6. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
-   - Candidate selection from last N days (auto-excludes duplicates)
+7. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
+   - Candidate selection from last N days (configurable, default 30, max 90; auto-excludes duplicates)
    - Share-ready detection (High priority + High confidence)
-   - Markdown brief + executive email template generation
+   - Deterministic Markdown brief + executive email template generation
+   - **AI-generated Weekly Executive Brief:** LLM synthesis (Gemini Flash) across up to 20 selected records following structured executive report template (exec summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions); token usage displayed
    - Analyst-driven item selection with one-click suggestions
 
-7. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
-   - Standalone JSONL deduplication with CSV export
-   - Diagnostic stats (duplicate rate, canonical count)
-   - Supports large datasets outside Streamlit UI
+8. **Bulk PDF Ingest** (`pages/01_Ingest.py`)
+   - Multi-file uploader with progress bar and per-file extraction loop
+   - Deduplication checks filename and extracted title against existing records and within the batch
+   - Summary table showing saved/skipped/failed counts per file
+   - Pre-run quota estimate (worst-case API calls vs remaining quota)
 
-8. **Streamlit Integration**
-   - Dashboard: canonical/all-records toggle with analytics
-   - Export/Admin: bulk export button + metrics dashboard
-   - 7-page app (Home, Ingest, Inbox, Record, Dashboard, Weekly Brief, Export/Admin)
-   - Token usage display after each ingest (model, prompt/output/total)
-   - Cleanup diagnostics display (removed lines, pattern breakdown)
+9. **API Quota Tracker** (`src/quota_tracker.py`)
+   - Per-model RPD usage persisted to `data/api_usage.json`; resets midnight Pacific Time
+   - Sidebar progress bars showing live per-model usage/remaining
+   - Smart chunk mode recommendations: warns when chunked mode is unnecessary or when calls will exceed remaining quota
+   - Supports custom quota overrides via `set_quota()`
 
-9. **Testing & Validation** (`test_scenarios.py`)
-   - 25+ test cases covering all workflows
-   - Publisher ranking hierarchy validation
-   - Weekly briefing logic verification
-   - Exact and fuzzy duplicate detection tests
+10. **Trend Analysis Dashboard** (`pages/04_Dashboard.py`)
+    - **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
+    - **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
+    - **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
+    - Canonical/all-records toggle for all analytics
+    - Unit-testable helpers: `weighted_explode`, `explode_list_column`, `classify_topic_momentum`, `canonicalize_company`, `week_start`, `get_effective_date`
+
+11. **Redesigned Review UX** (`pages/02_Inbox.py`, `pages/03_Record.py`)
+    - Inbox: title-first expandable cards with inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
+    - Record: Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
+    - Simplified review model: Pending/Approved/Disapproved with auto-approve heuristic at ingest
+    - Legacy status normalization ("Not Reviewed"/"Reviewed" → "Pending")
+
+12. **Original Documents Library** (`pages/07_Documents.py`)
+    - Filterable document index (date range, topic, company, review status, priority, text search)
+    - Link fallback chain: `original_url` > `source_pdf_path` > "No link"
+    - Expandable cards with evidence bullets, notes, and router usage summary
+    - One-click navigation to full Record page
+
+13. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
+    - Standalone JSONL deduplication with CSV export
+    - Diagnostic stats (duplicate rate, canonical count)
+    - Supports large datasets outside Streamlit UI
+
+14. **Testing & Validation** (`test_scenarios.py`)
+    - 25+ test cases covering all workflows
+    - Publisher ranking hierarchy validation
+    - Weekly briefing logic verification
+    - Exact and fuzzy duplicate detection tests
 
 ## Technical Stack
 
-- **Models:** Gemini 2.5-flash-lite (primary) + Gemini 2.5-flash (fallback) via `google-genai` with structured JSON schema
-- **UI:** Streamlit (7-page multi-page app)
-- **Storage:** JSONL (JSON Lines format)
+- **Models:** Gemini 2.5-flash-lite (primary, 10 RPM / 20 RPD) + Gemini 2.5-flash (fallback/repair/AI brief, 5 RPM / 20 RPD) via `google-genai` with structured JSON schema; both $0 on free tier
+- **UI:** Streamlit (8-page multi-page app)
+- **Charting:** Altair (Topic Momentum interactive charts), matplotlib (other charts), pandas aggregations
+- **Storage:** JSONL (JSON Lines format) + `data/api_usage.json` for quota tracking
 - **Language:** Python 3.9+
-- **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, google-genai, pytest
+- **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, altair, google-genai, pytest
+
+## Pages
+
+| # | Page | File | Purpose |
+|---|------|------|---------|
+| 1 | Home | `Home.py` | Landing page with project overview |
+| 2 | Ingest | `pages/01_Ingest.py` | Single + bulk PDF upload, extraction, noise routing, quota display |
+| 3 | Inbox | `pages/02_Inbox.py` | Title-first cards, inline approve, batch actions, newest-first sort |
+| 4 | Record | `pages/03_Record.py` | Detail view, edit fields, Next/Previous, Quick Approve |
+| 5 | Dashboard | `pages/04_Dashboard.py` | Trend charts, canonical toggle, topic/company/priority analytics |
+| 6 | Weekly Brief | `pages/05_Weekly_Brief.py` | Candidate selection, deterministic + AI-generated briefs, email template |
+| 7 | Export/Admin | `pages/06_Export_Admin.py` | Bulk CSV/JSONL export, dedup metrics |
+| 8 | Documents | `pages/07_Documents.py` | Source file library with filters and evidence previews |
 
 ---
 
@@ -565,37 +681,40 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ## A) Product & Scope
 
-- **MVP features:** PDF upload, text paste, noisy-PDF cleanup, chunked extraction, duplicate detection, weekly briefing, executive email generation
+- **MVP features:** PDF upload (single + bulk), text paste, noisy-PDF cleanup, chunked extraction with meta-based routing, duplicate detection, weekly briefing (deterministic + AI-generated), executive email generation, trend analysis dashboard, original documents library
 - **Duplicate detection:** Exact title block + similar story auto-ranking by source quality
 - **Deduplication logic:** Publisher ranking (S&P > Bloomberg > Reuters > ... > Other) + confidence + completeness
+- **Priority classification:** LLM prompt rules + deterministic `_boost_priority()` postprocess with 4 signal checks
 
 ## B) Technical Choices
 
-- **Model strategy:** Two-pass (Flash-Lite → Flash) for cost-efficient extraction with quality escalation
+- **Model strategy:** Meta-based routing (noise classification → model selection) + two-phase chunk repair (Phase 1 all chunks → Phase 2 repair failures only); single-context path uses two-pass (Flash-Lite → Flash)
 - **Cleanup:** Deterministic noisy-PDF cleaning before model calls (not relying on model to ignore noise)
 - **Chunking:** Overlapping chunks for long documents with per-chunk extraction and merge
-- **UI:** Streamlit 7-page app for lightweight, interactive workflows
+- **Quota management:** File-based RPD tracker with midnight PT reset, sidebar display, smart chunk recommendations
+- **UI:** Streamlit 8-page app for lightweight, interactive workflows
+- **Charting:** Altair for interactive Topic Momentum; matplotlib + pandas for other charts
 - **Storage:** JSONL for simplicity and scalability without database overhead
 
 ## C) Evaluation
 
 - **Test coverage:** 25+ scenario tests (duplicate detection, ranking, briefing)
-- **Quality gates:** Schema validation, evidence requirement, review gating, duplicate suppression
-- **Token tracking:** Per-call usage logging for cost monitoring and optimization
+- **Quality gates:** Schema validation, evidence requirement, review gating (auto-approve + manual), duplicate suppression, priority classification
+- **Token tracking:** Per-call usage logging + per-model RPD quota tracking for cost monitoring and optimization
 - **Regression prevention:** Comprehensive test suite for all new features
 
 ## D) Evidence & Trust
 
 - **Evidence source:** Quote fragments with schema validation, URL provenance via HITL input
-- **Hallucination mitigation:** noisy-PDF cleanup (cleaner inputs → fewer hallucinations), URL captured as manual input (not model extraction), publisher-vs-cited-source prompt rules, duplicates prevent repeated signals, evidence + validation + review gating
+- **Hallucination mitigation:** noisy-PDF cleanup (cleaner inputs → fewer hallucinations), URL captured as manual input (not model extraction), publisher-vs-cited-source prompt rules, duplicates prevent repeated signals, evidence + validation + review gating, priority classification with deterministic safety net
 
 ## E) Reporting
 
 - **Exports:** CSV (canonical and all) ready for Power BI; JSONL (canonical + dups) for analysis
-- **In-app:** Dashboard with filters, Weekly Brief with email draft, Admin metrics, token usage display
+- **In-app:** Dashboard with trend analysis charts (Topic Momentum, Company Mentions, Priority Distribution), Weekly Brief with deterministic + AI-generated executive briefs, Original Documents library, Admin metrics, token usage display, quota sidebar
 - **CLI:** Standalone bulk deduplication script with diagnostic output
 
 ---
 
-**Report version:** 0.3
-**Status:** Production MVP complete with two-pass model strategy, noisy-PDF cleaning, and chunked extraction; ready for deployment and evaluation
+**Report version:** 1.0
+**Status:** Production MVP complete with meta-based model routing, per-chunk repair, priority classification, API quota tracking, trend analysis dashboard, AI-generated executive briefs, bulk PDF ingest, and original documents library; ready for deployment and evaluation
