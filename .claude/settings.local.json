@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(git add:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: multi-provider AI brief, dashboard fixes, Admin page renumber\n\n- Weekly Brief: add provider selector \\(gemini/claude/chatgpt\\), web\n  coherence check toggle, and model override input\n- briefing.py: route synthesize_weekly_brief_llm by provider with\n  web_check and model_override params\n- model_router.py: add Google Search tool support in _call_gemini_text\n  via use_google_search param\n- Dashboard: fix exclude_from_brief crash when column missing, apply\n  _safe_list consistently in topic filter and heatmap, add date range\n  labels to Topic Momentum chart\n- Home.py: add Documents page to navigation caption\n- Rename Admin page from 06 to 08 to accommodate new page ordering\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: multi-provider AI brief, dashboard fixes, Admin page renumber\n\n- Weekly Brief: add provider selector \\(gemini/claude/chatgpt\\), web\n  coherence check toggle, and model override input\n- briefing.py: route synthesize_weekly_brief_llm by provider with\n  web_check and model_override params\n- model_router.py: add Google Search tool support in _call_gemini_text\n  via use_google_search param\n- Dashboard: fix exclude_from_brief crash when column missing, apply\n  _safe_list consistently in topic filter and heatmap, add date range\n  labels to Topic Momentum chart\n- Home.py: add Documents page to navigation caption\n- Rename Admin page from 06 to 08 to accommodate new page ordering\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(python -m pytest:*)",
+      "Bash(.venv/Scripts/python -m pytest --tb=short -q)",
+      "Bash(ls:*)",
+      "Bash(python -c:*)"
     ]
   }
 }

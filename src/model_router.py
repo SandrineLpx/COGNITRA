@@ -268,6 +268,11 @@ def extraction_prompt(context_pack: str) -> str:
         "   - Medium: everything else (general automotive trends, OEM strategy in non-footprint regions, "
         "supply chain news without direct Kiekert connection).\n"
         "   When in doubt between High and Medium, prefer High if any footprint region or closure-tech keyword appears.\n"
+        "9) confidence classification (how certain the extraction is):\n"
+        "   - High: all key fields (publish_date, source_type, actor_type) clearly stated in text; "
+        "at least 2 evidence bullets directly quotable from the source.\n"
+        "   - Medium: some fields require inference or are ambiguous; partial evidence available.\n"
+        "   - Low: significant ambiguity; most fields inferred; sparse or unclear source text.\n"
         "Use only the provided text.\n\nINPUT (context pack):\n"
         + context_pack
     )

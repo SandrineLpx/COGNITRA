@@ -10,7 +10,7 @@
 
 This project builds an AI-powered market intelligence triage system for the automotive closure systems and car entry domain. The system is designed for environments where teams already pay for high-quality information—such as Bloomberg, Automotive News, S&P Global, and MarkLines—as well as public sources like press releases and regulatory announcements. The problem is not access to content; it is the lack of a scalable way to convert these sources into consistent, decision-ready intelligence.
 
-Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies footprint region roll-up rules (e.g., Europe including UK/Turkey/Russia; Africa via Morocco/South Africa), and outputs priority and confidence alongside verifiable evidence bullets. It also generates strategic implications and recommended actions tailored to a closure systems supplier. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
+Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies footprint region roll-up rules (e.g., Europe including UK/Turkey/Russia; Africa via Morocco/South Africa), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets. It also generates strategic implications and recommended actions tailored to a closure systems supplier. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
 
 ## 1. Problem Statement and Significance
 
@@ -147,7 +147,8 @@ Everything else is deterministic:
 * **Priority classification:**
   * LLM prompt rules define High/Medium/Low criteria with Kiekert-specific signals
   * Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
-  * Auto-approve heuristic at ingest: confidence not Low, publish_date present, source_type not Other, 2+ evidence bullets → auto-Approved; otherwise Pending for manual review
+  * **Computed confidence scoring:** deterministic `_compute_confidence()` replaces LLM self-assessed confidence with score from observable signals (field completeness, evidence count, postprocess corrections, date provenance); audit trail in `_confidence_detail`
+  * Auto-approve heuristic at ingest: computed confidence not Low, publish_date present, source_type not Other, 2+ evidence bullets → auto-Approved; otherwise Pending for manual review
 * **Bulk PDF ingest:**
   * Multi-file uploader with progress bar and per-file extraction loop
   * Deduplication checks both filename and extracted title against existing records and within the batch
@@ -171,7 +172,7 @@ Review statuses:
 
 * **Pending** → **Approved** or **Disapproved**
 
-Auto-approve heuristic (applied deterministically at ingest): records are automatically set to Approved when all of the following hold: confidence is not Low, publish_date is present, source_type is not Other, and at least 2 evidence bullets are extracted. Records that fail any of these criteria start as Pending for manual review. Legacy records with old statuses ("Not Reviewed", "Reviewed") are normalized transparently to "Pending".
+Auto-approve heuristic (applied deterministically at ingest): records are automatically set to Approved when all of the following hold: computed confidence is High or Medium (see §7.5.6), publish_date is present, source_type is not Other, and at least 2 evidence bullets are extracted. Records that fail any of these criteria start as Pending for manual review. Because confidence is now computed from observable extraction signals rather than LLM self-assessment, the auto-approval gate is calibrated to actual data quality. Legacy records with old statuses ("Not Reviewed", "Reviewed") are normalized transparently to "Pending".
 
 Recommended gating rules (records that should always require manual review):
 
@@ -272,7 +273,8 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
    * Upgrades to High when: `mentions_our_company` is true, footprint region + closure topic/keyword, or footprint region + key OEM customer (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, etc.)
    * LLM prompt also includes priority criteria (rule 8) for initial classification
 9. Validate JSON against schema; if invalid, repair prompt with error details → revalidate
-10. **Auto-approve heuristic:** confidence not Low + publish_date present + source_type not Other + 2+ evidence bullets → auto-Approved; otherwise Pending
+10. **Computed confidence:** `_compute_confidence()` overwrites LLM self-assessed confidence with a deterministic score based on field completeness, evidence quality, rule corrections, and date provenance (see §7.5.6); audit trail stored in `_confidence_detail`
+11. **Auto-approve heuristic:** computed confidence not Low + publish_date present + source_type not Other + 2+ evidence bullets → auto-Approved; otherwise Pending
 11. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed; update API quota tracker
 12. Display token usage summary (model used, prompt/output/total tokens, noise level, chunks succeeded/repaired/failed)
 13. Render Intelligence Brief from JSON (deterministic, no LLM call)
@@ -415,7 +417,41 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Note:** Existing records ingested before v4.3 retain their original priority and need re-ingest to benefit from the new classification.
 
-#### 7.5.6 Meta-based model routing + per-chunk repair
+#### 7.5.6 Computed confidence — replacing LLM self-assessment with observable signals
+
+**Problem:** The `confidence` field (High/Medium/Low) was entirely self-assessed by the LLM during extraction. The prompt gave no criteria for what each level meant, and the model had no way to judge its own extraction quality. In practice this produced overconfidence bias — most records were marked "High" regardless of actual extraction quality. Because confidence feeds into auto-approval (records with Low confidence stay Pending for manual review) and weekly brief ranking, an uncalibrated confidence score undermines both quality gating and executive reporting.
+
+**Approach chosen:** A two-layer fix:
+
+1. **Prompt guidance (rule 9 in `extraction_prompt()`):** Explicit criteria added to the extraction prompt so the LLM's initial estimate is better calibrated:
+   - **High:** all key fields (publish_date, source_type, actor_type) clearly stated in source text; at least 2 evidence bullets directly quotable.
+   - **Medium:** some fields require inference or are ambiguous; partial evidence available.
+   - **Low:** significant ambiguity; most fields inferred; sparse or unclear source text.
+
+2. **Deterministic post-hoc computation (`_compute_confidence()` in `src/postprocess.py`):** After all postprocessing rules have fired, the system overwrites the LLM's confidence with a score computed from observable signals:
+
+   | Signal | Points | Logic |
+   |---|---|---|
+   | `publish_date` present | +2 | Core field; missing = weak extraction |
+   | `source_type` not "Other" | +2 | Known publisher = trustworthy source |
+   | `evidence_bullets` count | +1 to +2 | 2 bullets = +1, 3+ bullets = +2 |
+   | `key_insights` count | +1 | At least 2 present |
+   | `regions_relevant_to_kiekert` non-empty | +1 | Relevance clarity signal |
+   | Postprocess rule corrections (per 3 rules fired) | −1 each | More corrections = lower extraction quality |
+   | `publish_date` backfilled by regex | −1 | LLM missed an extractable date |
+
+   **Thresholds:** score ≥ 7 → High, score ≥ 4 → Medium, score < 4 → Low.
+
+3. **Auditability:** Each record stores a `_confidence_detail` object containing the LLM's original assessment, the computed value, the numeric score, and the per-signal breakdown. This enables calibration analysis (comparing LLM self-assessment vs computed confidence vs human review outcomes over time).
+
+**Why this works:** The computed score is deterministic, reproducible, and grounded in observable extraction quality — not the model's self-perception. A record where the LLM claims "High" confidence but failed to extract a publish_date, has an unknown source_type, and required multiple postprocess corrections will be downgraded to "Low" automatically. Conversely, a clean extraction from a known publisher with complete fields earns "High" regardless of what the model reported. This eliminates overconfidence bias and ensures that auto-approval and brief ranking are calibrated to actual data quality.
+
+**Impact on downstream systems:**
+- **Auto-approval** (`_finalize_record()` in `pages/01_Ingest.py`): requires confidence ∈ {High, Medium} — now based on computed score, so weak extractions are correctly routed to manual review.
+- **Weekly brief ranking** (`synthesize_weekly_brief_llm()` in `src/briefing.py`): records sorted by priority + confidence — computed confidence ensures the best-extracted records surface first.
+- **Dedup tie-breaking** (`src/dedupe.py`): confidence score (High=3, Medium=2, Low=1) breaks ties between duplicate records — computed confidence picks the more completely extracted version.
+
+#### 7.5.7 Meta-based model routing + per-chunk repair
 
 **Problem:** With 20 RPD (Requests Per Day) on both Flash-Lite and Flash under Gemini's free tier, every API call counts. The original chunked extraction ran each chunk through the full two-pass strategy (Flash-Lite → Flash) independently. For noisy documents, Flash-Lite consistently failed on every chunk, burning 2 calls per chunk (Flash-Lite attempt + Flash repair) — wasting half the daily quota on expected failures.
 
@@ -433,7 +469,7 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Non-chunked path unchanged:** Single-context documents still use `route_and_extract()` with its built-in two-pass (Flash-Lite → Flash). Meta-routing has no benefit for single calls.
 
-#### 7.5.7 API quota tracking + smart chunk recommendations
+#### 7.5.8 API quota tracking + smart chunk recommendations
 
 **Problem:** The Gemini free tier imposes a hard 20 RPD limit per model (Flash-Lite and Flash each). With no visibility into consumption, analysts could unknowingly exhaust their daily quota mid-batch. Chunked mode on short documents wasted calls unnecessarily (a 5K-char article produces 1 chunk, so chunked mode adds overhead with no quality benefit).
 
@@ -519,6 +555,7 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Bulk PDF ingest** (v3.8) enabled processing multiple articles in one session with progress tracking, per-file deduplication, and summary tables — critical for weekly batches of 10-20 articles from premium sources.
 * **Trend analysis charts** (v4.0-4.1) added the temporal dimension that makes a CI tool useful for spotting change over time: Topic Momentum with weighted counting and Emerging/Expanding/Fading/Stable classification, Top Company Mentions with canonicalization, and Priority Distribution with High-Ratio and Volatility Index. All computed deterministically (zero token cost) via pandas aggregations and Altair visualizations.
 * **Priority classification** (v4.3) — the two-layer approach (prompt rules + deterministic `_boost_priority()` postprocess) ensured that business-critical signals are never missed even when the model underestimates priority. The deterministic boost acts as a safety net that catches footprint-region + closure-tech or key-OEM combinations.
+* **Computed confidence** (v4.6) replaced the LLM's self-assessed confidence (which skewed toward "High" regardless of extraction quality) with a deterministic score based on observable signals (field completeness, postprocess corrections, date backfill). This fixed the overconfidence bias that was allowing weak extractions to be auto-approved and surface in executive briefs. The `_confidence_detail` audit trail enables ongoing calibration analysis.
 * **Meta-based model routing** (v4.5) cut API consumption by 30-50% compared to the per-chunk two-pass approach. Noisy documents skip Flash-Lite entirely (avoiding wasted calls), while clean documents complete on Flash-Lite in a single pass. This was essential for staying within the 20 RPD free-tier limit during daily workflows.
 * **API quota tracking** (v4.4) with smart chunk recommendations gave analysts the visibility to manage their daily API budget. The sidebar progress bars and pre-run estimates prevent mid-batch quota exhaustion.
 
@@ -535,6 +572,7 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Chunk boundary effects:** when a document is split into chunks, entities or dates that span a chunk boundary can be missed. The 800-char overlap mitigates this but does not eliminate it entirely.
 * **Priority defaulting to Medium:** without explicit priority criteria in the prompt, the model defaulted every record to "Medium" — a safe but useless classification. Fixing this required both prompt-side rules (defining what High/Medium/Low mean for Kiekert) and code-side deterministic overrides. The lesson is that business-specific classifications need explicit criteria; the model cannot infer domain-specific priority without guidance.
 * **API rate limits on free tier:** the Gemini free tier's 20 RPD per model constraint required rethinking the entire chunked extraction approach. The original per-chunk two-pass strategy (Flash-Lite → Flash for each chunk) could consume 6-8 calls for a single multi-chunk document. Meta-based routing and two-phase repair were necessary to stay within budget.
+* **LLM confidence self-assessment bias:** the model consistently rated its own confidence as "High" even for poorly extracted records (missing dates, unknown source types, sparse evidence). This was invisible until we compared model-reported confidence against actual field completeness. The fix required replacing self-assessment entirely with a computed score — a reminder that LLMs cannot reliably judge the quality of their own outputs without external grounding signals.
 * **Weighted counting for trend charts:** naive topic counting double-counts multi-topic records, inflating signals for broadly-tagged articles. Implementing 1/n weighted counting per topic (where n is the number of topics on a record) required restructuring the chart data pipeline and adopting Altair for interactive visualizations with classification labels.
 * **UTC-aware datetime handling:** mixing timezone-aware (from storage timestamps) and timezone-naive (from date inputs) datetimes caused Dashboard crashes. Required systematic UTC normalization across Dashboard, Inbox, and Weekly Brief pages.
 
@@ -581,73 +619,81 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
    - Router log: noise_level, initial_model, removed_ratio, chunks_succeeded_initial, chunks_repaired, chunks_failed_final
    - Non-chunked path: original two-pass strategy (Flash-Lite → Flash) via `route_and_extract()` preserved for single-context documents
 
-3. **Hardened Extraction Prompt** (8 numbered rules)
+3. **Hardened Extraction Prompt** (9 numbered rules)
    - Publisher-vs-cited-source rules (prevents S&P articles being tagged as "Reuters")
    - Strict date normalization (multiple patterns → YYYY-MM-DD)
    - Evidence bullet length cap (25 words max per bullet)
    - List deduplication and normalization instructions
    - **Priority classification rules** (rule 8): High/Medium/Low with Kiekert-specific criteria (footprint regions, closure tech, key OEMs, regulatory impact)
+   - **Confidence classification rules** (rule 9): High/Medium/Low with explicit criteria based on field clarity and evidence quotability
    - Repair prompt includes specific validation errors for targeted fixes
 
 4. **Priority Classification** (`src/postprocess.py`)
    - Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
    - Runs after model extraction as safety net for business-critical signals
 
-5. **Chunked Extraction with Merge** (`pages/01_Ingest.py`)
+5. **Computed Confidence** (`src/postprocess.py`)
+   - Replaces LLM self-assessed confidence with a deterministic score computed from observable extraction signals
+   - Scoring: +2 publish_date present, +2 known source_type, +1–2 evidence bullets, +1 key_insights, +1 kiekert regions, −1 per 3 rule corrections, −1 if date backfilled by regex
+   - Thresholds: ≥7 → High, ≥4 → Medium, <4 → Low
+   - Full audit trail in `_confidence_detail` (LLM original, computed value, numeric score, per-signal breakdown)
+   - Feeds auto-approval, weekly brief ranking, and dedup tie-breaking
+
+6. **Chunked Extraction with Merge** (`pages/01_Ingest.py`)
    - Each cleaned chunk extracted independently via model
    - Results merged: majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, short-bullet filtering
    - Handles long/noisy documents that exceed single-context limits
 
-6. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
+7. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
    - Exact title matching (blocking at ingest)
    - Fuzzy story detection (threshold 0.88)
    - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, ... Other=50)
    - Confidence and completeness scoring for tie-breaking
 
-7. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
+8. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
    - Candidate selection from last N days (configurable, default 30, max 90; auto-excludes duplicates)
    - Share-ready detection (High priority + High confidence)
    - Deterministic Markdown brief + executive email template generation
    - **AI-generated Weekly Executive Brief:** LLM synthesis (Gemini Flash) across up to 20 selected records following structured executive report template (exec summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions); token usage displayed
    - Analyst-driven item selection with one-click suggestions
 
-8. **Bulk PDF Ingest** (`pages/01_Ingest.py`)
+9. **Bulk PDF Ingest** (`pages/01_Ingest.py`)
    - Multi-file uploader with progress bar and per-file extraction loop
    - Deduplication checks filename and extracted title against existing records and within the batch
    - Summary table showing saved/skipped/failed counts per file
    - Pre-run quota estimate (worst-case API calls vs remaining quota)
 
-9. **API Quota Tracker** (`src/quota_tracker.py`)
-   - Per-model RPD usage persisted to `data/api_usage.json`; resets midnight Pacific Time
-   - Sidebar progress bars showing live per-model usage/remaining
-   - Smart chunk mode recommendations: warns when chunked mode is unnecessary or when calls will exceed remaining quota
-   - Supports custom quota overrides via `set_quota()`
+10. **API Quota Tracker** (`src/quota_tracker.py`)
+    - Per-model RPD usage persisted to `data/api_usage.json`; resets midnight Pacific Time
+    - Sidebar progress bars showing live per-model usage/remaining
+    - Smart chunk mode recommendations: warns when chunked mode is unnecessary or when calls will exceed remaining quota
+    - Supports custom quota overrides via `set_quota()`
 
-10. **Trend Analysis Dashboard** (`pages/04_Dashboard.py`)
+11. **Trend Analysis Dashboard** (`pages/04_Dashboard.py`)
     - **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     - **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
     - **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
     - Canonical/all-records toggle for all analytics
     - Unit-testable helpers: `weighted_explode`, `explode_list_column`, `classify_topic_momentum`, `canonicalize_company`, `week_start`, `get_effective_date`
 
-11. **Redesigned Review UX** (`pages/02_Inbox.py`, `pages/03_Record.py`)
+12. **Redesigned Review UX** (`pages/02_Inbox.py`, `pages/03_Record.py`)
     - Inbox: title-first expandable cards with inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
     - Record: Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
     - Simplified review model: Pending/Approved/Disapproved with auto-approve heuristic at ingest
     - Legacy status normalization ("Not Reviewed"/"Reviewed" → "Pending")
 
-12. **Original Documents Library** (`pages/07_Documents.py`)
+13. **Original Documents Library** (`pages/07_Documents.py`)
     - Filterable document index (date range, topic, company, review status, priority, text search)
     - Link fallback chain: `original_url` > `source_pdf_path` > "No link"
     - Expandable cards with evidence bullets, notes, and router usage summary
     - One-click navigation to full Record page
 
-13. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
+14. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
     - Standalone JSONL deduplication with CSV export
     - Diagnostic stats (duplicate rate, canonical count)
     - Supports large datasets outside Streamlit UI
 
-14. **Testing & Validation** (`test_scenarios.py`)
+15. **Testing & Validation** (`test_scenarios.py`)
     - 25+ test cases covering all workflows
     - Publisher ranking hierarchy validation
     - Weekly briefing logic verification
@@ -699,7 +745,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 ## C) Evaluation
 
 - **Test coverage:** 25+ scenario tests (duplicate detection, ranking, briefing)
-- **Quality gates:** Schema validation, evidence requirement, review gating (auto-approve + manual), duplicate suppression, priority classification
+- **Quality gates:** Schema validation, evidence requirement, review gating (auto-approve + manual), duplicate suppression, priority classification, computed confidence scoring
 - **Token tracking:** Per-call usage logging + per-model RPD quota tracking for cost monitoring and optimization
 - **Regression prevention:** Comprehensive test suite for all new features
 
@@ -717,4 +763,4 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 ---
 
 **Report version:** 1.0
-**Status:** Production MVP complete with meta-based model routing, per-chunk repair, priority classification, API quota tracking, trend analysis dashboard, AI-generated executive briefs, bulk PDF ingest, and original documents library; ready for deployment and evaluation
+**Status:** Production MVP complete with meta-based model routing, per-chunk repair, priority classification, computed confidence scoring, API quota tracking, trend analysis dashboard, AI-generated executive briefs, bulk PDF ingest, and original documents library; ready for deployment and evaluation

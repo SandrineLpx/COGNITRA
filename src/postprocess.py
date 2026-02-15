@@ -476,6 +476,58 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
             rec, "publish_date", original_publish_date, source="postprocess", reason="preserve_existing_valid_publish_date"
         )
 
+    rec = _compute_confidence(rec)
+    return rec
+
+
+def _compute_confidence(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute confidence from observable extraction signals, replacing the LLM self-assessment."""
+    _ensure_meta(rec)
+    llm_original = rec.get("confidence", "Medium")
+    signals: Dict[str, int] = {}
+
+    # +2 if publish_date is present
+    signals["publish_date_present"] = 2 if rec.get("publish_date") else 0
+
+    # +2 if source_type is a known publisher (not "Other")
+    signals["source_type_known"] = 2 if rec.get("source_type", "Other") != "Other" else 0
+
+    # +1 or +2 based on evidence_bullets count
+    bullets = rec.get("evidence_bullets") or []
+    signals["evidence_bullets"] = 2 if len(bullets) >= 3 else (1 if len(bullets) >= 2 else 0)
+
+    # +1 if at least 2 key_insights
+    insights = rec.get("key_insights") or []
+    signals["key_insights"] = 1 if len(insights) >= 2 else 0
+
+    # +1 if regions_relevant_to_kiekert is non-empty
+    signals["kiekert_regions"] = 1 if rec.get("regions_relevant_to_kiekert") else 0
+
+    # -1 per 3 postprocess rule corrections
+    rule_impact = rec.get("_rule_impact") or {}
+    total_rules = sum(int(v) for v in rule_impact.values())
+    signals["rule_corrections"] = -(total_rules // 3)
+
+    # -1 if publish_date was backfilled by regex (LLM missed it)
+    provenance = rec.get("_provenance") or {}
+    pd_prov = provenance.get("publish_date", {})
+    signals["date_backfilled"] = -1 if pd_prov.get("source") == "rule:regex_publish_date" else 0
+
+    score = sum(signals.values())
+    if score >= 7:
+        computed = "High"
+    elif score >= 4:
+        computed = "Medium"
+    else:
+        computed = "Low"
+
+    rec["_confidence_detail"] = {
+        "llm_original": llm_original,
+        "computed": computed,
+        "score": score,
+        "signals": signals,
+    }
+    set_field(rec, "confidence", computed, source="postprocess", reason="computed_confidence")
     return rec
 
 

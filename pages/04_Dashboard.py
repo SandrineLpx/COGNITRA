@@ -178,25 +178,32 @@ k4.metric("Disapproved", int((fdf.get("review_status") == "Disapproved").sum()) 
 k5.metric("Excluded", int(fdf.get("exclude_from_brief", pd.Series(False)).fillna(False).sum()))
 k6.metric("High Priority", int((fdf.get("priority") == "High").sum()) if "priority" in fdf else 0)
 
-# ── Monthly Histogram ──────────────────────────────────────────────────────
-st.subheader("Monthly Record Volume (Histogram)")
-monthly = fdf.dropna(subset=["event_day"]).copy()
-if not monthly.empty:
-    monthly["event_month"] = monthly["event_day"].dt.to_period("M").dt.to_timestamp()
-    monthly_hist = monthly.groupby("event_month").size().reset_index(name="count")
+# ── Weekly Histogram ───────────────────────────────────────────────────────
+st.subheader("Weekly Record Volume (Histogram)")
+weekly = fdf.dropna(subset=["event_day"]).copy()
+if not weekly.empty:
+    weekly["event_week"] = weekly["event_day"].dt.to_period("W").dt.start_time
+    weekly["source_type"] = weekly.get("source_type", pd.Series(index=weekly.index)).fillna("Unknown")
+    weekly_hist = (
+        weekly.groupby(["event_week", "source_type"], dropna=False)
+        .size()
+        .reset_index(name="count")
+    )
+    weekly_hist["week_label"] = weekly_hist["event_week"].dt.strftime("%Y-%m-%d")
     chart = (
-        alt.Chart(monthly_hist)
-        .mark_bar(color="#1565c0")
+        alt.Chart(weekly_hist)
+        .mark_bar()
         .encode(
-            x=alt.X("event_month:T", title="Month"),
+            x=alt.X("week_label:O", title="Week (start)"),
             y=alt.Y("count:Q", title="Records"),
-            tooltip=["event_month:T", "count:Q"],
+            color=alt.Color("source_type:N", title="Source"),
+            tooltip=["event_week:T", "source_type:N", "count:Q"],
         )
         .properties(height=280)
     )
     st.altair_chart(chart, use_container_width=True)
 else:
-    st.caption("No dated records for monthly histogram.")
+    st.caption("No dated records for weekly histogram.")
 
 # ── Region x Topic Heatmap ────────────────────────────────────────────────
 st.subheader("Region x Topic Heatmap")

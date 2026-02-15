@@ -25,6 +25,16 @@ def _save_brief(brief_text: str, week_range: str, selected_ids, usage):
     path = BRIEFS_DIR / filename
     path.write_text(brief_text, encoding="utf-8")
 
+    sidecar = path.with_suffix(".meta.json")
+    sidecar_meta = {
+        "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+        "week_range": week_range,
+        "file": str(path),
+        "selected_record_ids": list(selected_ids),
+        "usage": usage or {},
+    }
+    sidecar.write_text(json.dumps(sidecar_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
     meta = {
         "created_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "week_range": week_range,
