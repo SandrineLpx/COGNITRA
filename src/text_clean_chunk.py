@@ -46,6 +46,13 @@ JUNK_PATTERNS = {
 
 URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 PHOTO_CREDIT_RE = re.compile(r"\b(photo|credit|getty|stock|source)\b", re.IGNORECASE)
+PUBLISH_TS_RE = re.compile(
+    r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|"
+    r"January|February|March|April|May|June|July|August|September|October|November|December)"
+    r"\s+\d{1,2},\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s*(?:AM|PM)\s*"
+    r"(?:PST|PDT|EST|EDT|CST|CDT|MST|MDT|UTC|GMT)\b",
+    re.IGNORECASE,
+)
 
 
 def _fix_hyphen_breaks(text: str) -> str:
@@ -88,6 +95,10 @@ def _detect_title(lines: List[str]) -> str:
 
 def _line_is_table_fact(line: str) -> bool:
     return bool(re.search(r"\d", line) and ("|" in line or re.search(r"\s{2,}", line)))
+
+
+def _looks_like_publish_timestamp(line: str) -> bool:
+    return bool(PUBLISH_TS_RE.search(line))
 
 
 def _non_letter_ratio(line: str) -> float:
@@ -199,7 +210,7 @@ def clean_and_chunk(raw_text: str, *, max_chars_per_chunk: int = 9000, overlap_c
             drop_reason = "repeated_header_footer"
         elif URL_RE.findall(ln_l) and len(URL_RE.findall(ln_l)) >= 2:
             drop_reason = "link_heavy"
-        elif _non_letter_ratio(ln) > 0.35 and not _line_is_table_fact(ln):
+        elif _non_letter_ratio(ln) > 0.35 and not _line_is_table_fact(ln) and not _looks_like_publish_timestamp(ln):
             drop_reason = "symbol_heavy"
         else:
             g = _match_pattern_group(ln_l)

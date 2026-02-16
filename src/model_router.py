@@ -251,7 +251,15 @@ def extraction_prompt(context_pack: str) -> str:
         "'11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.\n"
         "5) Only use 'Closure Technology & Innovation' when latch/door/handle/digital key/smart entry/cinch appears explicitly.\n"
         "6) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.\n"
-        "7) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.\n"
+        "7) If numeric facts are present in the article, at least one evidence_bullet must include a specific numeric value verbatim "
+        "(e.g., percentage change, margin %, profit forecast, sales delta, production volume, year-over-year change, ranking gap). "
+        "Prefer financial/competitive metrics. Prefer financial forecast numbers (profit, margin, sales) over feature numbers (screens, price) when selecting the numeric bullet. "
+        "Do not fabricate, infer, or calculate numbers. "
+        "If no numeric facts are present, proceed normally.\n"
+        "8) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.\n"
+        "9) If the article mentions major software/AI features (e.g., AI voice controls, SDV, infotainment, autonomy), "
+        "include at least one evidence bullet on that and include relevant keywords from text "
+        "(e.g., AI, software, voice controls, infotainment, OpenAI, Microsoft, Google).\n"
         "Use only the provided text.\n\nINPUT (context pack):\n"
         + context_pack
     )

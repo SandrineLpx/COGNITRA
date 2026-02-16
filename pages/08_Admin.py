@@ -30,6 +30,7 @@ else:
     df = pd.json_normalize(export_records)
     
     st.subheader("Export CSV")
+    st.caption("(Flat table for Excel/Power BI; nested fields are flattened.)")
     c1, c2 = st.columns(2)
     with c1:
         export_approved = st.checkbox("Approved only", value=True)
@@ -47,7 +48,8 @@ else:
     
     st.divider()
     st.subheader("Bulk Deduplication Export")
-    st.caption("Export canonical and duplicate records to separate JSONL files")
+    st.caption("(JSONL for full-fidelity pipeline/audit outputs; preserves full JSON structure and metadata.)")
+    st.caption("Export canonical and duplicate records to separate JSONL files.")
     
     if st.button("Run deduplication and export", type="primary"):
         canonical_recs, dup_recs = dedupe_records(records)

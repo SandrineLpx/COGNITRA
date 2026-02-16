@@ -20,7 +20,10 @@ from src.briefing import (
     select_weekly_candidates,
     render_weekly_brief_md,
     render_exec_email,
+    _build_synthesis_prompt,
+    _choose_brief_mode,
 )
+from src.text_clean_chunk import clean_and_chunk
 
 
 # ============================================================================
@@ -243,11 +246,11 @@ class TestOWeeklyBriefing:
 
     def test_share_ready_items_prioritized(self):
         """Share-ready items (High/High) should come first."""
-        share_ready = sample_record(priority="High", confidence="High")
-        not_ready = sample_record(priority="Low", confidence="Low")
+        share_ready = sample_record(title="Share-ready story", priority="High", confidence="High")
+        not_ready = sample_record(title="Non-share-ready story", priority="Low", confidence="Low")
 
         records = [not_ready, share_ready]
-        candidates = select_weekly_candidates(records, days=7)
+        candidates = select_weekly_candidates(records, days=7, include_excluded=True)
 
         assert candidates[0]["priority"] == "High"
         assert candidates[0]["confidence"] == "High"
@@ -312,6 +315,32 @@ class TestBriefRendering:
 
         subject, body = render_exec_email([], "Feb 5-12, 2026")
         assert "No items selected" in body
+
+
+class TestSingleRecordSynthesisPrompt:
+    def test_single_mode_config_is_tight(self):
+        mode = _choose_brief_mode(1)
+        assert mode["name"] == "single"
+        assert mode["max_words"] == "350-450"
+        assert mode["exec_bullets"] == "2"
+        assert mode["priority_bullets"] == "1"
+        assert mode["actions_bullets"] == "2"
+        assert mode["allow_trends"] is False
+        assert mode["include_empty_regions"] is False
+        assert mode["include_topics"] is False
+
+    def test_single_record_prompt_enforces_executive_alert_structure(self):
+        rec = sample_record(title="Single item", priority="High", confidence="High")
+        prompt = _build_synthesis_prompt([rec], "Feb 5-12, 2026")
+
+        assert "EXECUTIVE ALERT" in prompt
+        assert "Target length: 350-450 words." in prompt
+        assert "Exactly 2 bullets: what happened + so-what for Kiekert." in prompt
+        assert "Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Kiekert." in prompt
+        assert "Exactly 2 bullets. Each must include: Owner + Action + Time horizon." in prompt
+        assert "EMERGING TRENDS" not in prompt
+        assert "No significant signals this period." not in prompt
+        assert "KEY DEVELOPMENTS BY TOPIC" not in prompt
 
 
 # ============================================================================
@@ -384,6 +413,23 @@ class TestIntegrationDuplicateWorkflow:
             weak_score = score_source_quality(weak_source)
             strong_score = score_source_quality(strong_source)
             assert strong_score > weak_score, "Strong source should outscore weak source"
+
+
+class TestPreprocessRetention:
+    """Ensure key Bloomberg header/software lines survive cleanup."""
+
+    def test_cleaner_keeps_bloomberg_timestamp_and_ai_paragraph(self):
+        raw = (
+            "Bloomberg\n"
+            "February 1, 2026 at 9:00 PM PST\n\n"
+            "Mercedes-Benz unveiled the CLA on Jan. 29.\n"
+            "The vehicle includes OpenAI and Microsoft voice controls plus Google infotainment features.\n"
+        )
+        out = clean_and_chunk(raw)
+        clean = out["clean_text"]
+
+        assert "February 1, 2026 at 9:00 PM PST" in clean
+        assert "OpenAI and Microsoft voice controls" in clean
 
 
 if __name__ == "__main__":

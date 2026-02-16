@@ -12,6 +12,13 @@ This project builds an AI-powered market intelligence triage system for the auto
 
 Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies footprint region roll-up rules (e.g., Europe including UK/Turkey/Russia; Africa via Morocco/South Africa), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets. It also generates strategic implications and recommended actions tailored to a closure systems supplier. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
 
+### 2026-02 Update Addendum (current implementation)
+
+- **Footprint regions moved to Option B buckets:** `Western Europe`, `Eastern Europe`, `Russia` (replacing legacy `Europe (including Russia)`), with backward-compatible migration in postprocess.
+- **Chunking behavior is automatic in Ingest UI:** the manual chunk-mode toggle was removed; extraction path is selected from cleaned-document chunk metadata.
+- **Macro-theme matching is source-grounded:** `notes` are excluded from macro-theme matching text fields.
+- **Weekly synthesis prompt tightened:** numeric grounding, Tier-1 implication enforcement, tone hardening, and length-scaling by record count were added at prompt level only.
+
 ## 1. Problem Statement and Significance
 
 ### 1.1 Problem

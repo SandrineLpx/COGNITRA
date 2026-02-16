@@ -150,21 +150,131 @@ def _slim_record(rec: Dict) -> Dict:
     return {k: v for k, v in rec.items() if k not in _STRIP_FIELDS}
 
 
+def _choose_brief_mode(n: int) -> Dict[str, Any]:
+    if n <= 1:
+        return {
+            "name": "single",
+            "max_words": "350-450",
+            "exec_bullets": "2",
+            "priority_bullets": "1",
+            "actions_bullets": "2",
+            "allow_trends": False,
+            "include_empty_regions": False,
+            "include_topics": False,
+        }
+    if n <= 4:
+        return {
+            "name": "compact",
+            "max_words": "600-850",
+            "exec_bullets": "3",
+            "priority_bullets": "3",
+            "actions_bullets": "3",
+            "allow_trends": True,
+            "include_empty_regions": False,
+            "include_topics": True,
+        }
+    return {
+        "name": "standard",
+        "max_words": "900-1300",
+        "exec_bullets": "4-5",
+        "priority_bullets": "3-6",
+        "actions_bullets": "3-6",
+        "allow_trends": True,
+        "include_empty_regions": True,
+        "include_topics": True,
+    }
+
+
 def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
+    mode = _choose_brief_mode(len(records))
+    is_single = mode["name"] == "single"
     topic_list = "\n".join(f"  - {t}" for t in CANON_TOPICS)
     region_list = "\n".join(f"  - {r}" for r in FOOTPRINT_REGIONS)
     slim = [_slim_record(r) for r in records]
     records_json = json.dumps(slim, indent=1, default=str)
 
+    title_heading = "EXECUTIVE ALERT" if is_single else "AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF"
+    intro = (
+        "Draft a single-record executive alert with high signal density."
+        if is_single
+        else "Draft a weekly executive brief."
+    )
+    exec_section = (
+        "- Exactly 2 bullets: what happened + so-what for Kiekert.\n"
+        "- If numeric financial deltas exist in records (margin %, profit change, sales %, deliveries %, mix %, pricing), "
+        "include at least one exact numeric value from evidence.\n"
+        "- Include at least one explicit Tier-1 implication: pricing pressure, volume volatility, premium content risk/opportunity, "
+        "regional sourcing shift, or technology value migration.\n"
+        "- End each bullet with (REC:<id>).\n\n"
+        if is_single
+        else (
+            f"- {mode['exec_bullets']} bullets maximum. Each bullet synthesizes a cross-record theme, not a "
+            "single article. Interpret through the Kiekert lens:\n"
+            "  * Closure systems demand / technology shifts\n"
+            "  * OEM program timing and platform decisions\n"
+            "  * Footprint / sourcing risk (China, US, Mexico, Europe tariffs)\n"
+            "  * Pricing pressure and supplier margin impact\n"
+            "  * Supply chain disruptions affecting door-module BOM\n"
+            "- If numeric financial deltas exist in records (margin %, profit change, sales %, deliveries %, mix %, pricing), "
+            "include at least one exact numeric value from evidence.\n"
+            "- Include at least one explicit Tier-1 implication: pricing pressure, volume volatility, premium content risk/opportunity, "
+            "regional sourcing shift, or technology value migration.\n"
+            "- End each bullet with (REC:<id>, REC:<id>).\n\n"
+        )
+    )
+    region_section = (
+        "Include ONLY regions present in the records. Do NOT add empty-region placeholder lines.\n"
+        if not mode["include_empty_regions"]
+        else (
+            "For each region below, write 1-3 bullets if the region appears in the records. "
+            "If a region has no signal, write 'No significant signals this period.'\n"
+        )
+    )
+    topic_section = (
+        ""
+        if not mode["include_topics"]
+        else (
+            "KEY DEVELOPMENTS BY TOPIC\n"
+            "Use these canonical topic labels exactly (include only topics with records):\n"
+            f"{topic_list}\n"
+            "For each topic, 1-3 bullets synthesizing across records. Cite (REC:<id>).\n\n"
+        )
+    )
+    trends_section = (
+        ""
+        if not mode["allow_trends"]
+        else (
+            "EMERGING TRENDS\n"
+            "- 1-3 bullets. Each trend MUST reference >=2 distinct records.\n"
+            "- If fewer than 2 records support a trend, do not include it.\n\n"
+        )
+    )
+    actions_section = (
+        "- Exactly 2 bullets. Each must include: Owner + Action + Time horizon.\n"
+        "- Keep actions concise and grounded with (REC:<id>).\n\n"
+        if is_single
+        else (
+            f"- {mode['actions_bullets']} bullets. Each must specify:\n"
+            "  * Owner role (e.g., VP Sales, Engineering, Procurement, Strategy)\n"
+            "  * Concrete action\n"
+            "  * Time horizon (immediate / this quarter / next 6 months)\n"
+            "- Ground each in a specific development above.\n\n"
+        )
+    )
+    priority_instruction = (
+        "- Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Kiekert.\n"
+        if mode["priority_bullets"] == "1"
+        else f"- Up to {mode['priority_bullets']} bullets. Each: Company/OEM + what happened + why it matters to Kiekert.\n"
+    )
+
     return (
         "You are a competitive intelligence analyst for Kiekert, a global automotive "
         "closure systems supplier (door latches, strikers, handles, smart entry, cinch "
-        "systems, window regulators). Draft a weekly executive brief.\n\n"
+        f"systems, window regulators). {intro}\n\n"
         f"Period: {week_range}\n"
-        f"Records provided: {len(records)}\n\n"
-        "═══════════════════════════════════════════════════════════════\n"
+        f"Records provided: {len(records)}\n"
+        f"Target length: {mode['max_words']} words.\n\n"
         "SYNTHESIS PROCEDURE (follow in order, do not skip)\n"
-        "═══════════════════════════════════════════════════════════════\n"
         "1. CLUSTER: group records by theme (not one-record-per-bullet).\n"
         "2. VALIDATE: for every claim, confirm it appears in at least one record's "
         "evidence_bullets or key_insights. Cite the record_id inline as (REC:<id>). "
@@ -172,67 +282,60 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "3. NUMBERS: reproduce figures exactly as they appear in evidence_bullets. "
         "Do not round, extrapolate, or invent numbers. If two records conflict on a "
         "figure, flag it in CONFLICTS & UNCERTAINTY.\n"
-        "4. WRITE: produce the brief in the structure below.\n\n"
-        "═══════════════════════════════════════════════════════════════\n"
-        "OUTPUT STRUCTURE (use these exact headings)\n"
-        "═══════════════════════════════════════════════════════════════\n\n"
-        "AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF\n"
+        "4. TONE: use analytical executive language. Avoid dramatic wording such as "
+        "'financial distress', 'collapse', 'crisis', 'catastrophic'. Prefer "
+        "'margin compression', 'profitability deterioration', 'strategic pressure', 'competitive intensity'.\n"
+        "5. ROLLUP FRAMING: if records include _macro_theme_rollups with 'Premium OEM Financial/Strategy Stress' "
+        "or 'China Tech-Driven Premium Disruption', elevate that framing implicitly in the Executive Summary. "
+        "Do not print rollup labels explicitly unless >3 records support the same rollup.\n"
+        "6. WRITE: produce the brief in the structure below.\n\n"
+        "LENGTH SCALING (internal, do not print):\n"
+        "- If 1 record: Executive Summary max 2 bullets; High Priority max 1; Footprint only mentioned regions; Recommended Actions max 2.\n"
+        "- If 2-4 records: Executive Summary max 3 bullets; High Priority max 3.\n"
+        "- If 5+ records: Executive Summary 4-5 bullets and include theme clustering.\n\n"
+        "OUTPUT STRUCTURE (use these exact headings)\n\n"
+        f"{title_heading}\n"
         f"Period: {week_range}\n"
         "Prepared by: Cognitra AI\n\n"
         "EXECUTIVE SUMMARY\n"
-        "- 4-6 bullets maximum. Each bullet synthesizes a cross-record theme, not a "
-        "single article. Interpret through the Kiekert lens:\n"
-        "  * Closure systems demand / technology shifts\n"
-        "  * OEM program timing and platform decisions\n"
-        "  * Footprint / sourcing risk (China, US, Mexico, Europe tariffs)\n"
-        "  * Pricing pressure and supplier margin impact\n"
-        "  * Supply chain disruptions affecting door-module BOM\n"
-        "- End each bullet with (REC:<id>, REC:<id>).\n\n"
-        "HIGH PRIORITY DEVELOPMENTS\n"
-        "- 3-6 bullets. Each: Company/OEM + what happened + why it matters to Kiekert.\n"
-        "- Only include items where priority=High in the records.\n"
-        "- Cite (REC:<id>).\n\n"
-        "FOOTPRINT REGION SIGNALS\n"
-        "For each region below, write 1-3 bullets if the region appears in the records. "
-        "If a region has no signal, write 'No significant signals this period.'\n"
-        f"{region_list}\n\n"
-        "KEY DEVELOPMENTS BY TOPIC\n"
-        "Use these canonical topic labels exactly (include only topics with records):\n"
-        f"{topic_list}\n"
-        "For each topic, 1-3 bullets synthesizing across records. Cite (REC:<id>).\n\n"
-        "EMERGING TRENDS\n"
-        "- 1-3 bullets. Each trend MUST reference >=2 distinct records.\n"
-        "- If fewer than 2 records support a trend, do not include it.\n\n"
-        "CONFLICTS & UNCERTAINTY\n"
-        "- Flag any contradictory figures, dates, or claims between records.\n"
-        "- Flag any claim where confidence=Low or evidence is single-sourced.\n"
-        "- If none, write: 'None observed this period.'\n\n"
-        "RECOMMENDED ACTIONS\n"
-        "- 3-6 bullets. Each must specify:\n"
-        "  * Owner role (e.g., VP Sales, Engineering, Procurement, Strategy)\n"
-        "  * Concrete action\n"
-        "  * Time horizon (immediate / this quarter / next 6 months)\n"
-        "- Ground each in a specific development above.\n\n"
-        "APPENDIX\n"
-        f"Items Covered: {len(records)}\n"
-        "Method: Structured extraction from source documents; human review and "
-        "approval; LLM synthesis by Cognitra.\n\n"
-        "═══════════════════════════════════════════════════════════════\n"
-        "RULES (hard constraints)\n"
-        "═══════════════════════════════════════════════════════════════\n"
-        "- GROUNDING: every factual claim must cite at least one (REC:<record_id>). "
-        "Uncited claims will be rejected.\n"
-        "- NO INVENTION: use only facts from the provided records. If a record lacks "
-        "detail, say so rather than filling gaps.\n"
-        "- NO FLUFF: avoid vague phrases ('dynamic environment', 'strategic pivot', "
-        "'rapidly evolving landscape'). Be specific or omit.\n"
-        "- CROSS-SYNTHESIS: do not summarize records one by one. Group by theme. "
-        "A bullet that restates a single record without connecting it to others is "
-        "acceptable only if the event is uniquely significant.\n"
-        "- NUMERIC FIDELITY: reproduce numbers exactly. '$4.2B' stays '$4.2B', "
-        "not 'approximately $4 billion'.\n"
-        "- No emojis. Executive tone.\n\n"
-        "APPROVED RECORDS (JSON list):\n"
+        + exec_section
+        + "HIGH PRIORITY DEVELOPMENTS\n"
+        + priority_instruction
+        + "- Only include items where priority=High in the records.\n"
+        + "- Cite (REC:<id>).\n\n"
+        + "FOOTPRINT REGION SIGNALS\n"
+        + region_section
+        + f"{region_list}\n\n"
+        + topic_section
+        + trends_section
+        + "CONFLICTS & UNCERTAINTY\n"
+        + "- Flag any contradictory figures, dates, or claims between records.\n"
+        + "- Flag any claim where confidence=Low or evidence is single-sourced.\n"
+        + "- If none, write: 'None observed this period.'\n\n"
+        + "RECOMMENDED ACTIONS\n"
+        + actions_section
+        + "APPENDIX\n"
+        + f"Items Covered: {len(records)}\n"
+        + "Method: Structured extraction from source documents; human review and "
+        + "approval; LLM synthesis by Cognitra.\n\n"
+        + "RULES (hard constraints)\n"
+        + "- GROUNDING: every factual claim must cite at least one (REC:<record_id>). "
+        + "Uncited claims will be rejected.\n"
+        + "- NO INVENTION: use only facts from the provided records. If a record lacks "
+        + "detail, say so rather than filling gaps.\n"
+        + "- NO FLUFF: avoid vague phrases ('dynamic environment', 'strategic pivot', "
+        + "'rapidly evolving landscape'). Be specific or omit.\n"
+        + "- NO DRAMATIC LANGUAGE: avoid 'financial distress', 'collapse', 'crisis', 'catastrophic'.\n"
+        + "- CROSS-SYNTHESIS: do not summarize records one by one. Group by theme. "
+        + "A bullet that restates a single record without connecting it to others is "
+        + "acceptable only if the event is uniquely significant.\n"
+        + "- NUMERIC FIDELITY: reproduce numbers exactly. '$4.2B' stays '$4.2B', "
+        + "not 'approximately $4 billion'.\n"
+        + "- NUMERIC ENFORCEMENT: when records contain numeric financial deltas (margin %, profit/sales/deliveries/mix/pricing), "
+        + "include at least one exact numeric value in EXECUTIVE SUMMARY.\n"
+        + "- TIER-1 LENS: include at least one explicit Tier-1 implication grounded in evidence bullets; do not speculate beyond records.\n"
+        + "- No emojis. Executive tone.\n\n"
+        + "APPROVED RECORDS (JSON list):\n"
         + records_json
     )
 

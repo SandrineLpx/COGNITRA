@@ -15,6 +15,7 @@ from src.quota_tracker import get_usage, reset_date
 
 st.set_page_config(page_title="Ingest", layout="wide")
 st.title("Ingest")
+st.info("Upload one or more PDFs to proceed, or enable 'Paste text manually'.")
 
 with st.sidebar:
     provider = st.selectbox("Model", ["auto","gemini","claude","chatgpt"], index=0)
@@ -69,13 +70,14 @@ else:
     pasted = ""
     show_selected_chunks = False
 
-chunked_mode = st.checkbox("Chunked extraction (better for long/noisy docs)", value=True)
+# Chunking is automatic based on cleaned document structure.
+chunked_hint = st.empty()
 
 has_upload = len(uploaded_files) > 0
 has_paste = manual_override and bool(pasted.strip())
 
 if not has_upload and not manual_override:
-    st.info("Upload one or more PDFs to proceed, or enable 'Paste text manually'.")
+    pass
 
 
 # ── Helper functions ──────────────────────────────────────────────────────
@@ -252,7 +254,7 @@ def _extract_usage_summary(router_log):
     return None
 
 
-def _process_one_pdf(pdf_bytes, filename, records, provider_choice, use_chunked,
+def _process_one_pdf(pdf_bytes, filename, records, provider_choice,
                      override_title="", override_url=""):
     """Extract, validate, and return (rec, router_log, status_msg) for one PDF.
     Returns (None, None, error_msg) on failure."""
@@ -439,24 +441,22 @@ if has_upload and not is_bulk:
     )
 
     # Smart chunk mode recommendation
-    if n_chunks <= 1 and chunked_mode:
-        st.info(
+    if n_chunks <= 1:
+        chunked_hint.info(
             f"Clean article ({cleaned_len:,} chars, {n_chunks} chunk) — "
             "chunked mode adds no benefit here (1 API call either way)."
         )
-    elif n_chunks > 1 and chunked_mode:
+    elif n_chunks > 1:
         _usage = get_usage()
         _lite = "gemini-2.5-flash-lite"
         _left = _usage.get(_lite, {}).get("remaining", "?")
-        st.warning(
-            f"Chunked mode: **{n_chunks} API calls** for this document. "
+        chunked_hint.warning(
+            f"Detected {n_chunks} chunks (long/noisy document). "
+            f"Extraction will run chunk-aware with about **{n_chunks} API calls**. "
             f"Remaining {_lite.replace('gemini-', '')}: {_left} today."
         )
-    elif n_chunks > 1 and not chunked_mode:
-        st.warning(
-            f"Document has {n_chunks} chunks but chunked mode is OFF — "
-            "only partial text will be sent. Consider enabling for better coverage."
-        )
+    else:
+        chunked_hint.empty()
 
     run = st.button("Run pipeline", type="primary")
     if run:
@@ -483,7 +483,7 @@ if has_upload and not is_bulk:
 
         with st.spinner("Extracting..."):
             rec, router_log, status_msg = _process_one_pdf(
-                pdf_bytes, uploaded.name, records, provider, chunked_mode,
+                pdf_bytes, uploaded.name, records, provider,
                 override_title=title.strip(), override_url=original_url_input.strip(),
             )
 
@@ -526,17 +526,11 @@ elif is_bulk:
     _bulk_usage = get_usage()
     _lite_model = "gemini-2.5-flash-lite"
     _lite_remaining = _bulk_usage.get(_lite_model, {}).get("remaining", 0)
-    if chunked_mode:
-        st.warning(
-            f"Chunked mode ON: each document may use 1-4 API calls depending on length. "
-            f"Remaining {_lite_model.replace('gemini-', '')}: **{_lite_remaining}** calls today. "
-            f"For {len(uploaded_files)} files, worst case ~{len(uploaded_files) * 3} calls."
-        )
-    else:
-        st.caption(
-            f"Non-chunked mode: ~1 API call per document. "
-            f"Remaining {_lite_model.replace('gemini-', '')}: {_lite_remaining} calls today."
-        )
+    st.warning(
+        f"Chunking is automatic by detected document chunks (better for long/noisy docs). "
+        f"Each document may use ~1-4 API calls depending on chunk count. "
+        f"Remaining {_lite_model.replace('gemini-', '')}: **{_lite_remaining}** calls today."
+    )
 
     run_bulk = st.button("Run bulk pipeline", type="primary")
     if run_bulk:
@@ -568,7 +562,7 @@ elif is_bulk:
 
             try:
                 rec, router_log, status_msg = _process_one_pdf(
-                    pdf_bytes, uploaded.name, all_records_so_far, provider, chunked_mode,
+                    pdf_bytes, uploaded.name, all_records_so_far, provider,
                 )
             except Exception as e:
                 results.append({
@@ -683,7 +677,7 @@ elif manual_override and has_paste:
 
         with st.spinner("Extracting..."):
             rec, router_log, status_msg = _process_one_pdf(
-                b"", "Manual Paste", records, provider, chunked_mode,
+                b"", "Manual Paste", records, provider,
                 override_title=title.strip(), override_url=original_url_input.strip(),
             )
 

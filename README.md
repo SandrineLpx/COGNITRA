@@ -20,3 +20,21 @@
 ## Data
 - Records: `data/records.jsonl` (JSON Lines)
 - PDFs saved to: `data/pdfs/`
+
+## Ingest behavior
+- Chunking is automatic based on cleaned document structure (`chunks_count`).
+- The app surfaces chunk-count guidance and estimated API-call impact in the Ingest UI.
+
+## Footprint regions
+- `India`, `China`, `Western Europe`, `Eastern Europe`, `Russia`, `Africa`, `US`, `Mexico`, `Thailand`
+- Legacy `Europe (including Russia)` values are migrated to `Western Europe` unless Russia is explicitly present.
+
+## Tests
+- `pytest` is required for tests.
+- Canonical command:
+  - `python -m pytest -q`
+
+## Bloomberg Date Semantics
+- Use Bloomberg PDF header timestamp as the source-of-truth date when available.
+- Store `publish_date` as date-only (`YYYY-MM-DD`) with no timezone conversion.
+- This avoids PST/UTC rollover flip-flops (for example, Feb 1 PST vs Feb 2 UTC).

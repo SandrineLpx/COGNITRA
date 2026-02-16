@@ -31,6 +31,16 @@ STOPWORDS = {
 }
 
 
+def normalize_title(title: str) -> str:
+    """Normalize title for exact duplicate checks (legacy helper used by tests)."""
+    if not title:
+        return ""
+    t = title.strip().lower()
+    t = re.sub(r"[^a-z0-9\s]", "", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 def _normalize_company_name(name: str) -> str:
     """Normalize company name for grouping: lowercase, remove punctuation."""
     if not name:

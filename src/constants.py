@@ -12,7 +12,7 @@ CANON_TOPICS = [
     "Executive & Organizational",
 ]
 
-FOOTPRINT_REGIONS = ["India", "China", "Europe (including Russia)", "Africa", "US", "Mexico", "Thailand"]
+FOOTPRINT_REGIONS = ["India", "China", "Western Europe", "Eastern Europe", "Russia", "Africa", "US", "Mexico", "Thailand"]
 
 ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Other"}
 ALLOWED_ACTOR_TYPES = {"oem", "supplier", "industry", "other"}
@@ -28,6 +28,120 @@ REQUIRED_KEYS = [
     "topics","keywords","country_mentions","regions_mentioned","regions_relevant_to_kiekert",
     "priority","confidence","evidence_bullets",
     "key_insights","review_status","notes"
+]
+
+# ---------------------------------------------------------------------------
+# Macro-theme detection rules (postprocess-computed, not LLM-extracted).
+# Each rule: name, required signal groups, min_groups to fire.
+#   "companies": at least one company in the record's companies_mentioned
+#   "keywords":  at least one keyword/regex found in record text
+#   "topics":    at least one canonical topic present
+#   "regions":   at least one footprint region present
+# Optional per-rule fields:
+#   "anti_keywords": list[str] — suppress theme if any match and <3 groups hit
+#   "premium_company_gate": bool — require company match in PREMIUM_OEMS
+#   "region_requirements": set[str] — require region group to include one of these
+#   "rollup": str — cluster label for overlapping themes
+# A theme fires when >= min_groups distinct signal groups match.
+# ---------------------------------------------------------------------------
+
+PREMIUM_OEMS = {
+    "bmw", "mercedes-benz", "mercedes", "audi", "porsche",
+    "jaguar", "land rover", "volvo cars", "bentley", "rolls-royce",
+    "maserati", "lamborghini",
+}
+
+MACRO_THEME_RULES = [
+    {
+        "name": "Luxury OEM Stress",
+        "min_groups": 2,
+        "signals": {
+            "companies": PREMIUM_OEMS,
+            "keywords": [r"margin", r"profit\s*warn", r"cost\s*cut", r"restructur",
+                         r"sales\s*declin", r"downturn", r"layoff", r"headcount",
+                         r"earnings\s*miss", r"revenue\s*drop"],
+        },
+        "anti_keywords": [r"record\s*profit", r"sales\s*surge", r"beat\s*expect"],
+        "premium_company_gate": True,
+        "rollup": "Premium OEM Financial/Strategy Stress",
+    },
+    {
+        "name": "China EV Competitive Acceleration",
+        "min_groups": 2,
+        "signals": {
+            "companies": {"byd", "nio", "xpeng", "li auto", "geely", "chery",
+                          "great wall", "saic", "changan"},
+            "keywords": [r"price\s*war", r"ev\s*export", r"electric\s*vehicle",
+                         r"\bev\b", r"\bnev\b", r"battery\s*cost",
+                         r"competition", r"market\s*share"],
+            "regions": {"China"},
+        },
+        "anti_keywords": [r"ev\s*sales\s*stall", r"ev\s*slow"],
+    },
+    {
+        "name": "Software-Defined Premium Shift",
+        "min_groups": 2,
+        "signals": {
+            "companies": {
+                "nvidia", "nvidia corp.",
+                "huawei", "huawei technologies co.",
+                "google", "google llc",
+                "microsoft", "microsoft corporation",
+                "openai", "openai inc.",
+            },
+            "keywords": [r"software.defined", r"\bsdv\b", r"digital\s*cockpit",
+                         r"\bota\b", r"over.the.air", r"connected\s*car",
+                         r"vehicle\s*software", r"digital\s*key",
+                         r"smart\s*entry", r"e.?architecture",
+                         r"\bopenai\b", r"\bmicrosoft\b", r"\bgoogle\b",
+                         r"voice\s*control", r"infotainment", r"ai\s*assistant"],
+            "topics": {"Closure Technology & Innovation",
+                       "Technology Partnerships & Components"},
+        },
+    },
+    {
+        "name": "Margin Compression at Premium OEMs",
+        "min_groups": 2,
+        "signals": {
+            "companies": PREMIUM_OEMS,
+            "keywords": [r"margin", r"cost\s*pressure", r"profit", r"ebit",
+                         r"pricing\s*pressure", r"supplier\s*squeeze",
+                         r"raw\s*material", r"inflation"],
+        },
+        "anti_keywords": [r"record\s*profit", r"margin\s*expan"],
+        "premium_company_gate": True,
+        "rollup": "Premium OEM Financial/Strategy Stress",
+    },
+    {
+        "name": "Tariff & Trade Disruption",
+        "min_groups": 2,
+        "signals": {
+            "keywords": [r"tariff", r"trade\s*war", r"import\s*dut", r"customs",
+                         r"section\s*301", r"nearshoring", r"reshoring",
+                         r"trade\s*barrier", r"countervailing"],
+            "regions": {"US", "Mexico", "China", "Western Europe", "Eastern Europe", "Russia"},
+        },
+        "region_requirements": {"US", "China", "Western Europe", "Eastern Europe", "Russia"},
+    },
+    {
+        "name": "EV Transition Slowdown",
+        "min_groups": 2,
+        "signals": {
+            "keywords": [r"ev\s*slow", r"ev\s*delay", r"hybrid\s*pivot",
+                         r"electrification\s*pause", r"ice\s*demand",
+                         r"ev\s*adoption", r"charging\s*infra",
+                         r"ev\s*target.*push", r"phase.?out\s*delay"],
+            "topics": {"OEM Strategy & Powertrain Shifts"},
+        },
+        "anti_keywords": [r"ev\s*sales\s*surge", r"ev\s*record"],
+    },
+]
+
+STRUCTURAL_ROLLUP_RULES = [
+    {
+        "themes": {"China EV Competitive Acceleration", "Software-Defined Premium Shift"},
+        "rollup": "China Tech-Driven Premium Disruption",
+    },
 ]
 
 FIELD_POLICY = {

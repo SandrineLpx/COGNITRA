@@ -4,7 +4,10 @@ from typing import Any, Dict, List, Optional
 from collections import Counter
 from datetime import datetime
 import re
-from src.constants import ALLOWED_ACTOR_TYPES, ALLOWED_CONF, ALLOWED_SOURCE_TYPES, FIELD_POLICY, FOOTPRINT_REGIONS
+from src.constants import (
+    ALLOWED_ACTOR_TYPES, ALLOWED_CONF, ALLOWED_SOURCE_TYPES,
+    FIELD_POLICY, FOOTPRINT_REGIONS, MACRO_THEME_RULES, PREMIUM_OEMS, STRUCTURAL_ROLLUP_RULES,
+)
 
 # Minimal canonicalization maps (extend as you see patterns)
 COUNTRY_ALIASES = {
@@ -24,9 +27,13 @@ REGION_ALIASES = {
     "usa": "US",
     "us": "US",
     "united states": "US",
-    "europe": "Europe (including Russia)",
-    "eu": "Europe (including Russia)",
-    "e.u.": "Europe (including Russia)",
+    "europe": "Western Europe",
+    "eu": "Western Europe",
+    "e.u.": "Western Europe",
+    "western europe": "Western Europe",
+    "eastern europe": "Eastern Europe",
+    "russia": "Russia",
+    "europe (including russia)": "Western Europe",
 }
 
 REGULATOR_ENTITY_ALIASES = {
@@ -38,17 +45,26 @@ REGULATOR_ENTITY_ALIASES = {
     "e.u.": "EU",
 }
 
-# Country -> footprint region mapping (only for your footprint lens)
+# Country -> footprint region mapping (Option B: Western Europe / Eastern Europe / Russia)
 COUNTRY_TO_FOOTPRINT = {
     "United States": "US",
-    "Germany": "Europe (including Russia)",
-    "France": "Europe (including Russia)",
-    "Italy": "Europe (including Russia)",
-    "Spain": "Europe (including Russia)",
-    "Czech Republic": "Europe (including Russia)",
-    "Turkey": "Europe (including Russia)",
-    "United Kingdom": "Europe (including Russia)",
-    "Russia": "Europe (including Russia)",
+    "Russia": "Russia",
+    "Germany": "Western Europe",
+    "France": "Western Europe",
+    "Italy": "Western Europe",
+    "Spain": "Western Europe",
+    "United Kingdom": "Western Europe",
+    "Switzerland": "Western Europe",
+    "Norway": "Western Europe",
+    "Poland": "Eastern Europe",
+    "Czech Republic": "Eastern Europe",
+    "Slovakia": "Eastern Europe",
+    "Hungary": "Eastern Europe",
+    "Romania": "Eastern Europe",
+    "Bulgaria": "Eastern Europe",
+    "Ukraine": "Eastern Europe",
+    "Belarus": "Eastern Europe",
+    "Turkey": "Eastern Europe",
     "Morocco": "Africa",
     "South Africa": "Africa",
     "India": "India",
@@ -62,6 +78,25 @@ def _norm_token(s: str) -> str:
     s = s.strip()
     s = re.sub(r"\s+", " ", s)
     return s
+
+
+def _canonicalize_company_name(name: str) -> str:
+    c0 = _norm_token(str(name))
+    lower = c0.lower()
+    if lower in _COMPANY_SPECIAL_CANONICAL:
+        return _COMPANY_SPECIAL_CANONICAL[lower]
+    if lower in _OEM_CANONICAL_BY_LOWER:
+        return _OEM_CANONICAL_BY_LOWER[lower]
+
+    base = re.sub(r"[.,]", "", lower)
+    tokens = base.split()
+    while tokens and tokens[-1] in _LEGAL_SUFFIX_TOKENS:
+        tokens.pop()
+    if tokens:
+        base_key = " ".join(tokens)
+        if base_key in PREMIUM_OEMS or base_key in _KEY_OEMS:
+            return _OEM_CANONICAL_BY_LOWER.get(base_key, _norm_token(base_key.title().replace("Benz", "Benz")))
+    return c0
 
 
 def _is_iso_date(value: Any) -> bool:
@@ -143,6 +178,35 @@ _ACTOR_TYPE_ALIASES = {
     "regulator": "other",
 }
 
+_OUR_COMPANY_ALIASES = {"kiekert", "kiekert ag", "kiekert group"}
+
+_KEY_OEMS = {
+    "vw", "volkswagen", "bmw", "hyundai", "kia", "ford", "gm",
+    "general motors", "stellantis", "toyota", "mercedes", "mercedes-benz",
+    "audi", "porsche", "nissan", "honda", "renault", "peugeot",
+    "tata", "mahindra", "byd", "geely", "chery", "great wall",
+}
+
+_OEM_CANONICAL_BY_LOWER = {
+    "bmw": "BMW",
+    "byd": "BYD",
+    "gm": "GM",
+    "mercedes-benz": "Mercedes-Benz",
+    "mercedes": "Mercedes",
+    "vw": "VW",
+}
+
+_LEGAL_SUFFIX_TOKENS = {
+    "group", "ag", "se", "nv", "inc", "inc.", "corp", "corp.",
+    "corporation", "co", "co.", "ltd", "llc",
+}
+
+_COMPANY_SPECIAL_CANONICAL = {
+    "mercedes-benz group ag": "Mercedes-Benz",
+    "mercedes-benz ag": "Mercedes-Benz",
+    "bmw ag": "BMW",
+}
+
 
 def _apply_field_policy(
     rec: Dict[str, Any], field: str, value: Any, source: str, reason: Optional[str] = None
@@ -189,6 +253,28 @@ def _normalize_regions(regions: List[str]) -> List[str]:
     return _dedupe_keep_order(out)
 
 
+def _normalize_regions_with_migrations(regions: List[str]) -> tuple[List[str], List[Dict[str, str]]]:
+    out: List[str] = []
+    migrations: List[Dict[str, str]] = []
+    for r in regions:
+        r0 = _norm_token(r)
+        key = r0.lower()
+        mapped = REGION_ALIASES.get(key, r0)
+        if key == "europe (including russia)":
+            migrations.append({"from": "Europe (including Russia)", "to": "Western Europe"})
+        out.append(mapped)
+    return _dedupe_keep_order(out), migrations
+
+
+def _append_audit_entry(rec: Dict[str, Any], key: str, value: Any) -> None:
+    cur = rec.get(key)
+    if not isinstance(cur, list):
+        cur = []
+    if value not in cur:
+        cur.append(value)
+    rec[key] = cur
+
+
 def _record_text(rec: Dict[str, Any], source_text: Optional[str] = None) -> str:
     parts: List[str] = []
     if isinstance(source_text, str) and source_text.strip():
@@ -202,6 +288,31 @@ def _record_text(rec: Dict[str, Any], source_text: Optional[str] = None) -> str:
         if isinstance(v, list):
             parts.extend(str(x) for x in v)
     return " ".join(parts)
+
+
+def _contains_company_alias(text: str, aliases: set[str]) -> bool:
+    text_l = text.lower()
+    for alias in aliases:
+        if re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", text_l):
+            return True
+    return False
+
+
+def _detect_mentions_our_company(rec: Dict[str, Any], source_text: Optional[str] = None) -> bool:
+    """Deterministic company mention detection from record evidence fields."""
+    parts: List[str] = []
+    if isinstance(source_text, str) and source_text.strip():
+        parts.append(source_text)
+    for k in ("title",):
+        v = rec.get(k)
+        if isinstance(v, str) and v.strip():
+            parts.append(v)
+    for k in ("evidence_bullets", "key_insights", "keywords"):
+        v = rec.get(k)
+        if isinstance(v, list):
+            parts.extend(str(x) for x in v if str(x).strip())
+    haystack = " ".join(parts)
+    return _contains_company_alias(haystack, _OUR_COMPANY_ALIASES)
 
 
 _DATE_PATTERNS = [
@@ -263,6 +374,132 @@ def parse_publish_date_from_text(text: str) -> Optional[str]:
     return extract_publish_date_iso(text)
 
 
+def _header_zone(text: str, max_lines: int = 60, max_chars: int = 5000) -> str:
+    lines = text.splitlines()[:max_lines]
+    return "\n".join(lines)[:max_chars]
+
+
+def _body_zone_excluding_header(text: str, skip_lines: int = 60) -> str:
+    lines = text.splitlines()
+    if len(lines) <= skip_lines:
+        return ""
+    return "\n".join(lines[skip_lines:])
+
+
+_PUBLISH_TIMESTAMP_LINE_RE = re.compile(
+    r"\bat\s+\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:PST|PDT|EST|EDT|CST|CDT|MST|MDT|UTC|GMT)\b",
+    re.IGNORECASE,
+)
+
+
+def _event_date_scan_text(text: str) -> str:
+    """Remove publisher-header/timestamp lines before event-date sniffing."""
+    body = _body_zone_excluding_header(text)
+    zone = body or text
+    keep: List[str] = []
+    for ln in zone.splitlines():
+        if _PUBLISH_TIMESTAMP_LINE_RE.search(ln):
+            continue
+        keep.append(ln)
+    return "\n".join(keep)
+
+
+def _extract_date_from_pattern_list(text: str, patterns: List[re.Pattern]) -> Optional[str]:
+    for pat in patterns:
+        m = pat.search(text)
+        if not m:
+            continue
+        month = _parse_month(m.group("month"))
+        if not month:
+            continue
+        try:
+            return datetime(int(m.group("year")), int(month), int(m.group("day"))).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_bloomberg_header_publish_date(text: str) -> Optional[str]:
+    """Extract Bloomberg-style header timestamp date (e.g., 'February 1, 2026 at 9:00 PM PST')."""
+    header = _header_zone(text)
+    patterns = [
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})\s+at\s+"
+            r"\d{1,2}:\d{2}\s*(?:AM|PM)\s*(?:PST|PDT|EST|EDT|CST|CDT|MST|MDT|UTC|GMT)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})\s+at\s+"
+            r"\d{1,2}:\d{2}\s*(?:AM|PM)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})\b",
+            re.IGNORECASE,
+        ),
+    ]
+    return _extract_date_from_pattern_list(header, patterns)
+
+
+def _extract_reuters_header_publish_date(text: str) -> Optional[str]:
+    """Extract Reuters-style header date/timestamp in article header."""
+    header = _header_zone(text)
+    patterns = [
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})(?:\s+at)?\s+"
+            r"\d{1,2}:\d{2}\s*(?:AM|PM)(?:\s*(?:PST|PDT|EST|EDT|CST|CDT|MST|MDT|UTC|GMT))?\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})\b",
+            re.IGNORECASE,
+        ),
+    ]
+    return _extract_date_from_pattern_list(header, patterns)
+
+
+def _extract_auto_news_header_publish_date(text: str) -> Optional[str]:
+    """Extract Automotive News style header date/timestamp."""
+    header = _header_zone(text)
+    patterns = [
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})\s+at\s+"
+            r"\d{1,2}:\d{2}\s*(?:AM|PM)?\b",
+            re.IGNORECASE,
+        ),
+        re.compile(
+            r"\b(?P<month>[A-Za-z]{3,9})\s+(?P<day>\d{1,2}),\s*(?P<year>\d{4})\b",
+            re.IGNORECASE,
+        ),
+    ]
+    return _extract_date_from_pattern_list(header, patterns)
+
+
+def _extract_sp_header_publish_date(text: str) -> Optional[str]:
+    """Extract S&P-style header timestamp/date."""
+    return _extract_auto_news_header_publish_date(text)
+
+
+def _extract_marklines_header_publish_date(text: str) -> Optional[str]:
+    """Extract MarkLines-style header timestamp/date."""
+    return _extract_auto_news_header_publish_date(text)
+
+
+def _extract_press_release_header_publish_date(text: str) -> Optional[str]:
+    """Extract press release header timestamp/date."""
+    return _extract_auto_news_header_publish_date(text)
+
+
+PUBLISHER_HEADER_RULES = {
+    "Bloomberg": ("rule:bloomberg_header_publish_date", _extract_bloomberg_header_publish_date),
+    "Reuters": ("rule:reuters_header_publish_date", _extract_reuters_header_publish_date),
+    "Automotive News": ("rule:automotive_news_header_publish_date", _extract_auto_news_header_publish_date),
+    "S&P": ("rule:sp_header_publish_date", _extract_sp_header_publish_date),
+    "MarkLines": ("rule:marklines_header_publish_date", _extract_marklines_header_publish_date),
+    "Press Release": ("rule:press_release_header_publish_date", _extract_press_release_header_publish_date),
+}
+
+
 def infer_publisher(text: str) -> Optional[str]:
     t = text.lower()
     if (
@@ -302,6 +539,20 @@ def _regions_from_text_hints(text_l: str) -> List[str]:
         if region.lower() in text_l:
             out.append(region)
     return _dedupe_keep_order(out)
+
+
+_GENERIC_EUROPE_RE = re.compile(r"\b(europe|eu|e\.u\.)\b", re.IGNORECASE)
+
+
+def _has_generic_europe_mention(text_l: str) -> bool:
+    if not isinstance(text_l, str):
+        return False
+    if not _GENERIC_EUROPE_RE.search(text_l):
+        return False
+    # Generic "Europe" with no explicit sub-region marker defaults to Western Europe.
+    if re.search(r"\b(western europe|eastern europe|russia)\b", text_l):
+        return False
+    return True
 
 
 def derive_regions_relevant_to_kiekert(country_mentions: List[str]) -> List[str]:
@@ -344,6 +595,42 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
         _apply_field_policy(rec, "original_url", None, source="postprocess", reason="empty_url_to_null")
 
     combined_text = _record_text(rec, source_text=source_text)
+    mentions_our_company = _detect_mentions_our_company(rec, source_text=source_text)
+    set_field(
+        rec,
+        "mentions_our_company",
+        mentions_our_company,
+        source="postprocess",
+        reason="company_alias_detected" if mentions_our_company else "company_alias_not_found",
+    )
+
+    rec["_publisher_date_override_applied"] = False
+    rec["_publisher_date_override_source"] = None
+    publisher = str(rec.get("source_type") or "")
+    publisher_rule = PUBLISHER_HEADER_RULES.get(publisher)
+    if publisher_rule:
+        publish_rule_source, publish_parser = publisher_rule
+        before_publish = rec.get("publish_date")
+        header_date = publish_parser(combined_text)
+        if header_date and before_publish != header_date:
+            _apply_field_policy(
+                rec,
+                "publish_date",
+                header_date,
+                source=publish_rule_source,
+                reason="publisher_header_timestamp_preferred",
+            )
+            _apply_field_policy(
+                rec,
+                "publish_date_confidence",
+                "High",
+                source=publish_rule_source,
+                reason="publisher_header_timestamp_preferred",
+            )
+            if _is_iso_date(before_publish):
+                rec["_publisher_date_override_applied"] = True
+                rec["_publisher_date_override_source"] = publish_rule_source
+
     parsed_date = parse_publish_date_from_text(combined_text)
     if parsed_date:
         if not rec.get("publish_date"):
@@ -362,7 +649,10 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
                 reason="publish_date_missing_backfill",
             )
         else:
-            _apply_field_policy(rec, "event_date", parsed_date, source="postprocess", reason="regex_detected_event_date")
+            event_scan_text = _event_date_scan_text(combined_text)
+            event_date = parse_publish_date_from_text(event_scan_text)
+            if event_date and event_date != rec.get("publish_date"):
+                _apply_field_policy(rec, "event_date", event_date, source="postprocess", reason="regex_detected_event_date")
 
     inferred_source = infer_publisher(combined_text)
     if inferred_source:
@@ -388,11 +678,28 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
         _apply_field_policy(rec, "country_mentions", [], source="postprocess", reason="country_mentions_not_list")
 
     regions = rec.get("regions_mentioned") or []
-    region_items = _normalize_regions([str(x) for x in regions]) if isinstance(regions, list) else []
+    region_items: List[str] = []
+    if isinstance(regions, list):
+        region_items, region_migrations = _normalize_regions_with_migrations([str(x) for x in regions])
+        for mig in region_migrations:
+            _append_audit_entry(rec, "_region_migrations", mig)
     region_items = [r for r in region_items if r in FOOTPRINT_REGIONS]
 
-    implied = derive_regions_relevant_to_kiekert(rec["country_mentions"])
-    hinted = _regions_from_text_hints(_record_text_for_region_hints(rec))
+    legacy_relevant = rec.get("regions_relevant_to_kiekert") or []
+    legacy_relevant_items: List[str] = []
+    if isinstance(legacy_relevant, list):
+        legacy_relevant_items, rel_migrations = _normalize_regions_with_migrations([str(x) for x in legacy_relevant])
+        for mig in rel_migrations:
+            _append_audit_entry(rec, "_region_migrations", mig)
+    legacy_relevant_items = [r for r in legacy_relevant_items if r in FOOTPRINT_REGIONS]
+
+    implied = _dedupe_keep_order(derive_regions_relevant_to_kiekert(rec["country_mentions"]) + legacy_relevant_items)
+    hints_text = _record_text_for_region_hints(rec)
+    hinted = _regions_from_text_hints(hints_text)
+    if not rec["country_mentions"] and _has_generic_europe_mention(hints_text):
+        _append_audit_entry(rec, "_region_ambiguity", "Europe_generic_defaulted_to_Western_Europe")
+        if "Western Europe" not in hinted:
+            hinted.append("Western Europe")
     merged = region_items + implied + hinted
 
     _apply_field_policy(
@@ -437,17 +744,7 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
 
     comps = rec.get("companies_mentioned") or []
     if isinstance(comps, list):
-        fixed = []
-        for c in comps:
-            c0 = _norm_token(str(c))
-            if c0.lower() == "gm":
-                fixed.append("GM")
-            elif c0.lower() == "byd":
-                fixed.append("BYD")
-            elif c0.lower() == "vw":
-                fixed.append("VW")
-            else:
-                fixed.append(c0)
+        fixed = [_canonicalize_company_name(str(c)) for c in comps]
         _apply_field_policy(
             rec,
             "companies_mentioned",
@@ -473,12 +770,18 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
         )
 
     _ensure_meta(rec)
-    if _is_iso_date(original_publish_date) and rec.get("publish_date") != original_publish_date:
+    publish_source = rec.get("_provenance", {}).get("publish_date", {}).get("source")
+    if (
+        _is_iso_date(original_publish_date)
+        and rec.get("publish_date") != original_publish_date
+        and not str(publish_source or "").endswith("_header_publish_date")
+    ):
         _apply_field_policy(
             rec, "publish_date", original_publish_date, source="postprocess", reason="preserve_existing_valid_publish_date"
         )
 
     rec = _compute_confidence(rec)
+    rec = _detect_macro_themes(rec)
     return rec
 
 
@@ -507,7 +810,7 @@ def _compute_confidence(rec: Dict[str, Any]) -> Dict[str, Any]:
 
     # -1 per 3 postprocess rule corrections
     rule_impact = rec.get("_rule_impact") or {}
-    total_rules = sum(int(v) for v in rule_impact.values())
+    total_rules = sum(int(v) for k, v in rule_impact.items() if str(k) != "computed_confidence")
     signals["rule_corrections"] = -(total_rules // 3)
 
     # -1 if publish_date was backfilled by regex (LLM missed it)
@@ -537,14 +840,6 @@ _CLOSURE_KEYWORDS = re.compile(
     r"\b(latch|latches|door\s*system|door\s*handle|handle|digital\s*key|smart\s*entry|cinch|striker|closure)\b",
     re.IGNORECASE,
 )
-
-_KEY_OEMS = {
-    "vw", "volkswagen", "bmw", "hyundai", "kia", "ford", "gm",
-    "general motors", "stellantis", "toyota", "mercedes", "mercedes-benz",
-    "audi", "porsche", "nissan", "honda", "renault", "peugeot",
-    "tata", "mahindra", "byd", "geely", "chery", "great wall",
-}
-
 
 def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
     if rec.get("priority") == "High":
@@ -585,6 +880,203 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
         set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_key_oem")
         return rec
 
+    return rec
+
+
+# ---------------------------------------------------------------------------
+# Macro-theme detection helpers
+# ---------------------------------------------------------------------------
+
+def _build_field_map(rec: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Build a map of field_name -> list of lowercased text fragments for matching."""
+    fm: Dict[str, List[str]] = {}
+    for k in ("title",):
+        v = rec.get(k)
+        if isinstance(v, str) and v.strip():
+            fm[k] = [v.lower()]
+    for k in ("evidence_bullets", "key_insights", "keywords"):
+        v = rec.get(k)
+        if isinstance(v, list):
+            fm[k] = [str(x).lower() for x in v]
+    return fm
+
+
+def _find_terms_in_fields(
+    patterns: List[str], field_map: Dict[str, List[str]],
+) -> Dict[str, Any]:
+    """Search regex patterns across a field map. Returns matched terms and field locations."""
+    terms_found: List[str] = []
+    fields_hit: List[str] = []
+    for pat in patterns:
+        for field_name, fragments in field_map.items():
+            for idx, frag in enumerate(fragments):
+                if re.search(pat, frag):
+                    terms_found.append(pat)
+                    loc = f"{field_name}[{idx}]" if len(fragments) > 1 else field_name
+                    if loc not in fields_hit:
+                        fields_hit.append(loc)
+                    break  # one hit per field per pattern is enough
+    return {"terms": _dedupe_keep_order(terms_found), "fields": _dedupe_keep_order(fields_hit)}
+
+
+def _match_companies(
+    companies_l: set, rule_companies: set, field_name: str = "companies_mentioned",
+) -> Dict[str, Any]:
+    """Check company overlap; return matched terms and field locations."""
+    overlap = companies_l & rule_companies
+    if overlap:
+        return {"terms": sorted(overlap), "fields": [field_name]}
+    return {"terms": [], "fields": []}
+
+
+def _match_set(
+    record_set: set, rule_set: set, field_name: str,
+) -> Dict[str, Any]:
+    """Check set overlap for topics or regions."""
+    overlap = record_set & rule_set
+    if overlap:
+        return {"terms": sorted(overlap), "fields": [field_name]}
+    return {"terms": [], "fields": []}
+
+
+def _detect_macro_themes(rec: Dict[str, Any]) -> Dict[str, Any]:
+    """Tag record with macro-themes derived from keyword/company/topic/region signals."""
+    field_map = _build_field_map(rec)
+    companies_l = {c.lower() for c in (rec.get("companies_mentioned") or []) if isinstance(c, str)}
+    topics_set = set(rec.get("topics") or [])
+    regions_set = set(rec.get("regions_mentioned") or []) | set(rec.get("regions_relevant_to_kiekert") or [])
+
+    matched: List[str] = []
+    detail_by_theme: Dict[str, Any] = {}
+    strength_by_theme: Dict[str, int] = {}
+    rollups: List[str] = []
+
+    for rule in MACRO_THEME_RULES:
+        name = rule["name"]
+        signals = rule["signals"]
+        min_groups = rule["min_groups"]
+        groups_matched: List[str] = []
+        matches: Dict[str, Any] = {}
+
+        # --- companies ---
+        if "companies" in signals:
+            cm = _match_companies(companies_l, signals["companies"])
+            if cm["terms"]:
+                groups_matched.append("companies")
+                matches["companies"] = cm
+
+        # --- keywords ---
+        if "keywords" in signals:
+            km = _find_terms_in_fields(signals["keywords"], field_map)
+            if km["terms"]:
+                groups_matched.append("keywords")
+                matches["keywords"] = km
+
+        # --- topics ---
+        if "topics" in signals:
+            tm = _match_set(topics_set, signals["topics"], "topics")
+            if tm["terms"]:
+                groups_matched.append("topics")
+                matches["topics"] = tm
+
+        # --- regions ---
+        if "regions" in signals:
+            rm = _match_set(regions_set, signals["regions"], "regions_mentioned")
+            if rm["terms"]:
+                groups_matched.append("regions")
+                matches["regions"] = rm
+
+        groups_count = len(groups_matched)
+
+        # --- anti_keywords suppression ---
+        anti_hit: Dict[str, Any] = {"terms": [], "fields": []}
+        anti_patterns = rule.get("anti_keywords") or []
+        if anti_patterns and groups_count >= min_groups:
+            anti_hit = _find_terms_in_fields(anti_patterns, field_map)
+            if anti_hit["terms"] and groups_count < 3:
+                # Suppress: anti-keyword matched and signal not strong enough
+                detail_by_theme[name] = {
+                    "fired": False,
+                    "groups_matched": groups_matched,
+                    "matches": matches,
+                    "anti_keyword_hits": anti_hit,
+                    "suppressed_by_anti_keyword": True,
+                    "min_groups": min_groups,
+                }
+                strength_by_theme[name] = 0
+                continue
+
+        # --- premium_company_gate ---
+        if rule.get("premium_company_gate"):
+            if not (companies_l & PREMIUM_OEMS):
+                detail_by_theme[name] = {
+                    "fired": False,
+                    "groups_matched": groups_matched,
+                    "matches": matches,
+                    "anti_keyword_hits": anti_hit,
+                    "suppressed_by_premium_gate": True,
+                    "min_groups": min_groups,
+                }
+                strength_by_theme[name] = 0
+                continue
+
+        # --- region_requirements ---
+        req_regions = rule.get("region_requirements")
+        if req_regions:
+            if not (regions_set & req_regions):
+                detail_by_theme[name] = {
+                    "fired": False,
+                    "groups_matched": groups_matched,
+                    "matches": matches,
+                    "anti_keyword_hits": anti_hit,
+                    "suppressed_by_region_requirement": True,
+                    "min_groups": min_groups,
+                }
+                strength_by_theme[name] = 0
+                continue
+
+        # --- min_groups threshold ---
+        fired = groups_count >= min_groups
+
+        # --- strength ---
+        if fired:
+            if name == "Software-Defined Premium Shift":
+                strength = 2 if groups_count >= 3 else 1
+            elif groups_count >= 4:
+                strength = 3
+            elif groups_count == 3:
+                strength = 2
+            else:
+                strength = 1
+        else:
+            strength = 0
+
+        detail_by_theme[name] = {
+            "fired": fired,
+            "groups_matched": groups_matched,
+            "matches": matches,
+            "anti_keyword_hits": anti_hit,
+            "min_groups": min_groups,
+        }
+        strength_by_theme[name] = strength
+
+        if fired:
+            matched.append(name)
+            rollup = rule.get("rollup")
+            if rollup and rollup not in rollups:
+                rollups.append(rollup)
+
+    matched_set = set(matched)
+    for rollup_rule in STRUCTURAL_ROLLUP_RULES:
+        themes = set(rollup_rule.get("themes") or [])
+        label = rollup_rule.get("rollup")
+        if label and themes and themes.issubset(matched_set) and label not in rollups:
+            rollups.append(label)
+
+    rec["macro_themes_detected"] = matched
+    rec["_macro_theme_detail"] = detail_by_theme
+    rec["_macro_theme_strength"] = strength_by_theme
+    rec["_macro_theme_rollups"] = rollups
     return rec
 
 
