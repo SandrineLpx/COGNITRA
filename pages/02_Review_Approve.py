@@ -530,39 +530,42 @@ with st.container():
         reviewed_by = st.text_input("Reviewed By", value=str(rec.get("reviewed_by") or ""), key=f"reviewed_by_{record_id}")
         notes = st.text_area("Notes", value=str(rec.get("notes") or ""), height=120, key=f"notes_{record_id}")
 
-    raw = st.text_area(
-        "Record JSON (editable)",
-        value=json.dumps(rec, ensure_ascii=False, indent=2),
-        height=320,
-        key=f"json_editor_{record_id}",
-    )
-    try:
-        parsed_obj = json.loads(raw)
-        if not isinstance(parsed_obj, dict):
-            raise ValueError("Top-level JSON must be an object.")
-        rec_obj = dict(rec)
-        rec_obj.update(parsed_obj)
-        rec_obj["record_id"] = record_id
-        rec_obj["review_status"] = status_value
-        rec_obj["reviewed_by"] = reviewed_by
-        rec_obj["notes"] = notes
-        rec_obj["exclude_from_brief"] = bool(exclude_value)
-        ok, errs = validate_record(rec_obj)
-    except Exception as exc:
-        rec_obj = None
-        ok = False
-        errs = [f"Invalid JSON: {exc}"]
+    raw_default = json.dumps(rec, ensure_ascii=False, indent=2)
+    rec_obj = None
+    ok = False
+    errs: List[str] = []
+    with st.expander("Advanced: Edit raw JSON", expanded=False):
+        raw = st.text_area(
+            "Record JSON (editable)",
+            value=raw_default,
+            height=320,
+            key=f"json_editor_{record_id}",
+        )
+        try:
+            parsed_obj = json.loads(raw)
+            if not isinstance(parsed_obj, dict):
+                raise ValueError("Top-level JSON must be an object.")
+            rec_obj = dict(rec)
+            rec_obj.update(parsed_obj)
+            rec_obj["record_id"] = record_id
+            rec_obj["review_status"] = status_value
+            rec_obj["reviewed_by"] = reviewed_by
+            rec_obj["notes"] = notes
+            rec_obj["exclude_from_brief"] = bool(exclude_value)
+            ok, errs = validate_record(rec_obj)
+        except Exception as exc:
+            rec_obj = None
+            ok = False
+            errs = [f"Invalid JSON: {exc}"]
 
-    if not ok:
-        st.warning("Validation issues")
-        for err in errs:
-            st.caption(f"- {err}")
+        if not ok:
+            st.warning("Validation issues")
+            for err in errs:
+                st.caption(f"- {err}")
 
     with st.expander("Rendered Intelligence Brief", expanded=True):
-        if rec_obj is not None:
-            st.code(render_intelligence_brief(rec_obj), language="markdown")
-        else:
-            st.caption("Valid JSON required to render.")
+        render_source = rec_obj if rec_obj is not None else rec
+        st.code(render_intelligence_brief(render_source), language="markdown")
 
     s1, s2, s3 = st.columns(3)
     with s1:
@@ -581,7 +584,7 @@ with st.container():
             else:
                 st.info("No changes to save.")
     with s2:
-        if st.button("Quick Approve", disabled=rec_obj is None, key=f"quick_approve_{record_id}"):
+        if st.button("Quick Approve", key=f"quick_approve_{record_id}"):
             changed = False
             updated = {
                 "review_status": "Approved",
@@ -600,7 +603,7 @@ with st.container():
             else:
                 st.info("Record already in this state.")
     with s3:
-        if st.button("Quick Disapprove", disabled=rec_obj is None, key=f"quick_disapprove_{record_id}"):
+        if st.button("Quick Disapprove", key=f"quick_disapprove_{record_id}"):
             changed = False
             updated = {
                 "review_status": "Disapproved",

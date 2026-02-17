@@ -225,8 +225,10 @@ if st.session_state.get("weekly_ai_brief_text"):
     saved_week_range = st.session_state.get("weekly_ai_brief_week_range", week_range)
     saved_ids = st.session_state.get("weekly_ai_brief_selected_ids", selected_ids)
 
-    st.code(saved_text, language="markdown")
-    st.text_area("Copy-friendly version", value=saved_text, height=280)
+    with st.expander("Rendered brief (readable)", expanded=True):
+        st.markdown(saved_text)
+    with st.expander("Copy / Export (raw text)", expanded=False):
+        st.text_area("Copy-friendly version", value=saved_text, height=280)
     st.caption(
         f"Model: {saved_usage.get('model', 'unknown')} | "
         f"prompt={saved_usage.get('prompt_tokens', '?')} "

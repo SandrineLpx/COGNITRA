@@ -13,7 +13,7 @@ No emojis. Keep the language executive-friendly and evidence-based.
 ```markdown
 INTELLIGENCE BRIEF
 Summary Date: [YYYY-MM-DD]
-Source Type: [Bloomberg | Automotive News | Reuters | Patent | Press Release | Other]
+Source Type: [Automotive News | Bloomberg | Financial News | Industry Publication | MarkLines | Other | Patent | Press Release | Reuters | S&P]
 Publish Date: [YYYY-MM-DD or Unknown]
 Original URL: [optional]
 
