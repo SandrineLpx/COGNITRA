@@ -43,6 +43,9 @@ This is the core of your handoff. Provide enough detail that an engineer could r
 
 Tips from past students: Include screenshots, code snippets, and workflow diagrams. The more transparent and detailed you are about your process, the stronger this section will be.
 
+`document this in the technical report in solution approach and technical implementation as I started this project writting skill.md and references files in .md. And as i was nuilding my tool and making iteration with AI and the scripts, the .md were not used. then this is when this chat happened. Explained it with enough details that it is clear to an engneer reading it, and understand why that approach makes sense. Cover the design decisions that what made: what approaches was considered, and why this choice ? As the design has been iterated, describe what changed and why. Include diagrams and placeholder for screenshots of the system architecture where helpful. Describe at least one meaningful iteration: what was changed, why, and whether it improved performance. Be transparent about the building process, including bottlenecks, frustrations, and workarounds `
+
+
 #### Results & Evaluation
 Present your results clearly. How did you evaluate whether your tool works well? Define your success criteria and metrics (e.g., accuracy, time saved, user satisfaction, task completion rate). Include at least 2–3 test cases showing your system in action, and discuss what you observed — including failures or edge cases. Refer to the benchmarking guidance below for more detail.
 

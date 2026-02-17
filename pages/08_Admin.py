@@ -5,8 +5,9 @@ from pathlib import Path
 from src.storage import load_records, overwrite_records, RECORDS_PATH
 from src.dedupe import dedupe_records
 
-st.set_page_config(page_title="Admin", layout="wide")
-st.title("Admin")
+st.set_page_config(page_title="Advanced / Admin", layout="wide")
+st.title("Advanced / Admin")
+st.caption("Developer/analyst utilities.")
 
 records = load_records()
 if not records:
@@ -72,8 +73,10 @@ else:
         st.caption(f"• Canonical: {canonical_path}\n• Duplicates: {dups_path}")
 
 st.divider()
-st.subheader("Admin")
-if st.button("Clear all records (demo reset)", type="secondary"):
-    overwrite_records([])
-    st.success("Cleared.")
-    st.caption(f"Data file: {RECORDS_PATH}")
+with st.expander("Danger Zone", expanded=False):
+    st.caption("Warning: this permanently clears stored records and cannot be undone.")
+    confirm_clear = st.checkbox("I understand this will permanently clear all records", value=False)
+    if st.button("Clear all records (demo reset)", type="secondary", disabled=not confirm_clear):
+        overwrite_records([])
+        st.success("Cleared.")
+        st.caption(f"Data file: {RECORDS_PATH}")

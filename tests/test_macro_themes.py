@@ -239,6 +239,28 @@ class TestRegionBucketingOptionB:
         migrations = out.get("_region_migrations") or []
         assert {"from": "Europe (including Russia)", "to": "Western Europe"} in migrations
 
+    def test_toyota_argentina_maps_to_latin_america_and_never_us_without_us_signal(self):
+        rec = _base_record(
+            title="Toyota Argentina production update",
+            country_mentions=["Argentina"],
+            regions_mentioned=["US"],  # Simulate bad extraction.
+            regions_relevant_to_kiekert=[],
+            evidence_bullets=[
+                "Toyota release Feb 4, 2026 announced local program updates.",
+                "Argentina operations update was included in the release.",
+            ],
+        )
+        source_text = (
+            "Toyota Argentina\n"
+            "Feb 07, 2026\n"
+            "On February 4, 2026, Toyota released updates for local operations in Argentina.\n"
+        )
+        out = postprocess_record(rec, source_text=source_text)
+
+        assert "Latin America" in out.get("regions_mentioned", [])
+        assert "US" not in out.get("regions_mentioned", [])
+        assert "Latin America" in out.get("regions_relevant_to_kiekert", [])
+
 
 # ============================================================================
 # Premium company gate
@@ -401,6 +423,63 @@ class TestBackwardCompat:
 
         assert rec["macro_themes_detected"] == []
         assert rec["_macro_theme_rollups"] == []
+
+
+# ============================================================================
+# Macro theme priority escalation
+# ============================================================================
+
+class TestMacroThemePriorityEscalation:
+
+    def test_tariff_theme_with_footprint_escalates_priority_high(self):
+        rec = _base_record(
+            title="US tariff disruption raises sourcing risk",
+            priority="Medium",
+            keywords=["tariff", "trade war", "import duty", "customs", "auto"],
+            country_mentions=["United States"],
+            regions_mentioned=[],
+            regions_relevant_to_kiekert=[],
+        )
+        out = postprocess_record(rec)
+
+        assert "Tariff & Trade Disruption" in out["macro_themes_detected"]
+        assert out.get("priority") == "High"
+        assert out.get("priority_final") == "High"
+        assert out.get("priority_reason") == "footprint_and_macro_theme:Tariff & Trade Disruption"
+
+    def test_theme_without_footprint_does_not_escalate(self):
+        rec = _base_record(
+            title="Mercedes warns on margin pressure",
+            priority="Medium",
+            companies_mentioned=["Mercedes-Benz"],
+            keywords=["margin", "profit warn", "cost pressure", "premium", "auto"],
+            country_mentions=[],
+            regions_mentioned=[],
+            regions_relevant_to_kiekert=[],
+        )
+        out = postprocess_record(rec)
+
+        assert "Luxury OEM Stress" in out["macro_themes_detected"]
+        assert out.get("regions_relevant_to_kiekert") == []
+        assert out.get("priority") == "Medium"
+        assert out.get("priority_final") == "Medium"
+        assert out.get("priority_reason") != "footprint_and_macro_theme:Luxury OEM Stress"
+
+    def test_existing_priority_rule_reason_preserved_when_already_high(self):
+        rec = _base_record(
+            title="Mercedes margin pressure in Germany",
+            priority="Medium",
+            companies_mentioned=["Mercedes-Benz"],
+            keywords=["margin", "cost pressure", "profit", "auto", "premium"],
+            country_mentions=["Germany"],
+            regions_mentioned=[],
+            regions_relevant_to_kiekert=[],
+        )
+        out = postprocess_record(rec)
+
+        assert "Luxury OEM Stress" in out["macro_themes_detected"]
+        assert out.get("priority") == "High"
+        assert out.get("priority_reason") == "footprint_and_key_oem"
 
 
 # ============================================================================

@@ -1,5 +1,38 @@
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Canonical topics — multi-label, 1-4 per record.
+# Tagging guidance (use / don't use) is embedded in the extraction prompt
+# in model_router.py. Update both places when adding or renaming a topic.
+#
+#   OEM Strategy & Powertrain Shifts
+#     Use: broad OEM pivots (BEV/ICE mix, vertical integration, platform resets, localization)
+#     Not: single program updates (→ OEM Programs)
+#   Closure Technology & Innovation
+#     Use: ONLY when latch/door/handle/digital key/smart entry/cinch appears explicitly
+#     Not: general vehicle electronics (→ Technology Partnerships)
+#   OEM Programs & Vehicle Platforms
+#     Use: specific program announcements (launches, refreshes, sourcing decisions)
+#     Not: broad strategy narratives (→ OEM Strategy)
+#   Regulatory & Safety
+#     Use: regulations, standards, recalls, cybersecurity rules
+#     Not: general political news (→ Market & Competition or Supply Chain)
+#   Supply Chain & Manufacturing
+#     Use: plant openings/closures, disruptions, logistics, labor, tariffs on supply
+#     Not: pure financial performance (→ Financial & Business Performance)
+#   Technology Partnerships & Components
+#     Use: partnerships/component sourcing where tech is central (chips, sensors, connectivity)
+#     Not: purely commercial alliances (→ Market & Competition)
+#   Market & Competition
+#     Use: demand, registrations, pricing, share shifts, competitor comparisons
+#     Not: internal exec changes (→ Executive & Organizational)
+#   Financial & Business Performance
+#     Use: earnings, guidance, M&A, restructurings, insolvency (financial lens)
+#     Not: exec churn without financial angle (→ Executive & Organizational)
+#   Executive & Organizational
+#     Use: leadership changes, governance, org restructuring
+#     Not: M&A purely as transaction (→ Financial & Business Performance)
+# ---------------------------------------------------------------------------
 CANON_TOPICS = [
     "OEM Strategy & Powertrain Shifts",
     "Closure Technology & Innovation",
@@ -12,10 +45,44 @@ CANON_TOPICS = [
     "Executive & Organizational",
 ]
 
-FOOTPRINT_REGIONS = ["India", "China", "Western Europe", "Eastern Europe", "Russia", "Africa", "US", "Mexico", "Thailand"]
+FOOTPRINT_REGIONS = [
+    "India",
+    "China",
+    "Western Europe",
+    "Eastern Europe",
+    "Russia",
+    "Africa",
+    "US",
+    "Mexico",
+    "Latin America",
+    "Thailand",
+    "Japan",
+    "Asia",
+]
 
-ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Other"}
-ALLOWED_ACTOR_TYPES = {"oem", "supplier", "industry", "other"}
+# Display-level region buckets for regions_mentioned (no individual countries).
+# regions_relevant_to_kiekert keeps using FOOTPRINT_REGIONS for granularity.
+DISPLAY_REGIONS = [
+    "Asia",
+    "Western Europe",
+    "Eastern Europe",
+    "Africa",
+    "US",
+    "Latin America",
+]
+
+# Collapse country-level footprint entries to display-region buckets.
+FOOTPRINT_TO_DISPLAY = {
+    "India": "Asia",
+    "China": "Asia",
+    "Japan": "Asia",
+    "Thailand": "Asia",
+    "Mexico": "Latin America",
+    "Russia": "Eastern Europe",
+}
+
+ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Financial News", "Industry Publication", "Other"}
+ALLOWED_ACTOR_TYPES = {"oem", "supplier", "technology", "industry", "other"}
 ALLOWED_PRIORITY = {"High", "Medium", "Low"}
 ALLOWED_CONF = {"High", "Medium", "Low"}
 ALLOWED_REVIEW = {"Pending", "Approved", "Disapproved"}
@@ -74,7 +141,7 @@ MACRO_THEME_RULES = [
             "keywords": [r"price\s*war", r"ev\s*export", r"electric\s*vehicle",
                          r"\bev\b", r"\bnev\b", r"battery\s*cost",
                          r"competition", r"market\s*share"],
-            "regions": {"China"},
+            "regions": {"China", "Asia"},
         },
         "anti_keywords": [r"ev\s*sales\s*stall", r"ev\s*slow"],
     },
@@ -119,7 +186,8 @@ MACRO_THEME_RULES = [
             "keywords": [r"tariff", r"trade\s*war", r"import\s*dut", r"customs",
                          r"section\s*301", r"nearshoring", r"reshoring",
                          r"trade\s*barrier", r"countervailing"],
-            "regions": {"US", "Mexico", "China", "Western Europe", "Eastern Europe", "Russia"},
+            "regions": {"US", "Mexico", "China", "Western Europe", "Eastern Europe", "Russia",
+                       "Latin America"},
         },
         "region_requirements": {"US", "China", "Western Europe", "Eastern Europe", "Russia"},
     },
@@ -143,6 +211,14 @@ STRUCTURAL_ROLLUP_RULES = [
         "rollup": "China Tech-Driven Premium Disruption",
     },
 ]
+
+# Macro themes that can escalate priority when Kiekert footprint relevance exists.
+MACRO_THEME_PRIORITY_ESCALATION_THEMES = {
+    "Luxury OEM Stress",
+    "Margin Compression at Premium OEMs",
+    "China EV Competitive Acceleration",
+    "Tariff & Trade Disruption",
+}
 
 FIELD_POLICY = {
     "llm": [

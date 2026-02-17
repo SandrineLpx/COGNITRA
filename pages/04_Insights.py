@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import altair as alt
-import ast
 from src.storage import load_records
 from src.dedupe import dedupe_records
+from src.ui_helpers import safe_list, workflow_ribbon
 
 
 # ── Pure helpers (unit-testable) ──────────────────────────────────────────
@@ -18,28 +18,12 @@ def get_effective_date(df: pd.DataFrame) -> pd.Series:
     return pub.combine_first(cre).dt.normalize()
 
 
-def _safe_list(val):
-    """Ensure val is a list. Parses stringified lists; returns [] on failure."""
-    if isinstance(val, list):
-        return val
-    if isinstance(val, str):
-        s = val.strip()
-        if s.startswith("["):
-            try:
-                parsed = ast.literal_eval(s)
-                return parsed if isinstance(parsed, list) else []
-            except Exception:
-                return []
-        return [s] if s else []
-    return []
-
-
 def explode_list_column(df: pd.DataFrame, col: str) -> pd.DataFrame:
     """Safely explode a list column. Returns long-form df with col values as strings."""
     if col not in df.columns:
         return pd.DataFrame(columns=df.columns)
     out = df.copy()
-    out[col] = out[col].apply(_safe_list)
+    out[col] = out[col].apply(safe_list)
     out = out.explode(col)
     out[col] = out[col].astype(str).str.strip()
     out = out[out[col].ne("") & out[col].ne("None") & out[col].ne("nan")]
@@ -51,7 +35,7 @@ def weighted_explode(df: pd.DataFrame, col: str) -> pd.DataFrame:
     if col not in df.columns:
         return pd.DataFrame(columns=list(df.columns) + ["_weight"])
     out = df.copy()
-    out[col] = out[col].apply(_safe_list)
+    out[col] = out[col].apply(safe_list)
     out["_weight"] = out[col].apply(lambda lst: 1.0 / max(len(lst), 1))
     out = out.explode(col)
     out[col] = out[col].astype(str).str.strip()
@@ -88,8 +72,11 @@ def week_start(ts: pd.Series) -> pd.Series:
 
 # ── Page setup ────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Dashboard", layout="wide")
-st.title("Dashboard")
+st.set_page_config(page_title="Insights", layout="wide")
+st.title("Insights")
+workflow_ribbon(4)
+st.caption("Exploratory analytics — not required for weekly executive output.")
+st.caption("Optional analytics and trend monitoring for approved intelligence records.")
 
 with st.sidebar:
     st.subheader("Data Mode")
@@ -139,7 +126,7 @@ with f4:
 t1, t2 = st.columns(2)
 with t1:
     all_topics = sorted(
-        pd.Series(df.get("topics", pd.Series(dtype=object))).apply(_safe_list).explode().dropna().astype(str).unique().tolist()
+        pd.Series(df.get("topics", pd.Series(dtype=object))).apply(safe_list).explode().dropna().astype(str).unique().tolist()
     )
     all_topics = [t for t in all_topics if t and t not in ("", "None", "nan")]
     sel_topics = st.multiselect("Topics", all_topics, default=all_topics)
@@ -158,7 +145,7 @@ if only_brief_included:
 if sel_topics:
     topic_set = set(sel_topics)
     topic_hit = pd.Series(
-        [bool(set(_safe_list(x)) & topic_set) for x in df.get("topics", [])],
+        [bool(set(safe_list(x)) & topic_set) for x in df.get("topics", [])],
         index=df.index,
     )
     mask = mask & topic_hit
@@ -209,8 +196,8 @@ else:
 st.subheader("Region x Topic Heatmap")
 if "regions_relevant_to_kiekert" in fdf and "topics" in fdf:
     hm = fdf[["regions_relevant_to_kiekert", "topics"]].copy()
-    hm["regions_relevant_to_kiekert"] = hm["regions_relevant_to_kiekert"].apply(_safe_list)
-    hm["topics"] = hm["topics"].apply(_safe_list)
+    hm["regions_relevant_to_kiekert"] = hm["regions_relevant_to_kiekert"].apply(safe_list)
+    hm["topics"] = hm["topics"].apply(safe_list)
     hm = hm.explode("regions_relevant_to_kiekert").explode("topics").dropna()
     if not hm.empty:
         ct = pd.crosstab(hm["regions_relevant_to_kiekert"], hm["topics"])
@@ -275,19 +262,12 @@ if not dated_rows.empty and "topics" in dated_rows:
             .encode(
                 x=alt.X("delta:Q", title="Weighted change in mentions"),
                 y=alt.Y("topic:N", sort=momentum["topic"].tolist(), title=None),
-                color=alt.Color(
-                    "color_group:N",
-                    scale=alt.Scale(
-                        domain=["Rising", "Falling", "Flat"],
-                        range=["#2e7d32", "#d32f2f", "#9e9e9e"],
-                    ),
-                    legend=None,
-                ),
+                color=alt.Color("color_group:N", legend=None),
                 tooltip=["topic", "prior", "recent", "delta", "pct_change", "class"],
             )
             .properties(height=max(180, len(momentum) * 28))
         )
-        rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule(color="gray").encode(x="x:Q")
+        rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule().encode(x="x:Q")
         st.altair_chart(chart + rule, use_container_width=True)
 
         # Detail table below
@@ -315,7 +295,7 @@ if "companies_mentioned" in fdf:
         top = co_long["companies_mentioned"].value_counts().head(10).sort_values()
         if not top.empty:
             fig_c, ax_c = plt.subplots(figsize=(8, max(2.5, len(top) * 0.35)))
-            ax_c.barh(top.index, top.values, color="#1565c0")
+            ax_c.barh(top.index, top.values)
             ax_c.set_xlabel("Records mentioning company")
             ax_c.set_title("Top 10 Companies (unique per record)")
             fig_c.tight_layout()
@@ -342,7 +322,7 @@ if not dated_rows.empty and "priority" in dated_rows:
 
         # Stacked bar chart
         fig_p, ax_p = plt.subplots(figsize=(8, 3))
-        pivot_pri.plot.bar(stacked=True, ax=ax_p, color={"High": "#d32f2f", "Medium": "#f9a825", "Low": "#2e7d32"})
+        pivot_pri.plot.bar(stacked=True, ax=ax_p)
         ax_p.set_xlabel("Week")
         ax_p.set_ylabel("Records")
         ax_p.set_title("Priority Distribution by Week")
@@ -381,7 +361,7 @@ if not dated_rows.empty and "confidence" in dated_rows:
         pivot_conf = pivot_conf[["High", "Medium", "Low"]]
 
         fig_conf, ax_conf = plt.subplots(figsize=(8, 3))
-        pivot_conf.plot.bar(stacked=True, ax=ax_conf, color={"High": "#2e7d32", "Medium": "#f9a825", "Low": "#d32f2f"})
+        pivot_conf.plot.bar(stacked=True, ax=ax_conf)
         ax_conf.set_xlabel("Week")
         ax_conf.set_ylabel("Records")
         ax_conf.set_title("Computed Confidence by Week")

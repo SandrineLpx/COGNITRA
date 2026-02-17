@@ -5,8 +5,7 @@ import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from src.dedupe import score_source_quality
-from src.dedup_rank import dedup_and_rank
+from src.dedupe import dedup_and_rank, score_source_quality
 from src.constants import CANON_TOPICS, FOOTPRINT_REGIONS
 
 

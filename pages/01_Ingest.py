@@ -3,7 +3,7 @@ import pandas as pd
 from collections import Counter
 from datetime import datetime
 from src.storage import load_records, new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
-from src.pdf_extract import extract_text_robust
+from src.pdf_extract import extract_text_robust, extract_pdf_publish_date_hint
 from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
 from src.model_router import route_and_extract, extract_single_pass, choose_extraction_strategy
@@ -12,9 +12,11 @@ from src.schema_validate import validate_record
 from src.text_clean_chunk import clean_and_chunk
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
 from src.quota_tracker import get_usage, reset_date
+from src.ui_helpers import workflow_ribbon
 
 st.set_page_config(page_title="Ingest", layout="wide")
 st.title("Ingest")
+workflow_ribbon(1)
 st.info("Upload one or more PDFs to proceed, or enable 'Paste text manually'.")
 
 with st.sidebar:
@@ -23,18 +25,19 @@ with st.sidebar:
 
     # ── API Quota display ──────────────────────────────────────────────
     st.divider()
-    st.subheader("API Quota (today)")
-    st.caption(f"Resets midnight PT — tracking date: {reset_date()}")
-    usage = get_usage()
-    for model_name, info in usage.items():
-        short = model_name.replace("gemini-", "").replace("2.5-", "").replace("2.0-", "")
-        used = info["used"]
-        quota = info["quota"]
-        remaining = info["remaining"]
-        pct = used / max(quota, 1)
-        st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
-    if not usage:
-        st.caption("No calls recorded yet today.")
+    with st.expander("Quota details", expanded=False):
+        st.subheader("API Quota (today)")
+        st.caption(f"Resets midnight PT - tracking date: {reset_date()}")
+        usage = get_usage()
+        for model_name, info in usage.items():
+            short = model_name.replace("gemini-", "").replace("2.5-", "").replace("2.0-", "")
+            used = info["used"]
+            quota = info["quota"]
+            remaining = info["remaining"]
+            pct = used / max(quota, 1)
+            st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
+        if not usage:
+            st.caption("No calls recorded yet today.")
     st.divider()
     with st.expander("Overrides Applied", expanded=False):
         run_impact = st.session_state.get("rule_impact_run", {})
@@ -92,16 +95,29 @@ def _is_valid_iso_date(value):
         return False
 
 
-def _postprocess_with_checks(rec, source_text):
+def _postprocess_with_checks(rec, source_text, publish_date_hint=None, publish_date_hint_source=None):
     before_publish = rec.get("publish_date")
-    rec = postprocess_record(rec, source_text=source_text)
+    rec = postprocess_record(
+        rec,
+        source_text=source_text,
+        publish_date_hint=publish_date_hint,
+        publish_date_hint_source=publish_date_hint_source,
+    )
     if not isinstance(rec.get("_provenance"), dict):
         rec["_provenance"] = {}
     if not isinstance(rec.get("_mutations"), list):
         rec["_mutations"] = []
     if not isinstance(rec.get("_rule_impact"), dict):
         rec["_rule_impact"] = {}
-    if _is_valid_iso_date(before_publish) and rec.get("publish_date") != before_publish:
+    publish_source = str(rec.get("_provenance", {}).get("publish_date", {}).get("source") or "")
+    if (
+        _is_valid_iso_date(before_publish)
+        and rec.get("publish_date") != before_publish
+        and not (
+            publish_source.endswith("_header_publish_date")
+            or publish_source == "rule:pdf_metadata_publish_date"
+        )
+    ):
         raise ValueError("postprocess changed existing valid publish_date")
     run_impact = st.session_state.setdefault("rule_impact_run", {})
     for rule, count in rec.get("_rule_impact", {}).items():
@@ -254,6 +270,45 @@ def _extract_usage_summary(router_log):
     return None
 
 
+def _humanize_router_failure(router_log):
+    """Turn router/provider logs into a concise, user-facing error."""
+    if not isinstance(router_log, dict):
+        return "Failed: model extraction failed. See details below."
+
+    providers = router_log.get("providers_tried", [])
+    if not providers:
+        return "Failed: model extraction failed. No provider logs found."
+
+    lines = []
+    saw_gemini_503 = False
+    for prov in providers:
+        name = str(prov.get("provider", "unknown")).lower()
+        errs = prov.get("errors") or []
+        if not errs:
+            continue
+
+        top = str(errs[0])
+        top_lower = top.lower()
+        if name == "gemini" and ("503" in top_lower or "unavailable" in top_lower):
+            saw_gemini_503 = True
+            lines.append("Gemini: temporarily unavailable (503 high demand). Retry shortly.")
+            continue
+
+        if name in ("claude", "chatgpt") and "not implemented yet" in top_lower:
+            lines.append(f"{name.capitalize()}: provider is not implemented in this app.")
+            continue
+
+        lines.append(f"{name.capitalize()}: {top}")
+
+    if not lines:
+        return "Failed: model extraction failed. Check provider logs below."
+
+    prefix = "Failed: model extraction failed."
+    if saw_gemini_503:
+        prefix = "Failed: Gemini is temporarily overloaded (503)."
+    return prefix + " " + " ".join(lines)
+
+
 def _process_one_pdf(pdf_bytes, filename, records, provider_choice,
                      override_title="", override_url=""):
     """Extract, validate, and return (rec, router_log, status_msg) for one PDF.
@@ -262,6 +317,7 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice,
     extracted_text, method = extract_text_robust(pdf_bytes)
     if not extracted_text.strip():
         return None, None, "Failed: no text extracted"
+    publish_date_hint, publish_date_hint_source = extract_pdf_publish_date_hint(pdf_bytes, extracted_text)
 
     cleaned = clean_and_chunk(extracted_text)
     cleaned_text = cleaned["clean_text"]
@@ -323,7 +379,12 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice,
         }
         if override_url and not rec.get("original_url"):
             rec["original_url"] = override_url
-        rec = _postprocess_with_checks(rec, source_text=cleaned_text)
+        rec = _postprocess_with_checks(
+            rec,
+            source_text=cleaned_text,
+            publish_date_hint=publish_date_hint,
+            publish_date_hint_source=publish_date_hint_source,
+        )
         ok, errs = validate_record(rec)
         if not ok:
             return None, router_log, f"Failed: validation errors: {'; '.join(errs[:3])}"
@@ -346,12 +407,17 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice,
         router_log["routing_metrics"] = strategy.get("routing_metrics", {})
         router_log["chunked_mode"] = False
         if rec is None:
-            return None, router_log, "Failed: all models failed strict validation"
+            return None, router_log, _humanize_router_failure(router_log)
 
         if override_url and not rec.get("original_url"):
             rec["original_url"] = override_url
         try:
-            rec = _postprocess_with_checks(rec, source_text=context_pack)
+            rec = _postprocess_with_checks(
+                rec,
+                source_text=context_pack,
+                publish_date_hint=publish_date_hint,
+                publish_date_hint_source=publish_date_hint_source,
+            )
         except Exception:
             pass
 
@@ -425,20 +491,21 @@ if has_upload and not is_bulk:
     cleaned_len = len(cleaned_text)
     removed_pct = (100.0 * (raw_len - cleaned_len) / raw_len) if raw_len > 0 else 0.0
 
-    st.subheader("Text preview")
-    col_raw, col_clean = st.columns(2)
-    with col_raw:
-        st.caption(f"Raw chars: {raw_len}")
-        st.text_area("Raw preview", preview_text[:2000], height=220)
-    with col_clean:
-        st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
-        st.text_area("Cleaned preview", cleaned_text[:6000], height=220)
     n_chunks = cleaned_meta.get("chunks_count", 0)
-    st.caption(
-        "Chunks: "
-        f"{n_chunks} | Removed lines: {cleaned_meta.get('removed_line_count', 0)} | "
-        f"Top removed patterns: {cleaned_meta.get('top_removed_patterns', [])[:3]}"
-    )
+    with st.expander("Chunking debug output", expanded=False):
+        st.subheader("Text preview")
+        col_raw, col_clean = st.columns(2)
+        with col_raw:
+            st.caption(f"Raw chars: {raw_len}")
+            st.text_area("Raw preview", preview_text[:2000], height=220)
+        with col_clean:
+            st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
+            st.text_area("Cleaned preview", cleaned_text[:6000], height=220)
+        st.caption(
+            "Chunks: "
+            f"{n_chunks} | Removed lines: {cleaned_meta.get('removed_line_count', 0)} | "
+            f"Top removed patterns: {cleaned_meta.get('top_removed_patterns', [])[:3]}"
+        )
 
     # Smart chunk mode recommendation
     if n_chunks <= 1:
@@ -647,19 +714,20 @@ elif manual_override and has_paste:
     cleaned_len = len(cleaned_text)
     removed_pct = (100.0 * (raw_len - cleaned_len) / raw_len) if raw_len > 0 else 0.0
 
-    st.subheader("Text preview")
-    col_raw, col_clean = st.columns(2)
-    with col_raw:
-        st.caption(f"Raw chars: {raw_len}")
-        st.text_area("Raw preview", pasted[:2000], height=220)
-    with col_clean:
-        st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
-        st.text_area("Cleaned preview", cleaned_text[:6000], height=220)
-    st.caption(
-        "Chunks: "
-        f"{cleaned_meta.get('chunks_count', 0)} | Removed lines: {cleaned_meta.get('removed_line_count', 0)} | "
-        f"Top removed patterns: {cleaned_meta.get('top_removed_patterns', [])[:3]}"
-    )
+    with st.expander("Chunking debug output", expanded=False):
+        st.subheader("Text preview")
+        col_raw, col_clean = st.columns(2)
+        with col_raw:
+            st.caption(f"Raw chars: {raw_len}")
+            st.text_area("Raw preview", pasted[:2000], height=220)
+        with col_clean:
+            st.caption(f"Cleaned chars: {cleaned_len} | Removed: {removed_pct:.1f}%")
+            st.text_area("Cleaned preview", cleaned_text[:6000], height=220)
+        st.caption(
+            "Chunks: "
+            f"{cleaned_meta.get('chunks_count', 0)} | Removed lines: {cleaned_meta.get('removed_line_count', 0)} | "
+            f"Top removed patterns: {cleaned_meta.get('top_removed_patterns', [])[:3]}"
+        )
 
     run = st.button("Run pipeline", type="primary")
     if run:
@@ -694,7 +762,7 @@ elif manual_override and has_paste:
             )
             rec, router_log = route_and_extract(selected["context_pack"], provider_choice=provider)
             if rec is None:
-                st.error("All models failed strict validation.")
+                st.error(_humanize_router_failure(router_log))
                 if router_log:
                     st.json(router_log)
                 st.stop()

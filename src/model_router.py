@@ -44,9 +44,9 @@ def record_response_schema() -> Dict[str, Any]:
             "type": "ARRAY",
             "items": {"type": "STRING", "enum": CANON_TOPICS},
             "minItems": 1,
-            "maxItems": 3,
+            "maxItems": 4,
         },
-        "keywords": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 5, "maxItems": 12},
+        "keywords": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 3, "maxItems": 15},
         "country_mentions": {"type": "ARRAY", "items": {"type": "STRING"}},
         "regions_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 15},
         "regions_relevant_to_kiekert": {
@@ -239,25 +239,55 @@ def choose_extraction_strategy(meta: Dict[str, Any]) -> Dict[str, Any]:
 
 def extraction_prompt(context_pack: str) -> str:
     return (
-        "Return JSON only matching the schema. Follow these rules strictly:\n"
+        "You are extracting structured intelligence for Kiekert, an automotive closure systems supplier "
+        "(door latches, strikers, handles, smart entry, cinch systems). "
+        "Return JSON only matching the schema. Follow these rules strictly:\n\n"
+        # --- source & actor rules ---
         "1) source_type is the PUBLISHER of the document. If 'S&P Global', 'S&P Global Mobility', "
         "'AutoIntelligence | Headline Analysis', or '(c) S&P Global' appears, set source_type='S&P'. "
         "If MarkLines is the publisher, set source_type='MarkLines'.\n"
         "2) If Reuters or Bloomberg is only cited inside the article, do NOT set source_type to Reuters/Bloomberg "
-        "unless they are clearly the publisher.\n"
-        "3) actor_type must be one of: oem, supplier, industry, other. "
-        "Use 'industry' for broad market/sector items not tied to one company; otherwise use 'other' when uncertain.\n"
+        "unless they are clearly the publisher. "
+        "Use 'Financial News' for financial publications (WSJ, FT, CNBC, Nikkei) and "
+        "'Industry Publication' for automotive trade press (Automotive Logistics, Just Auto, Wards Auto, etc.) "
+        "that are not Automotive News. Use 'Other' only when no specific type fits.\n"
+        "3) actor_type must be one of: oem, supplier, technology, industry, other. "
+        "Use 'technology' for tech companies (Nvidia, Qualcomm, Huawei, Google, etc.); "
+        "use 'industry' for broad market/sector items not tied to one company; otherwise use 'other' when uncertain.\n"
         "4) publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like '4 Feb 2026', "
-        "'11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.\n"
-        "5) Only use 'Closure Technology & Innovation' when latch/door/handle/digital key/smart entry/cinch appears explicitly.\n"
-        "6) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.\n"
-        "7) If numeric facts are present in the article, at least one evidence_bullet must include a specific numeric value verbatim "
+        "'11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.\n\n"
+        # --- topic classification guidance ---
+        "TOPIC CLASSIFICATION — pick 1-4 topics using these rules:\n"
+        "- 'OEM Strategy & Powertrain Shifts': broad OEM strategic pivots (BEV/ICE mix, vertical integration, "
+        "platform resets, localization). NOT single program updates.\n"
+        "- 'Closure Technology & Innovation': ONLY when latch/door/handle/digital key/smart entry/cinch "
+        "appears explicitly. NOT general vehicle electronics.\n"
+        "- 'OEM Programs & Vehicle Platforms': specific program announcements (launches, refreshes, platform "
+        "rollouts, sourcing decisions). NOT broad strategy narratives.\n"
+        "- 'Regulatory & Safety': regulations, standards, recalls, cybersecurity rules. NOT general political news.\n"
+        "- 'Supply Chain & Manufacturing': plant openings/closures, disruptions, logistics, labor, tariffs "
+        "impacting supply execution. NOT pure financial performance.\n"
+        "- 'Technology Partnerships & Components': partnerships and component sourcing where tech is central "
+        "(chips, sensors, connectivity). NOT purely commercial alliances.\n"
+        "- 'Market & Competition': demand, registrations, pricing, share shifts, competitor comparisons. "
+        "NOT internal exec changes.\n"
+        "- 'Financial & Business Performance': earnings, guidance, M&A, restructurings, insolvency (financial lens). "
+        "NOT exec churn without financial angle.\n"
+        "- 'Executive & Organizational': leadership changes, governance, org restructuring.\n\n"
+        # --- competitor context ---
+        "CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):\n"
+        "Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku\n"
+        "Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle\n"
+        "Our company: Kiekert (set mentions_our_company=true if mentioned)\n\n"
+        # --- evidence & formatting rules ---
+        "5) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.\n"
+        "6) If numeric facts are present in the article, at least one evidence_bullet must include a specific numeric value verbatim "
         "(e.g., percentage change, margin %, profit forecast, sales delta, production volume, year-over-year change, ranking gap). "
         "Prefer financial/competitive metrics. Prefer financial forecast numbers (profit, margin, sales) over feature numbers (screens, price) when selecting the numeric bullet. "
         "Do not fabricate, infer, or calculate numbers. "
         "If no numeric facts are present, proceed normally.\n"
-        "8) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.\n"
-        "9) If the article mentions major software/AI features (e.g., AI voice controls, SDV, infotainment, autonomy), "
+        "7) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.\n"
+        "8) If the article mentions major software/AI features (e.g., AI voice controls, SDV, infotainment, autonomy), "
         "include at least one evidence bullet on that and include relevant keywords from text "
         "(e.g., AI, software, voice controls, infotainment, OpenAI, Microsoft, Google).\n"
         "Use only the provided text.\n\nINPUT (context pack):\n"

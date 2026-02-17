@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pprint import pprint
 
-from src.dedup_rank import dedup_and_rank
+from src.dedupe import dedup_and_rank
 
 
 def main() -> None:
@@ -59,9 +59,9 @@ def main() -> None:
 
     kept, excluded = dedup_and_rank(records)
     print("KEPT:")
-    pprint([{k: r.get(k) for k in ("record_id", "source_type", "dedup_cluster_size", "dedup_sources", "rank_breakdown")} for r in kept])
+    pprint([{k: r.get(k) for k in ("record_id", "source_type", "dedup_cluster_size", "dedup_sources")} for r in kept])
     print("\nEXCLUDED:")
-    pprint([{k: r.get(k) for k in ("record_id", "canonical_record_id", "dedup_reason", "rank_breakdown")} for r in excluded])
+    pprint([{k: r.get(k) for k in ("record_id", "canonical_record_id", "dedup_reason")} for r in excluded])
 
 
 if __name__ == "__main__":

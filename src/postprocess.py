@@ -6,7 +6,8 @@ from datetime import datetime
 import re
 from src.constants import (
     ALLOWED_ACTOR_TYPES, ALLOWED_CONF, ALLOWED_SOURCE_TYPES,
-    FIELD_POLICY, FOOTPRINT_REGIONS, MACRO_THEME_RULES, PREMIUM_OEMS, STRUCTURAL_ROLLUP_RULES,
+    DISPLAY_REGIONS, FIELD_POLICY, FOOTPRINT_REGIONS, FOOTPRINT_TO_DISPLAY,
+    MACRO_THEME_PRIORITY_ESCALATION_THEMES, MACRO_THEME_RULES, PREMIUM_OEMS, STRUCTURAL_ROLLUP_RULES,
 )
 
 # Minimal canonicalization maps (extend as you see patterns)
@@ -27,6 +28,9 @@ REGION_ALIASES = {
     "usa": "US",
     "us": "US",
     "united states": "US",
+    "latin america": "Latin America",
+    "latam": "Latin America",
+    "south america": "Latin America",
     "europe": "Western Europe",
     "eu": "Western Europe",
     "e.u.": "Western Europe",
@@ -34,6 +38,10 @@ REGION_ALIASES = {
     "eastern europe": "Eastern Europe",
     "russia": "Russia",
     "europe (including russia)": "Western Europe",
+    "asia": "Asia",
+    "asia-pacific": "Asia",
+    "asia pacific": "Asia",
+    "apac": "Asia",
 }
 
 REGULATOR_ENTITY_ALIASES = {
@@ -48,6 +56,7 @@ REGULATOR_ENTITY_ALIASES = {
 # Country -> footprint region mapping (Option B: Western Europe / Eastern Europe / Russia)
 COUNTRY_TO_FOOTPRINT = {
     "United States": "US",
+    "Canada": "US",
     "Russia": "Russia",
     "Germany": "Western Europe",
     "France": "Western Europe",
@@ -56,6 +65,14 @@ COUNTRY_TO_FOOTPRINT = {
     "United Kingdom": "Western Europe",
     "Switzerland": "Western Europe",
     "Norway": "Western Europe",
+    "Sweden": "Western Europe",
+    "Austria": "Western Europe",
+    "Belgium": "Western Europe",
+    "Netherlands": "Western Europe",
+    "Portugal": "Western Europe",
+    "Denmark": "Western Europe",
+    "Finland": "Western Europe",
+    "Ireland": "Western Europe",
     "Poland": "Eastern Europe",
     "Czech Republic": "Eastern Europe",
     "Slovakia": "Eastern Europe",
@@ -64,14 +81,64 @@ COUNTRY_TO_FOOTPRINT = {
     "Bulgaria": "Eastern Europe",
     "Ukraine": "Eastern Europe",
     "Belarus": "Eastern Europe",
+    "Serbia": "Eastern Europe",
+    "Croatia": "Eastern Europe",
+    "Slovenia": "Eastern Europe",
     "Turkey": "Eastern Europe",
     "Morocco": "Africa",
     "South Africa": "Africa",
+    "Egypt": "Africa",
+    "Nigeria": "Africa",
+    "Kenya": "Africa",
     "India": "India",
     "China": "China",
     "Mexico": "Mexico",
+    "Argentina": "Latin America",
+    "Brazil": "Latin America",
+    "Chile": "Latin America",
+    "Colombia": "Latin America",
+    "Peru": "Latin America",
+    "Uruguay": "Latin America",
+    "Paraguay": "Latin America",
+    "Ecuador": "Latin America",
+    "Bolivia": "Latin America",
+    "Venezuela": "Latin America",
+    "Guatemala": "Latin America",
+    "Costa Rica": "Latin America",
+    "Panama": "Latin America",
+    "Honduras": "Latin America",
+    "El Salvador": "Latin America",
+    "Nicaragua": "Latin America",
     "Thailand": "Thailand",
+    "Japan": "Japan",
+    "South Korea": "Asia",
+    "Taiwan": "Asia",
+    "Indonesia": "Asia",
+    "Vietnam": "Asia",
+    "Malaysia": "Asia",
+    "Philippines": "Asia",
+    "Singapore": "Asia",
+    "Australia": "Asia",
+    "New Zealand": "Asia",
 }
+
+_US_TEXT_RE = re.compile(
+    r"\b(?:United States|U\.S\.A\.?|USA)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_explicit_us_signal(text: str, country_mentions: List[str]) -> bool:
+    countries = {str(c).strip().lower() for c in (country_mentions or [])}
+    if "united states" in countries or "canada" in countries:
+        return True
+    if isinstance(text, str):
+        if _US_TEXT_RE.search(text):
+            return True
+        # Accept uppercase token "US" only; ignore lowercase pronoun "us".
+        if re.search(r"(?<![A-Za-z])US(?![A-Za-z])", text):
+            return True
+    return False
 
 
 def _norm_token(s: str) -> str:
@@ -530,6 +597,16 @@ def _record_text_for_region_hints(rec: Dict[str, Any]) -> str:
     return " ".join(parts).lower()
 
 
+_CITY_REGION_HINTS: Dict[str, List[str]] = {
+    "tokyo": ["Japan", "Asia"],
+    "osaka": ["Japan", "Asia"],
+    "nagoya": ["Japan", "Asia"],
+    "seoul": ["Asia"],
+    "taipei": ["Asia"],
+    "jakarta": ["Asia"],
+}
+
+
 def _regions_from_text_hints(text_l: str) -> List[str]:
     out: List[str] = []
     for alias, region in REGION_ALIASES.items():
@@ -538,6 +615,9 @@ def _regions_from_text_hints(text_l: str) -> List[str]:
     for region in FOOTPRINT_REGIONS:
         if region.lower() in text_l:
             out.append(region)
+    for city, regions in _CITY_REGION_HINTS.items():
+        if city in text_l:
+            out.extend(regions)
     return _dedupe_keep_order(out)
 
 
@@ -565,7 +645,12 @@ def derive_regions_relevant_to_kiekert(country_mentions: List[str]) -> List[str]
     return regions
 
 
-def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -> Dict[str, Any]:
+def postprocess_record(
+    rec: Dict[str, Any],
+    source_text: Optional[str] = None,
+    publish_date_hint: Optional[str] = None,
+    publish_date_hint_source: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     - canonicalizes/dedupes country_mentions + regions_mentioned
     - derives regions_relevant_to_kiekert strictly from country_mentions
@@ -630,6 +715,36 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
             if _is_iso_date(before_publish):
                 rec["_publisher_date_override_applied"] = True
                 rec["_publisher_date_override_source"] = publish_rule_source
+
+    if _is_iso_date(publish_date_hint):
+        before_publish = rec.get("publish_date")
+        hint_source = str(publish_date_hint_source or "pdf_publish_date_hint")
+        source_tag = f"rule:{hint_source}"
+        if before_publish != publish_date_hint:
+            _apply_field_policy(
+                rec,
+                "publish_date",
+                publish_date_hint,
+                source=source_tag,
+                reason="pdf_publish_date_hint_preferred",
+            )
+            _apply_field_policy(
+                rec,
+                "publish_date_confidence",
+                "High" if hint_source == "pdf_header_publish_date" else "Medium",
+                source=source_tag,
+                reason="pdf_publish_date_hint_preferred",
+            )
+            if _is_iso_date(before_publish) and before_publish != publish_date_hint:
+                _apply_field_policy(
+                    rec,
+                    "event_date",
+                    before_publish,
+                    source=source_tag,
+                    reason="prior_publish_date_reclassified_as_event_date",
+                )
+                rec["_publisher_date_override_applied"] = True
+                rec["_publisher_date_override_source"] = source_tag
 
     parsed_date = parse_publish_date_from_text(combined_text)
     if parsed_date:
@@ -701,11 +816,23 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
         if "Western Europe" not in hinted:
             hinted.append("Western Europe")
     merged = region_items + implied + hinted
+    merged = _dedupe_keep_order([r for r in _normalize_regions(merged) if r in FOOTPRINT_REGIONS])
+
+    if "US" in merged and not _has_explicit_us_signal(combined_text, rec["country_mentions"]):
+        merged = [r for r in merged if r != "US"]
+        _append_audit_entry(rec, "_region_validation_flags", "us_region_removed_no_us_evidence")
+
+    # Collapse country-level footprint entries to display-region buckets
+    # so regions_mentioned contains only regions, not individual countries.
+    display = _dedupe_keep_order(
+        FOOTPRINT_TO_DISPLAY.get(r, r) for r in merged
+    )
+    display = [r for r in display if r in DISPLAY_REGIONS]
 
     _apply_field_policy(
         rec,
         "regions_mentioned",
-        _dedupe_keep_order([r for r in _normalize_regions(merged) if r in FOOTPRINT_REGIONS]),
+        display,
         source="postprocess",
         reason="regions_bucketed_deduped",
     )
@@ -754,6 +881,9 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
         )
 
     rec = _boost_priority(rec)
+    rec = _detect_macro_themes(rec)
+    rec = _escalate_priority_from_macro_themes(rec)
+
     final_priority = rec.get("priority")
     set_field(rec, "priority_final", final_priority, source="postprocess", reason="final_priority_after_rules")
     if final_priority != original_priority:
@@ -774,14 +904,16 @@ def postprocess_record(rec: Dict[str, Any], source_text: Optional[str] = None) -
     if (
         _is_iso_date(original_publish_date)
         and rec.get("publish_date") != original_publish_date
-        and not str(publish_source or "").endswith("_header_publish_date")
+        and not (
+            str(publish_source or "").endswith("_header_publish_date")
+            or str(publish_source or "") == "rule:pdf_metadata_publish_date"
+        )
     ):
         _apply_field_policy(
             rec, "publish_date", original_publish_date, source="postprocess", reason="preserve_existing_valid_publish_date"
         )
 
     rec = _compute_confidence(rec)
-    rec = _detect_macro_themes(rec)
     return rec
 
 
@@ -880,6 +1012,33 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
         set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_key_oem")
         return rec
 
+    return rec
+
+
+def _escalate_priority_from_macro_themes(rec: Dict[str, Any]) -> Dict[str, Any]:
+    if rec.get("priority") == "High":
+        return rec
+
+    regions = rec.get("regions_relevant_to_kiekert") or []
+    if not isinstance(regions, list) or len(regions) == 0:
+        return rec
+
+    themes = rec.get("macro_themes_detected") or []
+    if not isinstance(themes, list):
+        return rec
+
+    matched = [t for t in themes if t in MACRO_THEME_PRIORITY_ESCALATION_THEMES]
+    if not matched:
+        return rec
+
+    theme = str(matched[0])
+    set_field(
+        rec,
+        "priority",
+        "High",
+        source="postprocess",
+        reason=f"footprint_and_macro_theme:{theme}",
+    )
     return rec
 
 

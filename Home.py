@@ -1,18 +1,20 @@
 import streamlit as st
 
+from src.ui_helpers import workflow_ribbon
+
 st.set_page_config(page_title="Auto Intelligence (MVP)", layout="wide")
 
 st.title("Automotive Market Intelligence (MVP)")
-st.caption("Multi-page app: Ingest → Inbox → Record → Dashboard → Weekly Brief → Review Brief → Documents → Admin")
+workflow_ribbon(1)
+st.caption("Workflow: Ingest -> Review & Approve -> Weekly Executive Brief -> Insights")
 
-st.markdown("""
+st.markdown(
+    """
 Use the left sidebar to navigate pages.
-- **Ingest**: upload PDF (single or bulk) or paste text, extract with meta-based model routing, save record
-- **Inbox**: filter/browse records with inline approve, batch actions, search
-- **Record**: view/edit one record, confidence detail breakdown, review status controls
-- **Dashboard**: KPI metrics, trend charts (topic momentum, company mentions, priority & confidence distribution)
-- **Weekly Brief**: curate approved items, generate deterministic or AI-powered executive brief
-- **Review Brief**: inspect latest saved brief, compare to previous, approve/exclude source records
-- **Documents**: original source library with filters, evidence previews, and link fallback
-- **Admin**: export CSV/JSONL, bulk deduplication, clear demo data
-""")
+- **Ingest**: upload PDF (single or bulk) or paste text, extract with model routing, save record
+- **Review & Approve**: filter queue, inspect details, edit JSON, approve/disapprove, exclude from brief
+- **Weekly Executive Brief**: select approved records, generate deterministic/AI brief, compare saved briefs
+- **Insights**: optional analytics and trend monitoring
+- **Advanced / Admin**: exports and maintenance utilities
+"""
+)

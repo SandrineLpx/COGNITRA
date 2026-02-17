@@ -1,0 +1,8 @@
+streamlit>=1.40
+pandas>=2.2
+matplotlib>=3.8
+altair>=5.4
+pymupdf>=1.24
+pdfplumber>=0.11
+google-genai>=1.0
+pytest>=8.0

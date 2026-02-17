@@ -4,6 +4,7 @@ from datetime import datetime
 
 from src.constants import (
     CANON_TOPICS,
+    DISPLAY_REGIONS,
     FOOTPRINT_REGIONS,
     ALLOWED_SOURCE_TYPES,
     ALLOWED_ACTOR_TYPES,
@@ -60,16 +61,16 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
         errs.append(f"review_status must be one of {sorted(ALLOWED_REVIEW)}")
 
     topics = rec["topics"]
-    if not isinstance(topics, list) or not (1 <= len(topics) <= 3):
-        errs.append("topics must be a list of 1-3 items")
+    if not isinstance(topics, list) or not (1 <= len(topics) <= 4):
+        errs.append("topics must be a list of 1-4 items")
     else:
         bad = [t for t in topics if t not in CANON_TOPICS]
         if bad:
             errs.append(f"topics contains non-canonical labels: {bad}")
 
     kw = rec["keywords"]
-    if not isinstance(kw, list) or not (5 <= len(kw) <= 12):
-        errs.append("keywords must be a list of 5-12 items")
+    if not isinstance(kw, list) or not (3 <= len(kw) <= 15):
+        errs.append("keywords must be a list of 3-15 items")
 
     ev = rec["evidence_bullets"]
     if not isinstance(ev, list) or not (2 <= len(ev) <= 4):
@@ -87,7 +88,7 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
             errs.append("regions_mentioned must not contain duplicates")
         if len(rm) > 15:
             errs.append("regions_mentioned must have at most 15 items")
-        badrm = [r for r in rm if r not in FOOTPRINT_REGIONS]
+        badrm = [r for r in rm if r not in DISPLAY_REGIONS]
         if badrm:
             errs.append(f"regions_mentioned contains invalid labels: {badrm}")
 

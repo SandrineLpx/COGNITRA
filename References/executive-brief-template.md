@@ -78,14 +78,19 @@ HIGH PRIORITY DEVELOPMENTS
 - [3–6 bullets max; each bullet should mention company/OEM + what happened + why it matters.]
 
 FOOTPRINT REGION SIGNALS
-Europe (including Russia)
+Do not include region that are not relevant.
+
+Western Europe
 - [1–3 bullets; include Countries: ... when applicable]
 
-US
-- [1–3 bullets]
+Eastern Europe
+- [1–3 bullets; include Countries: ... when applicable]
 
-Mexico
-- [1–3 bullets]
+North America
+- [1–3 bullets; include Countries: ... when applicable]
+
+Asia
+- [1–3 bullets; include Countries: ... when applicable]
 
 China
 - [1–3 bullets]
@@ -96,8 +101,8 @@ India
 Thailand
 - [1–3 bullets]
 
-Africa
-- [1–3 bullets; primarily Morocco and South Africa]
+Any other important
+- 
 
 KEY DEVELOPMENTS BY TOPIC
 Include only topics present this period. Use canonical labels exactly.

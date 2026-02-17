@@ -89,6 +89,16 @@ Executive & Organizational:
 
 [Organize remaining developments by topic. Include 2-4 most significant topics.]
 
+ BATTERY TECHNOLOGY
+
+• [Company] - [Brief development description (1 sentence)]
+  [Link if available]
+
+• [Company] - [Brief development description (1 sentence)]
+  [Link if available]
+
+• [Company] - [Brief development description (1 sentence)]
+  [Link if available]
 
  PARTNERSHIPS & DEALS
 

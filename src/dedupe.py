@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from copy import deepcopy
 from datetime import datetime
 from difflib import SequenceMatcher
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 # Publisher ranking (higher = better source)
 PUBLISHER_SCORE = {
@@ -238,6 +239,51 @@ def dedupe_records(records: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
                     rec["canonical_source_type"] = best.get("source_type")
                     dups.append(rec)
     
+    return canonical, dups
+
+
+def dedup_and_rank(records: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Compatibility wrapper used by briefing flows.
+
+    This function now uses the same core dedupe engine as `dedupe_records`
+    and annotates records with briefing-friendly fields.
+    """
+    working = [deepcopy(r) for r in records]
+    canonical, dups = dedupe_records(working)
+
+    canonical_obj_ids: Set[int] = {id(r) for r in canonical}
+    groups: Dict[str, List[Dict]] = defaultdict(list)
+    for rec in working:
+        groups[build_dedupe_key(rec)].append(rec)
+
+    for rec in canonical:
+        rec["exclude_from_brief"] = False
+        rec["dedup_signature"] = build_dedupe_key(rec)
+
+    for rec in dups:
+        rec["exclude_from_brief"] = True
+        rec["canonical_record_id"] = rec.get("duplicate_of")
+        rec["dedup_reason"] = rec.get("duplicate_reason", "duplicate_of_canonical")
+        rec["dedup_signature"] = build_dedupe_key(rec)
+
+    for key, group in groups.items():
+        sources = sorted({str(r.get("source_type") or "Other") for r in group})
+        canonical_rec = next((r for r in group if id(r) in canonical_obj_ids), group[0])
+        canonical_rec["dedup_cluster_size"] = len(group)
+        canonical_rec["dedup_sources"] = sources
+        canonical_rec["dedup_signature"] = key
+
+        for rec in group:
+            if rec is canonical_rec:
+                continue
+            rec.setdefault("canonical_record_id", canonical_rec.get("record_id"))
+            rec.setdefault("dedup_reason", "duplicate_of_canonical")
+            rec["exclude_from_brief"] = True
+            rec["dedup_signature"] = key
+
+    canonical.sort(key=lambda r: str(r.get("record_id") or ""))
+    dups.sort(key=lambda r: str(r.get("record_id") or ""))
     return canonical, dups
 
 

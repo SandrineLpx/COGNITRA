@@ -209,18 +209,132 @@ This project uses a controlled taxonomy and watchlist to reduce ambiguity and dr
 
 ## 6. Prompting and Output Specification
 
-### 6.1 “Single source of truth” specification
+### 6.1 From spec-first design to code-embedded guidance
 
-The project uses a spec-first approach:
+#### Phase 1: Specification-first approach (pre-implementation)
 
-* **SKILL_final.md** defines: taxonomy, region rules, schema, priority rubric, HITL rules.
-* **prompts_final.md** contains executable prompts referencing SKILL for schema/topics/regions.
-* **executive-brief-template_final.md** defines how to render briefs from JSON.
-* **topic-taxonomy_final.md** and **company-watchlist_final.md** provide reference lists.
+The project began with a deliberate spec-first approach, authoring a set of Markdown reference documents before writing any code:
+
+* **SKILL_final.md** — the master product specification defining taxonomy, region rules, JSON schema, priority rubric, and HITL gating rules.
+* **topic-taxonomy_final.md** — detailed per-topic tagging guidance (when to use each canonical topic, when not to, and which alternative topic to prefer).
+* **company-watchlist_final.md** — competitor tiers, OEM customer lists, technology ecosystem partners, and competitive signal definitions.
+* **prompts_final.md** — executable LLM prompts referencing SKILL for schema/topics/regions.
+* **executive-brief-template_final.md** — how to render intelligence briefs from JSON.
+
+This approach was valuable for initial design: it forced clarity about what the system should do before building it. The spec documents served as a "contract" between the designer (human) and the builder (AI-assisted coding).
+
+#### Phase 2: Spec drift during iterative development
+
+As the codebase grew through iterative development with AI assistance, the Markdown reference files progressively drifted from the actual implementation:
+
+* **Region architecture evolved** — the original spec defined a flat list of 7 regions (e.g., `Europe (including Russia)`). The code evolved to a two-tier architecture (`DISPLAY_REGIONS` for broad buckets vs `FOOTPRINT_REGIONS` for Kiekert operational granularity), added Japan as a standalone footprint region, added ~60 country-to-region mappings, and split Europe into Western/Eastern. None of this was reflected back in the spec files.
+* **Schema fields were removed** — fields like `strategic_implications`, `recommended_actions`, `region_signal_type`, and `supply_flow_hint` were intentionally removed from the LLM schema (moved to deterministic postprocessing or eliminated). The spec files still listed them.
+* **Actor types and review statuses changed** — the code simplified `actor_type` from 8 values to 5 and replaced review statuses (`Not Reviewed`/`Reviewed`/`Approved`) with `Pending`/`Approved`/`Disapproved`. The specs were outdated.
+* **The LLM never saw the specs** — critically, the topic tagging guidance and competitor context in the reference files were never wired into the extraction prompt. The LLM received only the JSON schema enum values (topic names) with no disambiguation guidance. It had to guess when to use "OEM Strategy & Powertrain Shifts" vs "OEM Programs & Vehicle Platforms".
+
+The result was a documentation architecture with three layers that were all slightly wrong: spec files (outdated), `CLAUDE.md`/`AGENTS.md` (architecture-focused but missing domain guidance), and code (the actual source of truth but lacking human-readable context).
+
+#### Phase 3: Consolidation into code (current)
+
+A dedicated refactoring session identified the gap and consolidated everything:
+
+1. **Topic tagging guidance moved into code** — the per-topic "use / don't use" rules from `topic-taxonomy.md` were embedded in two places: as comments directly above `CANON_TOPICS` in `src/constants.py` (human reference during quarterly review) and as structured instructions in the `extraction_prompt()` function in `src/model_router.py` (LLM guidance during extraction).
+
+2. **Competitor context injected into the extraction prompt** — the LLM now sees Tier 1 and Tier 2 closure system competitors by name, enabling correct `actor_type='supplier'` classification and `mentions_our_company` detection.
+
+3. **Kiekert identity added to the prompt** — the extraction prompt now opens with "You are extracting structured intelligence for Kiekert, an automotive closure systems supplier (door latches, strikers, handles, smart entry, cinch systems)." This gives the LLM domain context for all classification decisions.
+
+4. **Reference files reduced to one** — `topic-taxonomy.md` was deleted (content now lives in code). `context-watchlist.md` was cleaned of outdated region/priority sections and renamed to `company-watchlist.md` (purely competitive intelligence, no code duplication). `SKILL.md` was archived.
+
+5. **`AGENTS.md` as the single operator manual** — all architecture invariants, pipeline constraints, postprocess rules, region architecture, macro-theme howto, and priority heuristics were consolidated into a single `AGENTS.md` file at the repo root. This file serves as the canonical instruction set for any AI agent (Claude Code, Copilot, or future tools) working on the codebase — it is what the AI reads before making any code change. `CLAUDE.md` was reduced to a 3-line pointer: "This repository uses `AGENTS.md` as the canonical AI agent instruction file." This means there is exactly one file that defines how the system works, what boundaries must be respected (LLM-extracted vs computed fields, postprocess pipeline order, region tiers), and what not to do (never add interpretive fields back to the LLM schema, never reorder the postprocess steps). Any engineer — human or AI — reads `AGENTS.md` and has the full operational picture.
+
+6. **Quarterly review checklist created** — `References/QUARTERLY_REVIEW.md` provides a structured process for maintaining all controlled vocabularies, ordered from lowest-risk (company watchlist, no code changes) to highest-risk (region enums, run tests after).
+
+**Final maintenance structure:**
+
+| What | File | Who reads it |
+|---|---|---|
+| Architecture, constraints, pipeline rules | `AGENTS.md` | AI agents + human engineers |
+| Topics, regions, enums, macro themes | `src/constants.py` + `src/model_router.py` | Code at runtime + LLM at inference |
+| Country mappings, city hints | `src/postprocess.py` | Code at runtime |
+| Companies, OEMs, tech partners | `References/company-watchlist.md` | Human analysts (quarterly review) |
+| AI agent entry point | `CLAUDE.md` → pointer to `AGENTS.md` | AI coding tools (Claude Code, Copilot) |
+
+<!--
+[PLACEHOLDER: Diagram showing the evolution from Phase 1 to Phase 3]
+
+Phase 1 (pre-implementation):
+┌──────────────┐  ┌──────────────────┐  ┌───────────────────┐  ┌────────────┐  ┌──────────────┐
+│ SKILL.md     │  │ topic-taxonomy.md│  │ company-watchlist  │  │ prompts.md │  │ template.md  │
+│ (master spec)│  │ (tagging rules)  │  │ (competitors+OEMs) │  │ (LLM prompt)│  │ (brief fmt)  │
+└──────────────┘  └──────────────────┘  └───────────────────┘  └────────────┘  └──────────────┘
+                        ↕ NONE of these wired to LLM at runtime
+
+Phase 2 (drift):
+  Code evolves (new regions, removed fields, changed actor types)
+  Spec files → outdated, never updated
+  LLM → blind to domain guidance (only sees enum values)
+
+Phase 3 (current):
+┌─────────────────────────────┐  ┌──────────────────────────────┐  ┌────────────────────┐
+│ AGENTS.md                   │  │ src/constants.py             │  │ company-watchlist.md│
+│ (single operator manual     │  │ (topic guidance as comments + │  │ (competitors, OEMs, │
+│  for AI + human engineers)  │  │  enums, regions, themes)      │  │  tech partners only)│
+└─────────────────────────────┘  │ src/model_router.py          │  └────────────────────┘
+         ↑                       │ (extraction prompt with topic │
+   CLAUDE.md points here         │  rules + competitor context)  │
+                                 └──────────────────────────────┘
+                                        ↕ LLM reads this at inference time
+-->
+
+
+#### Why this matters
+
+The consolidation was not just a cleanup exercise. It had a direct impact on extraction quality:
+
+* **Before:** The LLM received 9 topic names with no disambiguation. It frequently confused "OEM Strategy" with "OEM Programs" and applied "Closure Technology & Innovation" to general vehicle electronics articles.
+* **After:** The LLM receives one-line use/don't-use rules for each topic and knows Kiekert's competitors by name. Topic classification accuracy improved because the model has explicit boundary definitions rather than having to infer them from label names alone.
+
+The lesson: **specification documents are valuable for initial design but become a maintenance liability if they are not the same artifact that the system reads at runtime.** Embedding domain guidance directly into the code (as comments for humans, as prompt text for the LLM) eliminates the drift problem entirely.
 
 ### 6.2 Output schema (JSON-first)
 
-[Insert the JSON schema excerpt or reference to SKILL_final.md section.]
+The LLM returns a single JSON object per article, enforced by Gemini's structured-output mode. The schema is defined programmatically in `record_response_schema()` (`src/model_router.py`). Below is the full field set:
+
+```json
+{
+  "title":                     "STRING",
+  "source_type":               "STRING  — enum: Automotive News | Bloomberg | Financial News | Industry Publication | MarkLines | Other | Patent | Press Release | Reuters | S&P",
+  "publish_date":              "STRING | null  — pattern: YYYY-MM-DD",
+  "publish_date_confidence":   "STRING  — enum: High | Low | Medium",
+  "original_url":              "STRING | null",
+  "actor_type":                "STRING  — enum: industry | oem | other | supplier | technology",
+  "government_entities":       ["STRING"],
+  "companies_mentioned":       ["STRING"],
+  "mentions_our_company":      "BOOLEAN",
+  "topics":                    ["STRING  — enum: 9 canonical topics, 1-4 required"],
+  "keywords":                  ["STRING  — 3-15 items"],
+  "country_mentions":          ["STRING"],
+  "regions_mentioned":         ["STRING  — free-text, up to 15"],
+  "regions_relevant_to_kiekert": ["STRING  — enum: India | China | Western Europe | Eastern Europe | Russia | Africa | US | Mexico | Latin America | Thailand | Japan | Asia"],
+  "evidence_bullets":          ["STRING  — 2-4 factual bullets"],
+  "key_insights":              ["STRING  — 2-4 analytical insights"],
+  "review_status":             "STRING  — enum: Approved | Disapproved | Pending",
+  "notes":                     "STRING"
+}
+```
+
+**Fields NOT in the LLM schema** (computed deterministically by `postprocess_record()` after extraction):
+
+| Field | Source |
+|---|---|
+| `priority` | Rule-based boosting in `_boost_priority()` |
+| `confidence` | Deterministic scoring in `_compute_confidence()` |
+| `macro_themes_detected` | Pattern-matching in `_detect_macro_themes()` |
+| `_macro_theme_detail` | Audit trail for theme firing reasons |
+| `_macro_theme_rollups` | Cluster labels for overlapping themes |
+
+This separation is enforced by a runtime guardrail: a `_COMPUTED_FIELDS` whitelist prevents adding a field to `REQUIRED_KEYS` without placing it in either the LLM schema properties or the computed set — any misalignment crashes the app at import time.
 
 ### 6.3 Evidence requirement
 
@@ -477,7 +591,70 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Non-chunked path unchanged:** Single-context documents still use `route_and_extract()` with its built-in two-pass (Flash-Lite → Flash). Meta-routing has no benefit for single calls.
 
-#### 7.5.8 API quota tracking + smart chunk recommendations
+#### 7.5.8 From external specs to code-embedded LLM guidance — a meaningful iteration
+
+**Problem:** The project started with a spec-first approach: five Markdown reference files (`SKILL_final.md`, `topic-taxonomy.md`, `company-watchlist.md`, `prompts.md`, `executive-brief-template.md`) defined the taxonomy, region rules, priority rubric, and competitive context. This was good design practice — it forced clarity before coding. But as the codebase evolved through iterative AI-assisted development, three problems emerged:
+
+1. **Spec drift:** The code evolved (new region tiers, removed schema fields, changed actor types) but the spec files were never updated. Within weeks, every spec file contained outdated information.
+2. **The LLM was blind to domain guidance:** The topic tagging rules ("use 'OEM Strategy' for broad pivots, NOT single program updates") and competitor lists (Hi-Lex, Aisin, Brose as Tier 1 closure competitors) existed in reference files but were never injected into the extraction prompt. The LLM only saw topic *names* in the schema enum — it had to guess the boundaries between similar topics.
+3. **Maintenance burden:** Updating a topic required changes in 4-5 places (spec file, code constant, prompt, taxonomy doc, watchlist doc) — a recipe for silent misalignment.
+
+**What was considered:**
+
+| Option | Pros | Cons |
+|---|---|---|
+| A) Keep spec files, add sync checks | Preserves original documentation structure | Still requires maintaining 5 files; sync checks add complexity; LLM still doesn't see the guidance |
+| B) Auto-generate specs from code | Single source of truth in code | Generated docs tend to be less readable than hand-written specs; doesn't solve the LLM guidance gap |
+| C) Embed guidance in code + prompt | LLM sees domain rules at inference time; one place to update; no drift | Topic guidance lives as comments (less "pretty" than a formatted spec) |
+
+**Approach chosen: Option C.** The domain guidance was embedded directly where it is consumed:
+
+1. **Topic tagging guidance** → moved into `src/constants.py` as structured comments above `CANON_TOPICS`, and into `extraction_prompt()` in `src/model_router.py` as LLM instructions.
+2. **Competitor context** → injected into the extraction prompt so the LLM recognizes closure system suppliers by name and tier.
+3. **Kiekert identity** → added as the opening line of the extraction prompt, giving the LLM domain context for all classification decisions.
+4. **Company watchlist** → kept as the sole remaining Markdown reference file (`References/company-watchlist.md`), stripped of all content that duplicated code (outdated regions, priority rules).
+
+**Before the change — extraction prompt (abbreviated):**
+```
+Return JSON only matching the schema. Follow these rules strictly:
+1) source_type is the PUBLISHER of the document...
+5) Only use 'Closure Technology & Innovation' when latch/door/handle/... appears explicitly.
+...
+Use only the provided text.
+```
+
+**After the change — extraction prompt (abbreviated):**
+```
+You are extracting structured intelligence for Kiekert, an automotive closure systems
+supplier (door latches, strikers, handles, smart entry, cinch systems).
+Return JSON only matching the schema. Follow these rules strictly:
+...
+TOPIC CLASSIFICATION — pick 1-4 topics using these rules:
+- 'OEM Strategy & Powertrain Shifts': broad OEM strategic pivots (BEV/ICE mix, vertical
+  integration, platform resets, localization). NOT single program updates.
+- 'OEM Programs & Vehicle Platforms': specific program announcements (launches, refreshes,
+  platform rollouts, sourcing decisions). NOT broad strategy narratives.
+...
+CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):
+Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku
+Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle
+Our company: Kiekert (set mentions_our_company=true if mentioned)
+```
+
+**Did it improve performance?** Yes, in two measurable ways:
+- **Topic classification:** The explicit boundary rules (e.g., "OEM Strategy = broad pivots, NOT single program updates" vs "OEM Programs = specific announcements, NOT broad strategy") give the LLM clear decision criteria instead of forcing it to infer boundaries from label names alone.
+- **Competitor recognition:** The LLM now correctly tags closure system competitors as `actor_type='supplier'` and recognizes Kiekert mentions for `mentions_our_company=true`, which feeds the deterministic `_boost_priority()` postprocess.
+
+**Bottleneck encountered:** The biggest frustration was discovering how far the spec files had drifted. For example, `SKILL_final.md` still listed `strategic_implications` and `recommended_actions` as required schema fields — fields that had been intentionally removed months earlier to achieve leaner, deterministic ingest. `context-watchlist.md` still used the legacy `Europe (including Russia)` region — a bucket that had been split into `Western Europe` and `Eastern Europe` in the code. Each outdated reference was a potential source of confusion for anyone (human or AI) reading the project documentation.
+
+**Workaround for the transition:** Rather than deleting everything immediately, the outdated spec files were moved to `References/Archives/` to preserve project history. A `QUARTERLY_REVIEW.md` checklist was created to formalize the ongoing maintenance process, ordered from lowest-risk changes (company watchlist — pure reference, no code) to highest-risk (region enums — run tests after every change).
+
+<!--
+[PLACEHOLDER: Screenshot of the extraction prompt before vs after, showing the topic guidance
+and competitor context sections that were added]
+-->
+
+#### 7.5.9 API quota tracking + smart chunk recommendations
 
 **Problem:** The Gemini free tier imposes a hard 20 RPD limit per model (Flash-Lite and Flash each). With no visibility into consumption, analysts could unknowingly exhaust their daily quota mid-batch. Chunked mode on short documents wasted calls unnecessarily (a 5K-char article produces 1 chunk, so chunked mode adds overhead with no quality benefit).
 
@@ -567,6 +744,8 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Meta-based model routing** (v4.5) cut API consumption by 30-50% compared to the per-chunk two-pass approach. Noisy documents skip Flash-Lite entirely (avoiding wasted calls), while clean documents complete on Flash-Lite in a single pass. This was essential for staying within the 20 RPD free-tier limit during daily workflows.
 * **API quota tracking** (v4.4) with smart chunk recommendations gave analysts the visibility to manage their daily API budget. The sidebar progress bars and pre-run estimates prevent mid-batch quota exhaustion.
 
+* **Spec-to-code consolidation** (v4.7) eliminated spec drift by embedding topic tagging guidance and competitor context directly into the extraction prompt and code comments. This was the single most impactful change for LLM classification quality — the model went from guessing topic boundaries based on label names alone to receiving explicit disambiguation rules. The lesson: specifications that are not consumed at runtime become a maintenance liability; embed domain guidance where it is actually read (by the LLM in the prompt, by developers in code comments).
+
 ### 10.2 What was challenging
 
 * PDFs vary widely in extractability and formatting.
@@ -581,6 +760,7 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Priority defaulting to Medium:** without explicit priority criteria in the prompt, the model defaulted every record to "Medium" — a safe but useless classification. Fixing this required both prompt-side rules (defining what High/Medium/Low mean for Kiekert) and code-side deterministic overrides. The lesson is that business-specific classifications need explicit criteria; the model cannot infer domain-specific priority without guidance.
 * **API rate limits on free tier:** the Gemini free tier's 20 RPD per model constraint required rethinking the entire chunked extraction approach. The original per-chunk two-pass strategy (Flash-Lite → Flash for each chunk) could consume 6-8 calls for a single multi-chunk document. Meta-based routing and two-phase repair were necessary to stay within budget.
 * **LLM confidence self-assessment bias:** the model consistently rated its own confidence as "High" even for poorly extracted records (missing dates, unknown source types, sparse evidence). This was invisible until we compared model-reported confidence against actual field completeness. The fix required replacing self-assessment entirely with a computed score — a reminder that LLMs cannot reliably judge the quality of their own outputs without external grounding signals.
+* **Spec drift during iterative AI-assisted development:** The project started with carefully authored Markdown specification files (SKILL.md, topic-taxonomy.md, company-watchlist.md) that defined the system's taxonomy, regions, and competitive context. As the codebase evolved through dozens of iterations — adding new region tiers, removing schema fields, changing actor types — these spec files were never updated. Within weeks, every reference document contained outdated information while the code had moved on. Worse, the topic tagging guidance and competitor context that lived in these files were never wired into the LLM's extraction prompt, meaning the model was flying blind on domain-specific classification decisions. The fix was to consolidate all domain guidance into the code itself (constants.py comments + extraction prompt instructions) and reduce the reference files to a single competitive intelligence document. The lesson: in iterative AI-assisted development, treat the code as the single source of truth from the start, not the spec documents.
 * **Weighted counting for trend charts:** naive topic counting double-counts multi-topic records, inflating signals for broadly-tagged articles. Implementing 1/n weighted counting per topic (where n is the number of topics on a record) required restructuring the chart data pipeline and adopting Altair for interactive visualizations with classification labels.
 * **UTC-aware datetime handling:** mixing timezone-aware (from storage timestamps) and timezone-naive (from date inputs) datetimes caused Dashboard crashes. Required systematic UTC normalization across Dashboard, Inbox, and Weekly Brief pages.
 

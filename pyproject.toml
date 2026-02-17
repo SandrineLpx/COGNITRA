@@ -1,0 +1,25 @@
+[project]
+name = "cognitra"
+version = "0.1.0"
+description = "Streamlit app for automotive competitive intelligence workflows"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "streamlit>=1.40",
+  "pandas>=2.2",
+  "matplotlib>=3.8",
+  "altair>=5.4",
+  "pymupdf>=1.24",
+  "pdfplumber>=0.11",
+  "google-genai>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+python_files = ["test_*.py"]
+addopts = "-q"
