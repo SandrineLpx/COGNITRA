@@ -18,9 +18,9 @@ PUBLISHER_SCORE = {
     "Bloomberg": 90,
     "Reuters": 80,
     "Financial News": 78,
+    "MarkLines": 76,
     "Automotive News": 75,
     "Industry Publication": 72,
-    "MarkLines": 70,
     "Press Release": 60,
     "Patent": 55,
     "Other": 50,
@@ -260,11 +260,11 @@ def dedup_and_rank(records: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
         groups[build_dedupe_key(rec)].append(rec)
 
     for rec in canonical:
-        rec["exclude_from_brief"] = False
+        rec["is_duplicate"] = False
         rec["dedup_signature"] = build_dedupe_key(rec)
 
     for rec in dups:
-        rec["exclude_from_brief"] = True
+        rec["is_duplicate"] = True
         rec["canonical_record_id"] = rec.get("duplicate_of")
         rec["dedup_reason"] = rec.get("duplicate_reason", "duplicate_of_canonical")
         rec["dedup_signature"] = build_dedupe_key(rec)
@@ -281,7 +281,7 @@ def dedup_and_rank(records: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
                 continue
             rec.setdefault("canonical_record_id", canonical_rec.get("record_id"))
             rec.setdefault("dedup_reason", "duplicate_of_canonical")
-            rec["exclude_from_brief"] = True
+            rec["is_duplicate"] = True
             rec["dedup_signature"] = key
 
     canonical.sort(key=lambda r: str(r.get("record_id") or ""))

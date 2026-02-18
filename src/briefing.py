@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.dedupe import dedup_and_rank, score_source_quality
-from src.constants import CANON_TOPICS, FOOTPRINT_REGIONS
+from src.constants import (
+    CANON_TOPICS,
+    FOOTPRINT_REGIONS,
+    UNCERTAINTY_TOPICS,
+    UNCERTAINTY_WORDS,
+)
 
 
 def _parse_date(value: Optional[str]) -> Optional[date]:
@@ -57,7 +63,7 @@ def select_weekly_candidates(
     for r in merged:
         if str(r.get("review_status") or "") == "Disapproved":
             continue
-        if not include_excluded and r.get("exclude_from_brief"):
+        if not include_excluded and r.get("is_duplicate"):
             continue
         if within_last_days(r, days):
             items.append(r)
@@ -136,12 +142,36 @@ def render_exec_email(records: List[Dict], week_range: str) -> Tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 _STRIP_FIELDS = {
-    "_router_log", "source_pdf_path", "record_id", "created_at",
+    "_router_log", "source_pdf_path", "created_at",
     "review_status", "notes", "story_primary", "duplicate_story_of",
-    "exclude_from_brief",
+    "is_duplicate",
 }
 
 _MAX_RECORDS_FOR_SYNTHESIS = 20
+
+_UNCERTAINTY_WORDS = re.compile(UNCERTAINTY_WORDS, re.IGNORECASE)
+
+
+def _has_uncertainty_signals(records: List[Dict]) -> bool:
+    """Return True when records contain signals that warrant a mandatory
+    CONFLICTS & UNCERTAINTY section (at least one item required)."""
+    for rec in records:
+        # Condition 1: confidence is Medium or Low
+        if rec.get("confidence") in ("Medium", "Low"):
+            return True
+        # Condition 2: topics include strategy/guidance change
+        topics = rec.get("topics") or []
+        if any(t in UNCERTAINTY_TOPICS for t in topics):
+            return True
+        # Condition 3: uncertainty language in evidence or insights
+        text_fields = (
+            (rec.get("evidence_bullets") or [])
+            + (rec.get("key_insights") or [])
+        )
+        for txt in text_fields:
+            if _UNCERTAINTY_WORDS.search(txt):
+                return True
+    return False
 
 
 def _slim_record(rec: Dict) -> Dict:
@@ -191,6 +221,8 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
     region_list = "\n".join(f"  - {r}" for r in FOOTPRINT_REGIONS)
     slim = [_slim_record(r) for r in records]
     records_json = json.dumps(slim, indent=1, default=str)
+    record_ids = [str(r.get("record_id") or "").strip() for r in records if str(r.get("record_id") or "").strip()]
+    record_ids_text = ", ".join(record_ids) if record_ids else "(none)"
 
     title_heading = "EXECUTIVE ALERT" if is_single else "AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF"
     intro = (
@@ -266,6 +298,24 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         else f"- Up to {mode['priority_bullets']} bullets. Each: Company/OEM + what happened + why it matters to Kiekert.\n"
     )
 
+    uncertainty_required = _has_uncertainty_signals(records)
+    uncertainty_section = (
+        "CONFLICTS & UNCERTAINTY (REQUIRED — at least 1 item)\n"
+        "Uncertainty signals detected in the input records. You MUST include at least one item.\n"
+        "- Flag any contradictory figures, dates, or claims between records.\n"
+        "- Flag any claim where confidence=Low or confidence=Medium, or evidence is single-sourced.\n"
+        "- Flag claims containing forecast language (forecast, could, weighing, sources said, expected) "
+        "and note the uncertainty. Cite (REC:<id>).\n"
+        "- Flag strategy-shift or guidance-change topics that lack concrete commitments.\n\n"
+        if uncertainty_required
+        else (
+            "CONFLICTS & UNCERTAINTY\n"
+            "- Flag any contradictory figures, dates, or claims between records.\n"
+            "- Flag any claim where confidence=Low or evidence is single-sourced.\n"
+            "- If none, write: 'None observed this period.'\n\n"
+        )
+    )
+
     return (
         "You are a competitive intelligence analyst for Kiekert, a global automotive "
         "closure systems supplier (door latches, strikers, handles, smart entry, cinch "
@@ -275,6 +325,7 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         f"Target length: {mode['max_words']} words.\n\n"
         "SYNTHESIS PROCEDURE (follow in order, do not skip)\n"
         "1. CLUSTER: group records by theme (not one-record-per-bullet).\n"
+        f"0. VALID IDS: use only these record IDs in REC citations: {record_ids_text}\n"
         "2. VALIDATE: for every claim, confirm it appears in at least one record's "
         "evidence_bullets or key_insights. Cite the record_id inline as (REC:<id>). "
         "If a claim draws from multiple records, cite all.\n"
@@ -307,10 +358,7 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         + f"{region_list}\n\n"
         + topic_section
         + trends_section
-        + "CONFLICTS & UNCERTAINTY\n"
-        + "- Flag any contradictory figures, dates, or claims between records.\n"
-        + "- Flag any claim where confidence=Low or evidence is single-sourced.\n"
-        + "- If none, write: 'None observed this period.'\n\n"
+        + uncertainty_section
         + "RECOMMENDED ACTIONS\n"
         + actions_section
         + "APPENDIX\n"
@@ -318,6 +366,7 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         + "Method: Structured extraction from source documents; human review and "
         + "approval; LLM synthesis by Cognitra.\n\n"
         + "RULES (hard constraints)\n"
+        + f"- VALID REC IDs ONLY: citations must use one of [{record_ids_text}]. Do not use REC:1, REC:2, etc.\n"
         + "- GROUNDING: every factual claim must cite at least one (REC:<record_id>). "
         + "Uncited claims will be rejected.\n"
         + "- NO INVENTION: use only facts from the provided records. If a record lacks "

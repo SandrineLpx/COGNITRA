@@ -81,7 +81,7 @@ FOOTPRINT_TO_DISPLAY = {
     "Russia": "Eastern Europe",
 }
 
-ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Financial News", "Industry Publication", "Other"}
+ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Financial News", "GlobalData", "Industry Publication", "Other"}
 ALLOWED_ACTOR_TYPES = {"oem", "supplier", "technology", "industry", "other"}
 ALLOWED_PRIORITY = {"High", "Medium", "Low"}
 ALLOWED_CONF = {"High", "Medium", "Low"}
@@ -218,6 +218,21 @@ MACRO_THEME_PRIORITY_ESCALATION_THEMES = {
     "Margin Compression at Premium OEMs",
     "China EV Competitive Acceleration",
     "Tariff & Trade Disruption",
+}
+
+# Single source of truth for uncertainty language detection.
+# Used by both briefing.py (mandatory CONFLICTS & UNCERTAINTY section)
+# and quality.py (KPI-B3 uncertainty compliance check).
+UNCERTAINTY_WORDS = (
+    r"\b(forecast|could|weighing|sources said|expected|may|might|"
+    r"uncertain|preliminary|unconfirmed|estimated|projected|reportedly|"
+    r"reconsider|reviewing|speculation)\b"
+)
+
+# Topics that trigger mandatory CONFLICTS & UNCERTAINTY in the weekly brief.
+UNCERTAINTY_TOPICS = {
+    "OEM Strategy & Powertrain Shifts",
+    "Financial & Business Performance",
 }
 
 FIELD_POLICY = {

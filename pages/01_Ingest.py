@@ -434,7 +434,7 @@ def _finalize_record(rec, router_log, record_id, pdf_path, records):
     rec["created_at"] = utc_now_iso()
     rec["source_pdf_path"] = pdf_path
     rec["_router_log"] = router_log
-    rec.setdefault("exclude_from_brief", False)
+    rec.setdefault("is_duplicate", False)
 
     _auto = (
         rec.get("confidence") in ("High", "Medium")
@@ -457,12 +457,12 @@ def _finalize_record(rec, router_log, record_id, pdf_path, records):
         if best is rec:
             rec["story_primary"] = True
             for existing, _ratio in similar:
-                existing["exclude_from_brief"] = True
+                existing["is_duplicate"] = True
                 existing["duplicate_story_of"] = record_id
                 existing["story_primary"] = False
             return rec, "Saved (similar story suppressed)"
         else:
-            rec["exclude_from_brief"] = True
+            rec["is_duplicate"] = True
             rec["duplicate_story_of"] = best.get("record_id")
             rec["story_primary"] = False
             return rec, "Saved (duplicate — excluded from briefs)"

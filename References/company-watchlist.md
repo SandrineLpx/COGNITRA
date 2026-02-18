@@ -53,7 +53,7 @@ Key companies tracked for automotive closure systems market intelligence. Primar
 - **Volvo** (Geely-owned) - Safety focus, premium Scandinavian design
 
 ### Asian OEMs
-- **Toyota** - World's largest OEM, conservative EV adoption, hybrid focus
+- **Toyota Motor Corporation (Toyota)** - World's largest OEM, conservative EV adoption, hybrid focus
 - **Honda** - Gradually accelerating EV strategy, GM partnership in US
 - **Hyundai-Kia** - E-GMP platform, strong EV growth, global expansion
 - **Nissan** - Ariya EV, historical Renault partnership

@@ -10,7 +10,7 @@
 
 This project builds an AI-powered market intelligence triage system for the automotive closure systems and car entry domain. The system is designed for environments where teams already pay for high-quality information—such as Bloomberg, Automotive News, S&P Global, and MarkLines—as well as public sources like press releases and regulatory announcements. The problem is not access to content; it is the lack of a scalable way to convert these sources into consistent, decision-ready intelligence.
 
-Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies footprint region roll-up rules (e.g., Europe including UK/Turkey/Russia; Africa via Morocco/South Africa), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets. It also generates strategic implications and recommended actions tailored to a closure systems supplier. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
+Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies a two-tier footprint region architecture (display-level buckets like Asia, Western/Eastern Europe; Kiekert operational footprint with country-level granularity like India, China, Japan, Thailand), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets and key insights. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
 
 ### 2026-02 Update Addendum (current implementation)
 
@@ -77,9 +77,8 @@ A lightweight tool that takes an input document (PDF/text) and generates:
 AI is used only where it provides high leverage:
 
 * classification and normalization (topics, companies, actor type)
-* priority scoring and confidence
-* evidence-backed extraction (verifiable bullets)
-* strategic implications (closure systems supplier lens)
+* evidence-backed extraction (verifiable bullets and key insights)
+* cross-record synthesis for weekly executive briefs
 
 Everything else is deterministic:
 
@@ -163,16 +162,14 @@ Everything else is deterministic:
   * Pre-run quota estimate (worst-case API calls vs remaining quota)
 * **Analytics & Presentation:**
 
-  * Inbox with title-first expandable cards, inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
-  * Record detail with Next/Previous navigation, title+metrics header, Quick Approve with auto-advance, and computed confidence detail breakdown (per-signal score, LLM override indicator)
-  * Dashboard with canonical/all-records toggle and four trend analysis charts:
+  * Review & Approve page with queue filtering, title-first expandable cards, inline Approve/Review buttons, record detail with Next/Previous navigation, Quick Approve with auto-advance, JSON editing, and computed confidence detail breakdown (per-signal score, LLM override indicator)
+  * Insights page with canonical/all-records toggle and four trend analysis charts:
     * **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     * **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
     * **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
     * **Confidence Distribution (Computed):** weekly stacked bars showing extraction quality trend, plus LLM override rate metrics (total computed, count overridden, override %)
-  * **Original Documents library** (`pages/07_Documents.py`): filterable document index with date range, topic, company, review status, priority, and text search; link fallback chain (`original_url` > `source_pdf_path` > "No link"); expandable cards with evidence bullets, notes, and router usage summary
   * Export to CSV for Power BI (canonical and all records support)
-  * Weekly Brief page for digest drafting, email templates, and AI brief generation
+  * Weekly Executive Brief page for digest drafting, email templates, and AI brief generation
 
 ### 4.2 Human-in-the-loop gating
 
@@ -205,7 +202,7 @@ This project uses a controlled taxonomy and watchlist to reduce ambiguity and dr
 
 * Canonical topic taxonomy (9 topics)
 * Company watchlist (including “Our company” section)
-* Footprint region roll-up rules (Europe incl. UK/Turkey/Russia; Africa via Morocco/South Africa; US normalization)
+* Two-tier footprint region architecture: display-level buckets (Asia, Western/Eastern Europe, Africa, US, Latin America) and Kiekert footprint regions (India, China, Japan, Thailand, Mexico, Russia + display regions); ~60 country-to-region mappings
 
 ## 6. Prompting and Output Specification
 
@@ -304,7 +301,7 @@ The LLM returns a single JSON object per article, enforced by Gemini's structure
 ```json
 {
   "title":                     "STRING",
-  "source_type":               "STRING  — enum: Automotive News | Bloomberg | Financial News | Industry Publication | MarkLines | Other | Patent | Press Release | Reuters | S&P",
+  "source_type":               "STRING  — enum: Automotive News | Bloomberg | Financial News | GlobalData | Industry Publication | MarkLines | Other | Patent | Press Release | Reuters | S&P",
   "publish_date":              "STRING | null  — pattern: YYYY-MM-DD",
   "publish_date_confidence":   "STRING  — enum: High | Low | Medium",
   "original_url":              "STRING | null",
@@ -348,7 +345,7 @@ Each record includes 2–4 evidence bullets:
 
 ### 7.1 Technology stack
 
-* **UI:** Streamlit (9-page multi-page app)
+* **UI:** Streamlit (5-page multi-page app: Ingest, Review & Approve, Weekly Executive Brief, Insights, Admin)
 * **Local extraction:** PyMuPDF with pdfplumber fallback
 * **LLM provider:** Gemini 2.5-flash-lite (primary) + Gemini 2.5-flash (fallback/repair) via `google-genai` with structured JSON schema
 * **Storage:** JSONL (JSON Lines format)
@@ -357,13 +354,12 @@ Each record includes 2–4 evidence bullets:
 * **Language:** Python 3.9+
 * **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, altair, google-genai, pytest
 
-For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion (single and bulk), duplicate detection, record review, analytics, trend analysis, weekly briefing workflows, and a document library in a lightweight interface. The app includes nine main pages: (1) Home, (2) Ingest with duplicate blocking and bulk PDF upload, (3) Inbox with title-first expandable cards and batch actions, (4) Record detail with sequential navigation, Quick Approve, and confidence detail breakdown, (5) Dashboard with trend analysis charts including confidence distribution, (6) Weekly Brief for digest drafting and AI-generated executive brief, (7) Review Brief for inspecting saved briefs and approving/excluding source records, (8) Original Documents library, and (9) Admin for bulk export and deduplication. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). API usage is tracked per-model in `data/api_usage.json` with midnight Pacific Time reset. For reporting and downstream analysis, the app includes:
+For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion (single and bulk), duplicate detection, record review, analytics, trend analysis, and weekly briefing workflows in a lightweight interface. The app includes five main pages plus a Home landing page: (1) Ingest with duplicate blocking and bulk PDF upload, (2) Review & Approve with queue filtering, record detail/edit, JSON editing, approve/disapprove, and confidence detail breakdown, (3) Weekly Executive Brief for digest drafting and AI-generated executive briefs, (4) Insights with trend analysis charts including confidence distribution, and (5) Admin for bulk export and maintenance. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). API usage is tracked per-model in `data/api_usage.json` with midnight Pacific Time reset. For reporting and downstream analysis, the app includes:
 
 - CSV export of canonical records (or all records) filtered by approval status
 - JSONL export of both canonical and duplicate records for analysis
-- Dashboard with toggle to view analytics on canonical vs. all records, plus Topic Momentum, Company Mentions, and Priority Distribution trend charts
-- Weekly Brief page for drafting deterministic digest summaries, AI-generated executive briefs, and executable email templates
-- Original Documents page for browsing/filtering source files with evidence previews
+- Insights page with toggle to view analytics on canonical vs. all records, plus Topic Momentum, Company Mentions, and Priority Distribution trend charts
+- Weekly Executive Brief page for drafting deterministic digest summaries, AI-generated executive briefs, and executable email templates
 - CLI script (`scripts/dedupe_jsonl.py`) for off-app bulk deduplication with diagnostic stats
 
 ### 7.2 Processing pipeline (step-by-step)
@@ -392,12 +388,12 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
    * **Single-context mode:** score paragraphs (watchlist, keyword, country hits), build bounded context pack, single model call with two-pass strategy (Flash-Lite → Flash fallback)
 7. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, infer publish_date and source_type from text patterns, remove invalid regulator entities)
 8. **Deterministic priority classification** (`_boost_priority()` in `src/postprocess.py`):
-   * Upgrades to High when: `mentions_our_company` is true, footprint region + closure topic/keyword, or footprint region + key OEM customer (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, etc.)
+   * Upgrades to High when: `mentions_our_company` is true, footprint region + closure topic/keyword, or footprint region + key OEM customer (Volkswagen, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes-Benz, etc.)
    * LLM prompt also includes priority criteria (rule 8) for initial classification
 9. Validate JSON against schema; if invalid, repair prompt with error details → revalidate
 10. **Computed confidence:** `_compute_confidence()` overwrites LLM self-assessed confidence with a deterministic score based on field completeness, evidence quality, rule corrections, and date provenance (see §7.5.6); audit trail stored in `_confidence_detail`
 11. **Auto-approve heuristic:** computed confidence not Low + publish_date present + source_type not Other + 2+ evidence bullets → auto-Approved; otherwise Pending
-11. Store record with `duplicate_of` / `exclude_from_brief` metadata if needed; update API quota tracker
+11. Store record with `duplicate_of` / `is_duplicate` metadata if needed; update API quota tracker
 12. Display token usage summary (model used, prompt/output/total tokens, noise level, chunks succeeded/repaired/failed)
 13. Render Intelligence Brief from JSON (deterministic, no LLM call)
 14. Human review: Pending records require manual approval; Quick Approve with auto-advance to next unreviewed record
@@ -474,10 +470,10 @@ This section documents the three most impactful design decisions and the reasoni
 
 1. **Exact title match (blocking):** at ingest time, the system checks if a record with the same normalized title already exists. If so, ingestion is blocked entirely.
 2. **Fuzzy story detection (flagging):** if no exact match is found, the system searches for similar titles using `SequenceMatcher` with a 0.88 similarity threshold. When similar stories are found, the system automatically compares source quality using a composite scoring tuple:
-   - Publisher score: S&P=100 > Bloomberg=90 > Reuters=80 > Automotive News=75 > MarkLines=70 > Press Release=60 > Patent=55 > Other=50
+   - Publisher score: S&P=100 > Bloomberg=90 > Reuters=80 > Financial News=78 > MarkLines=76 > Automotive News=75 > Industry Publication=72 > Press Release=60 > Patent=55 > Other=50
    - Confidence score: High=3 > Medium=2 > Low=1
    - Completeness score: +1 for publish_date present, +1 for original_url present, +1 for regions_relevant non-empty, +1 for evidence_bullets count >= 3
-3. **Canonical selection:** the highest-scoring record becomes canonical; all others are marked with `exclude_from_brief=True` and `duplicate_story_of` pointing to the canonical record_id.
+3. **Canonical selection:** the highest-scoring record becomes canonical; all others are marked with `is_duplicate=True` and `duplicate_story_of` pointing to the canonical record_id.
 4. **Brief suppression:** the weekly briefing workflow (`src/briefing.py`) excludes duplicates by default, so the executive digest shows only one version of each story.
 
 **Why this works:** The ranking is deterministic and repeatable — no LLM calls are needed. The publisher hierarchy reflects real-world source authority (S&P's analysis is generally more valuable than a raw Reuters wire). The completeness score ensures that when two sources have the same publisher tier, the more complete record wins.
@@ -533,7 +529,7 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
    - Signal 1: `mentions_our_company` is true
    - Signal 2: footprint region + "Closure Technology & Innovation" topic
    - Signal 3: footprint region + closure keyword (latch, door system, handle, digital key, smart entry, cinch, striker) found in title/evidence/insights
-   - Signal 4: footprint region + key OEM customer (VW, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes, Nissan, Honda, Renault, Tata, Mahindra, BYD, Geely, Chery, Great Wall)
+   - Signal 4: footprint region + key OEM customer (Volkswagen, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes-Benz, Nissan, Honda, Renault, Tata, Mahindra, BYD, Geely, Chery, Great Wall)
 
 **Why this works:** The prompt gives the model context to make reasonable initial priority judgments. The deterministic postprocess acts as a safety net — it catches cases where the model underestimates priority because it does not know Kiekert's specific business context (e.g., which OEMs are customers, which regions are manufacturing footprint). This two-layer approach ensures that business-critical signals are never missed, even when the model defaults to Medium.
 
@@ -687,11 +683,12 @@ and competitor context sections that were added]
 ### 8.2 Accuracy checks (taxonomy and regions)
 
 * Topic consistency: are topics chosen from canonical list? any drift?
-* Region roll-ups:
+* Region roll-ups (two-tier architecture):
 
-  * Europe: includes UK/Turkey/Russia and broad EU/Europe/EMEA mentions
-  * Africa: Morocco/South Africa mapping
-  * US: country mention normalized to “United States” and region “US”
+  * Display regions: Asia, Western Europe, Eastern Europe, Africa, US, Latin America
+  * Footprint regions: India, China, Japan, Thailand, Mexico, Russia + display regions
+  * Country-to-region mappings: ~60 countries mapped via `COUNTRY_TO_FOOTPRINT` in `postprocess.py`
+  * Legacy migration: `Europe (including Russia)` → `Western Europe` unless Russia explicitly present
 
 ### 8.3 Case studies (recommended for the report)
 
@@ -702,6 +699,149 @@ Add 2–3 short “before/after” examples:
 * Example C: government/regulatory release (actor type driven)
 
 For each: include the source snippet, the JSON record, and the rendered brief.
+
+### 8.4 Quality monitoring system
+
+Extraction accuracy and brief consistency are the hardest aspects of an LLM-based intelligence pipeline to maintain over time. Schema validation catches structural errors, but it cannot detect semantic drift — a correct-looking record where the confidence is inflated, a footprint region is missing because the country mapping was incomplete, or a macro theme fires without meeting its signal threshold. These failures are silent: they pass validation, surface in executive briefs, and erode trust without any visible error.
+
+To address this, the system includes an automated quality monitoring module (`src/quality.py`, `scripts/run_quality.py`) that runs post-hoc checks on both records and briefs, computes quality KPIs, and produces append-only audit logs for trend analysis.
+
+#### 8.4.1 Quality check categories
+
+**Record-level checks** (run on every record in the brief's selection set):
+
+| Check | What it detects | Severity |
+|---|---|---|
+| Evidence grounding | Evidence bullets not found in source PDF text (exact or ≥60% keyword overlap) | High |
+| Evidence near-miss | Evidence bullets between 45–60% keyword overlap (paraphrased but not hallucinated) | Medium |
+| Duplicate record in brief | Same story ingested as separate records (detected by dedupe key or ≥85% title similarity) | High |
+| Near-duplicate titles | Fuzzy title match (≥85% similarity) across records with different dedupe keys | Medium |
+| Geo leakage | Footprint regions present that cannot be derived from country_mentions | High |
+| Display bucket leakage | Country-level values (India, China, etc.) appearing in `regions_mentioned` instead of display buckets (Asia) | High |
+| Missing footprint region | Country present in `country_mentions` but its derived footprint region missing from `regions_relevant_to_kiekert` | Medium |
+| Duplicate values | Repeated entries in companies, countries, or regions (after normalization) | Medium |
+| Canonicalization inconsistency | Multiple alias forms of the same company (e.g., VW + Volkswagen) surviving dedup | Medium |
+| Macro theme rule violation | Theme fired without meeting min_groups, premium company gate, or region requirement | High |
+| Confidence-evidence mismatch | High confidence with fewer than 2 evidence bullets | Medium |
+| Confidence-source mismatch | High confidence from source_type "Other" | Low |
+| Missing priority reason | Priority escalated from LLM original but `priority_reason` is empty | Medium |
+
+**Brief-level checks** (run on the generated executive brief text):
+
+| Check | What it detects | Severity |
+|---|---|---|
+| Ungrounded claim | Bullet in a claim section has no REC citation while the brief uses REC labels | High |
+| REC mismatch | REC ID referenced in brief does not exist in the selected record set | High |
+| Missing uncertainty section | Records contain uncertainty signals but CONFLICTS & UNCERTAINTY is empty or "None observed" | High |
+| Overreach | Hard-assertion language (e.g., "decided", "scrapping") when source records use softer language (e.g., "weighing", "could") | Medium |
+
+#### 8.4.2 Severity definitions
+
+Severity levels are assigned based on downstream impact:
+
+- **High**: Factual error that would propagate to executive output. A single High-severity finding in a published brief is a quality failure. Examples: hallucinated evidence, wrong region mapping, ungrounded claim.
+- **Medium**: Inconsistency that degrades analytics or audit transparency but does not produce a factually wrong executive output. Examples: duplicate company entries inflating theme counts, missing priority explanation, thin evidence for stated confidence.
+- **Low**: Minor inconsistency with limited downstream impact. Examples: non-canonical alias form that was still correctly deduplicated, high confidence from an unrecognized publisher.
+
+#### 8.4.3 KPI methodology
+
+Ten KPIs are computed per quality run — five for records (R1–R5), five for briefs (B1–B5):
+
+**Record KPIs:**
+
+| KPI | Definition | Target | Computation |
+|---|---|---|---|
+| R1 | High-severity defects per record | 0.00 | count(High findings) / count(records) |
+| R2 | Medium-severity defects per record | ≤ 1.0 | count(Medium findings) / count(records) |
+| R3 | Evidence grounding pass rate | ≥ 90% | % of records where all evidence bullets are source-verifiable |
+| R4 | Canonicalization stability | ≥ 95% | % of records with no alias inconsistency findings |
+| R5 | Geo determinism pass rate | ≥ 98% | % of records where footprint regions == f(country_mentions) and no display bucket leakage |
+
+**Brief KPIs:**
+
+| KPI | Definition | Target | Computation |
+|---|---|---|---|
+| B1 | Ungrounded claims count | 0 | count(ungrounded_claim + rec_mismatch findings) |
+| B2 | Overreach count | ≤ 2 | count(overreach findings) |
+| B3 | Uncertainty compliance | 100% | 1.0 if uncertainty section present when required, else 0.0 |
+| B4 | Synthesis density | ≥ 2 | count(bullets citing ≥ 2 distinct REC IDs) |
+| B5 | Action specificity score | ≥ 4/5 | Keyword-based scoring: owner role (1pt), timeframe (1pt), artifact verb (1pt), trigger/watch condition (1pt), output type (1pt) |
+
+#### 8.4.4 Weighted quality scores
+
+Two composite scores (0–100) summarize overall quality per run:
+
+**Record score** — starts at 100, deductions:
+- High finding: −25 each
+- Medium finding: −10 each
+- Low finding: −2 each
+
+**Brief score** — starts at 100, deductions:
+- Ungrounded claim or REC mismatch: −25 each
+- Wrong signal / wrong certainty: −20 each
+- Overreach: −10 each
+- Missing uncertainty when required: −20
+- Fewer than 2 cross-record themes: −15
+
+**Overall score** = average(record score, brief score). A score below 80 should trigger investigation before publishing. Scores below 60 indicate systematic quality issues requiring pipeline or prompt changes.
+
+#### 8.4.5 Quality outputs and audit trail
+
+All quality data is append-only (no overwrites), enabling trend analysis:
+
+| Output | Path | Format |
+|---|---|---|
+| Record findings | `data/quality/record_qc.jsonl` | One JSON object per finding |
+| Brief findings | `data/quality/brief_qc.jsonl` | One JSON object per finding |
+| Run summaries | `data/quality/quality_runs.jsonl` | One JSON object per run with all KPIs |
+| Excel report | `data/quality/quality_report.xlsx` | 5 sheets: record_qc, brief_qc, runs_summary, kpi_trends, summary_pivot |
+
+The CLI entrypoint (`python scripts/run_quality.py`) accepts `--latest-brief` (default) or `--brief-id <id>` and prints a console summary: high issue count, brief score, and top 3 issue types. The Excel report includes a summary pivot sheet for recurring defect pattern analysis.
+
+#### 8.4.6 Integration with the pipeline
+
+The quality module is intentionally read-only — it observes records and briefs but never modifies them. This preserves the architecture invariant that `postprocess_record()` → `validate_record()` is the only mutation path.
+
+Uncertainty detection uses a shared word list (`UNCERTAINTY_WORDS` in `constants.py`) consumed by both the synthesis prompt (which makes the CONFLICTS & UNCERTAINTY section mandatory when triggered) and the quality checker (which verifies the brief actually includes it). This single-source-of-truth pattern prevents the prompt and QC from diverging on what counts as uncertainty language.
+
+#### 8.4.7 Quality system improvements (2026-02-17)
+
+**Problem identified:** The initial quality monitoring system (sections 8.4.1–8.4.6) was purely observational. It could detect issues in a single run, but had no mechanism to (1) track whether extraction quality was improving or degrading over time, (2) catch duplicate records that slipped through ingest-time dedup, (3) distinguish genuine hallucinations from acceptable paraphrasing in evidence grounding, (4) surface recurring issues as actionable feedback for prompt tuning, or (5) scale company alias detection beyond 4 hardcoded OEM groups. These gaps meant the QC system could report problems but could not close the loop toward fixing them.
+
+**Prompt used:** *"Scan python scripts/run_quality.py references and output. Is it good quality check and monitoring to improve extraction and brief generation?"* — followed by: *"Suggest improvement to be able to see quality extraction improving over time and to check duplicate-record cross-check. What do you propose about evidence grounding threshold? About feedback loop to extraction? To improve company alias groups that are hardcoded with only 4 groups?"*
+
+**Five improvements implemented:**
+
+**1. KPI trend tracking and regression detection** (`compute_quality_trends()` in `quality.py`)
+
+The run summary log (`quality_runs.jsonl`) already stored KPI values per run but nothing consumed them for trend analysis. A new function compares the current run against the last N runs (default 5), computing delta-from-average and delta-from-last for all 13 KPIs. Each KPI is annotated with its improvement direction (e.g., R1 "high defect rate" improves when it goes down; R3 "evidence grounding pass rate" improves when it goes up). Regression alerts fire when a ratio KPI worsens by ≥5% or a count KPI worsens by ≥2 points. A new `kpi_trends` sheet in the Excel report shows run-over-run movement for all KPIs. The CLI output now prints trend direction, regression alerts, and stable-vs-declining status after each run.
+
+**2. Duplicate-record cross-check** (`_check_duplicate_records()` in `quality.py`)
+
+Ingest-time dedup uses a composite key (date + topic + companies + title fingerprint) and a title similarity threshold of 0.88. However, the same article ingested on different days or with slight title variations can slip through. A post-hoc duplicate check now runs on all target records during QC, using two methods: (a) exact match on `build_dedupe_key()` — any group with 2+ records emits a High-severity `duplicate_record_in_brief` finding; (b) fuzzy title matching via `SequenceMatcher` at threshold 0.85 (lower than the 0.88 ingest check to catch near-misses) — emits a Medium-severity `near_duplicate_titles` finding. Pairs already caught by exact key are skipped to avoid double-reporting.
+
+**3. Granular evidence grounding with configurable threshold**
+
+The original evidence grounding check used a hardcoded 60% keyword overlap threshold and reported binary pass/fail. Three changes were made: (a) the threshold is now a named constant (`EVIDENCE_GROUNDING_THRESHOLD = 0.60`) for single-point tuning; (b) a near-miss tier (`EVIDENCE_NEAR_MISS_THRESHOLD = 0.45`) separates genuine hallucinations (<45%, High severity) from acceptable paraphrasing (45–60%, Medium severity); (c) per-bullet overlap percentages and per-record average overlap are reported in finding notes, enabling threshold tuning based on observed data rather than guesswork.
+
+**4. Extraction feedback loop** (`generate_extraction_feedback()` in `quality.py`)
+
+A new function aggregates findings across the last N quality runs (default 5) and identifies chronic issues — finding types that appear in ≥50% of recent runs. Each chronic finding type maps to a pre-defined actionable suggestion (template-driven, no LLM call). For example, if `evidence_not_grounded` appears in 4 of the last 5 runs, the system suggests: *"Consider adding 'Use exact phrases from the source text where possible' to the extraction prompt."* Twelve finding types have mapped suggestions covering prompt changes, postprocess map extensions, and dedup threshold adjustments. The CLI prints chronic issues and suggestions after each run. This is Phase A (observational feedback); the human operator decides whether to act on the suggestions.
+
+**5. Auto-derived company alias groups** (`_build_company_alias_groups()` in `quality.py`)
+
+The original QC module hardcoded 4 company alias groups (Volkswagen, Toyota, GM, Mercedes-Benz). A new builder function auto-derives alias groups from the postprocess canonicalization maps (`_OEM_CANONICAL_BY_LOWER`, `_COMPANY_SPECIAL_CANONICAL`) and enriches them with known variants for 14 additional OEMs (Ford, Hyundai, Stellantis, Nissan, Honda, Renault, Geely, Tata, Volvo, JLR, Kia, Audi, Porsche). This produces 18 alias groups covering all major automotive companies. The groups auto-update when postprocess maps change — adding a new OEM canonical mapping automatically extends QC coverage with zero maintenance.
+
+**Updated quality outputs:**
+
+| Output | Change |
+|---|---|
+| CLI console | Now prints KPI trends, regression alerts, chronic issues, and prompt suggestions |
+| Excel report | New 5th sheet `kpi_trends` with per-KPI direction, delta, and run count |
+| Pipeline return | New `trends` and `feedback` keys in the result dict |
+| Record findings | New finding types: `evidence_near_miss`, `duplicate_record_in_brief`, `near_duplicate_titles` |
+
+All 97 existing tests continue to pass after these changes. The read-only invariant is preserved — no improvement modifies records or briefs.
 
 ## 9. Results (initial)
 
@@ -728,7 +868,7 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * Context pack selection controlled token usage without losing key signals.
 * HITL gating made the workflow realistic for organizational adoption.
 * Duplicate detection layer (both exact and fuzzy) prevented noise in executive reporting while maintaining flexibility.
-* Publisher ranking system (deterministic scoring: S&P=100 > Bloomberg=90 > Reuters=80 > ... > Other=50) ensured that when multiple sources covered the same story, the highest-quality source was automatically selected.
+* Publisher ranking system (deterministic scoring: S&P=100 > Bloomberg=90 > Reuters=80 > Financial News=78 > MarkLines=76 > Automotive News=75 > Industry Publication=72 > ... > Other=50) ensured that when multiple sources covered the same story, the highest-quality source was automatically selected.
 * Weekly briefing workflow with share-ready detection (High priority + High confidence) and executive email templating made it easy for analysts to draft weekly digests with minimal manual work.
 * Deduplication and briefing modules were entirely deterministic (no additional LLM calls), keeping token costs and latency predictable.
 * **Noisy-PDF cleaning** significantly improved extraction quality: removing ads, nav menus, paywall prompts, and repeated headers before the model sees the text eliminated the most common source of wrong source_type and phantom entity extraction.
@@ -736,13 +876,15 @@ For each: include the source snippet, the JSON record, and the rendered brief.
 * **Publisher-vs-cited-source prompt rule** was the single highest-impact prompt change — it fixed the most common misclassification (S&P articles being tagged as "Reuters" because Reuters was cited in the body).
 * **Token usage logging** provided visibility into cost per document and made it easy to identify which documents triggered the stronger model, enabling targeted improvements to the cleanup pipeline.
 * **AI-generated Weekly Executive Brief** (v3.5) transformed the flagship deliverable from a static list of titles into a cross-record LLM synthesis following the executive report template. This is the single most valuable output for executive stakeholders, and it requires only one additional LLM call (Gemini Flash) for up to 20 records.
-* **Redesigned review UX** (v3.6-3.7) dramatically reduced review friction: title-first expandable cards with inline approve/review buttons, batch actions, Next/Previous navigation, and Quick Approve with auto-advance eliminated the need to open each record individually. The simplified review model (Pending/Approved/Disapproved with auto-approve) matches the single-analyst workflow.
+* **Consolidated Review & Approve page** (v3.6-3.7, consolidated v6.2) dramatically reduced review friction: unified queue with filters, title-first expandable cards with inline approve/review buttons, record detail with Next/Previous navigation, Quick Approve with auto-advance, and full JSON editing — all in a single page. The simplified review model (Pending/Approved/Disapproved with auto-approve) matches the single-analyst workflow.
 * **Bulk PDF ingest** (v3.8) enabled processing multiple articles in one session with progress tracking, per-file deduplication, and summary tables — critical for weekly batches of 10-20 articles from premium sources.
 * **Trend analysis charts** (v4.0-4.1) added the temporal dimension that makes a CI tool useful for spotting change over time: Topic Momentum with weighted counting and Emerging/Expanding/Fading/Stable classification, Top Company Mentions with canonicalization, and Priority Distribution with High-Ratio and Volatility Index. All computed deterministically (zero token cost) via pandas aggregations and Altair visualizations.
 * **Priority classification** (v4.3) — the two-layer approach (prompt rules + deterministic `_boost_priority()` postprocess) ensured that business-critical signals are never missed even when the model underestimates priority. The deterministic boost acts as a safety net that catches footprint-region + closure-tech or key-OEM combinations.
 * **Computed confidence** (v4.6) replaced the LLM's self-assessed confidence (which skewed toward "High" regardless of extraction quality) with a deterministic score based on observable signals (field completeness, postprocess corrections, date backfill). This fixed the overconfidence bias that was allowing weak extractions to be auto-approved and surface in executive briefs. The `_confidence_detail` audit trail enables ongoing calibration analysis.
 * **Meta-based model routing** (v4.5) cut API consumption by 30-50% compared to the per-chunk two-pass approach. Noisy documents skip Flash-Lite entirely (avoiding wasted calls), while clean documents complete on Flash-Lite in a single pass. This was essential for staying within the 20 RPD free-tier limit during daily workflows.
 * **API quota tracking** (v4.4) with smart chunk recommendations gave analysts the visibility to manage their daily API budget. The sidebar progress bars and pre-run estimates prevent mid-batch quota exhaustion.
+
+* **Automated quality monitoring** (v6.3) addressed the hardest problem in LLM-based intelligence: silent semantic drift that passes schema validation but erodes output quality. The quality module runs 10+ post-hoc checks per record (evidence grounding against source PDF, geo determinism, macro theme rule validation, confidence-evidence alignment, priority audit trail) and 4+ checks per brief (REC citation consistency, uncertainty compliance, overreach detection). Ten KPIs with weighted composite scores (0–100) and append-only audit logs enable trend analysis across runs. The single-source-of-truth pattern for uncertainty word lists (shared between the synthesis prompt and QC checker) prevents the most common drift pattern: the prompt and its validator diverging on definitions.
 
 * **Spec-to-code consolidation** (v4.7) eliminated spec drift by embedding topic tagging guidance and competitor context directly into the extraction prompt and code comments. This was the single most impactful change for LLM classification quality — the model went from guessing topic boundaries based on label names alone to receiving explicit disambiguation rules. The lesson: specifications that are not consumed at runtime become a maintenance liability; embed domain guidance where it is actually read (by the LLM in the prompt, by developers in code comments).
 
@@ -787,10 +929,10 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ---
 
-# Implementation Summary (v4.5)
+# Implementation Summary (v6.3)
 
-**Version:** 4.5
-**Completion Date:** February 14, 2026
+**Version:** 6.3
+**Completion Date:** February 17, 2026
 
 ## Key Features Delivered
 
@@ -835,10 +977,10 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 7. **Duplicate Detection & Deduplication** (`src/dedupe.py`)
    - Exact title matching (blocking at ingest)
    - Fuzzy story detection (threshold 0.88)
-   - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, ... Other=50)
+   - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, Financial News=78, MarkLines=76, Automotive News=75, Industry Publication=72, ... Other=50)
    - Confidence and completeness scoring for tie-breaking
 
-8. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/06_Weekly_Brief.py`)
+8. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/03_Weekly_Executive_Brief.py`)
    - Candidate selection from last N days (configurable, default 30, max 90; auto-excludes duplicates)
    - Share-ready detection (High priority + High confidence)
    - Deterministic Markdown brief + executive email template generation
@@ -858,7 +1000,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
     - Smart chunk mode recommendations: warns when chunked mode is unnecessary or when calls will exceed remaining quota
     - Supports custom quota overrides via `set_quota()`
 
-11. **Trend Analysis Dashboard** (`pages/04_Dashboard.py`)
+11. **Trend Analysis Dashboard** (`pages/04_Insights.py`)
     - **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     - **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
     - **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
@@ -866,34 +1008,33 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
     - Canonical/all-records toggle for all analytics
     - Unit-testable helpers: `weighted_explode`, `explode_list_column`, `classify_topic_momentum`, `canonicalize_company`, `week_start`, `get_effective_date`
 
-12. **Redesigned Review UX** (`pages/02_Inbox.py`, `pages/03_Record.py`)
-    - Inbox: title-first expandable cards with inline Approve/Review buttons, batch actions, sorted newest-first by `created_at`
-    - Record: Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
-    - **Confidence detail breakdown:** expandable section showing computed score, per-signal contributions (publish date, source type, evidence bullets, key insights, kiekert regions, rule corrections, date backfill), and LLM override indicator; auto-expands when LLM confidence was overridden
+12. **Review & Approve** (`pages/02_Review_Approve.py`)
+    - Unified queue with filters (review status, priority, source type, topic, date range, text search)
+    - Title-first expandable cards with inline Approve/Review buttons, batch actions, sorted newest-first
+    - Record detail with Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
+    - Full JSON editing capability for manual field corrections
+    - **Confidence detail breakdown:** expandable section showing computed score, per-signal contributions, and LLM override indicator
     - Simplified review model: Pending/Approved/Disapproved with auto-approve heuristic at ingest
     - Legacy status normalization ("Not Reviewed"/"Reviewed" → "Pending")
-
-13. **Original Documents Library** (`pages/07_Documents.py`)
-    - Filterable document index (date range, topic, company, review status, priority, text search)
-    - Link fallback chain: `original_url` > `source_pdf_path` > "No link"
-    - Expandable cards with evidence bullets, notes, and router usage summary
-    - One-click navigation to full Record page
 
 14. **Bulk Deduplication CLI** (`scripts/dedupe_jsonl.py`)
     - Standalone JSONL deduplication with CSV export
     - Diagnostic stats (duplicate rate, canonical count)
     - Supports large datasets outside Streamlit UI
 
-15. **Testing & Validation** (`test_scenarios.py`)
-    - 25+ test cases covering all workflows
+15. **Testing & Validation** (`tests/`)
+    - 97 test cases across 4 test modules (`test_scenarios.py`, `test_macro_themes.py`, `test_regions_bucketed.py`, `test_publish_date_pdf.py`)
     - Publisher ranking hierarchy validation
     - Weekly briefing logic verification
     - Exact and fuzzy duplicate detection tests
+    - Macro theme detection with signal group matching, anti-keywords, premium gates, rollups
+    - Two-tier region bucketing with country-to-footprint mapping, display collapse, legacy migration
+    - Company name canonicalization (VW/Volkswagen dedup, legal suffix stripping)
 
 ## Technical Stack
 
 - **Models:** Gemini 2.5-flash-lite (primary, 10 RPM / 20 RPD) + Gemini 2.5-flash (fallback/repair/AI brief, 5 RPM / 20 RPD) via `google-genai` with structured JSON schema; both $0 on free tier
-- **UI:** Streamlit (9-page multi-page app)
+- **UI:** Streamlit (5-page multi-page app + Home landing page)
 - **Charting:** Altair (Topic Momentum interactive charts), matplotlib (other charts), pandas aggregations
 - **Storage:** JSONL (JSON Lines format) + `data/api_usage.json` for quota tracking
 - **Language:** Python 3.9+
@@ -903,15 +1044,12 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 | # | Page | File | Purpose |
 |---|------|------|---------|
-| 1 | Home | `Home.py` | Landing page with navigation guide for all 9 pages |
-| 2 | Ingest | `pages/01_Ingest.py` | Single + bulk PDF upload, extraction, noise routing, quota display |
-| 3 | Inbox | `pages/02_Inbox.py` | Title-first cards, inline approve, batch actions, newest-first sort |
-| 4 | Record | `pages/03_Record.py` | Detail view, edit fields, confidence detail breakdown, Next/Previous, Quick Approve |
-| 5 | Dashboard | `pages/04_Dashboard.py` | Trend charts, canonical toggle, topic/company/priority/confidence analytics |
-| 6 | Weekly Brief | `pages/05_Weekly_Brief.py` | Candidate selection, deterministic + AI-generated briefs, email template |
-| 7 | Review Brief | `pages/06_Review_Brief.py` | Inspect saved brief, compare to previous, approve/exclude source records |
-| 8 | Documents | `pages/07_Documents.py` | Source file library with filters and evidence previews |
-| 9 | Admin | `pages/08_Admin.py` | Bulk CSV/JSONL export, dedup metrics, demo reset |
+| — | Home | `Home.py` | Landing page with workflow navigation guide |
+| 1 | Ingest | `pages/01_Ingest.py` | Single + bulk PDF upload, extraction, noise routing, quota display |
+| 2 | Review & Approve | `pages/02_Review_Approve.py` | Queue filtering, record detail/edit, JSON editing, approve/disapprove, confidence breakdown |
+| 3 | Weekly Executive Brief | `pages/03_Weekly_Executive_Brief.py` | Candidate selection, deterministic + AI-generated briefs, saved brief comparison |
+| 4 | Insights | `pages/04_Insights.py` | Trend charts, canonical toggle, topic/company/priority/confidence analytics |
+| 5 | Admin | `pages/08_Admin.py` | Bulk CSV/JSONL export, dedup metrics, maintenance utilities |
 
 ---
 
@@ -919,9 +1057,9 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ## A) Product & Scope
 
-- **MVP features:** PDF upload (single + bulk), text paste, noisy-PDF cleanup, chunked extraction with meta-based routing, duplicate detection, weekly briefing (deterministic + AI-generated), executive email generation, trend analysis dashboard, original documents library
+- **MVP features:** PDF upload (single + bulk), text paste, noisy-PDF cleanup, chunked extraction with meta-based routing, duplicate detection, weekly briefing (deterministic + AI-generated), executive email generation, trend analysis (Insights page), consolidated Review & Approve workflow
 - **Duplicate detection:** Exact title block + similar story auto-ranking by source quality
-- **Deduplication logic:** Publisher ranking (S&P > Bloomberg > Reuters > ... > Other) + confidence + completeness
+- **Deduplication logic:** Publisher ranking (S&P > Bloomberg > Reuters > Financial News > MarkLines > Automotive News > Industry Publication > ... > Other) + confidence + completeness
 - **Priority classification:** LLM prompt rules + deterministic `_boost_priority()` postprocess with 4 signal checks
 
 ## B) Technical Choices
@@ -930,13 +1068,13 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 - **Cleanup:** Deterministic noisy-PDF cleaning before model calls (not relying on model to ignore noise)
 - **Chunking:** Overlapping chunks for long documents with per-chunk extraction and merge
 - **Quota management:** File-based RPD tracker with midnight PT reset, sidebar display, smart chunk recommendations
-- **UI:** Streamlit 9-page app for lightweight, interactive workflows
+- **UI:** Streamlit 5-page app for lightweight, interactive workflows
 - **Charting:** Altair for interactive Topic Momentum; matplotlib + pandas for other charts
 - **Storage:** JSONL for simplicity and scalability without database overhead
 
 ## C) Evaluation
 
-- **Test coverage:** 25+ scenario tests (duplicate detection, ranking, briefing)
+- **Test coverage:** 97 tests across 4 modules (duplicate detection, ranking, briefing, macro themes, regions, company canonicalization)
 - **Quality gates:** Schema validation, evidence requirement, review gating (auto-approve + manual), duplicate suppression, priority classification, computed confidence scoring
 - **Token tracking:** Per-call usage logging + per-model RPD quota tracking for cost monitoring and optimization
 - **Regression prevention:** Comprehensive test suite for all new features
@@ -949,10 +1087,10 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 ## E) Reporting
 
 - **Exports:** CSV (canonical and all) ready for Power BI; JSONL (canonical + dups) for analysis
-- **In-app:** Dashboard with trend analysis charts (Topic Momentum, Company Mentions, Priority Distribution), Weekly Brief with deterministic + AI-generated executive briefs, Original Documents library, Admin metrics, token usage display, quota sidebar
+- **In-app:** Insights page with trend analysis charts (Topic Momentum, Company Mentions, Priority Distribution), Weekly Executive Brief with deterministic + AI-generated briefs, Admin metrics, token usage display, quota sidebar
 - **CLI:** Standalone bulk deduplication script with diagnostic output
 
 ---
 
 **Report version:** 1.0
-**Status:** Production MVP complete with meta-based model routing, per-chunk repair, priority classification, computed confidence scoring, API quota tracking, trend analysis dashboard, AI-generated executive briefs, bulk PDF ingest, and original documents library; ready for deployment and evaluation
+**Status:** Production MVP complete with meta-based model routing, per-chunk repair, priority classification, computed confidence scoring, API quota tracking, trend analysis (Insights page), AI-generated executive briefs, bulk PDF ingest, and consolidated Review & Approve workflow; ready for deployment and evaluation

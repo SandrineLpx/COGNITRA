@@ -2,7 +2,7 @@
 
 ## What this is
 
-Streamlit multipage app (Home.py + pages/01–08) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces weekly executive briefs for Kiekert (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
+Streamlit multipage app (Home.py + 5 pages) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces weekly executive briefs for Kiekert (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
 
 Minimal-AI approach: one model call per document for strict JSON extraction, deterministic postprocessing and validation, deterministic brief rendering from stored JSON (no second model call). Human review before executive reporting.
 
@@ -81,6 +81,8 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 | `src/storage.py` | JSONL read/write, record IDs, PDF storage |
 | `src/dedupe.py` / `src/dedup_rank.py` | Duplicate detection and story-level dedup |
 | `src/render_brief.py` | Single-record intelligence brief markdown rendering |
+| `src/quality.py` | Post-hoc QC engine: record + brief checks, KPI computation, Excel export |
+| `scripts/run_quality.py` | CLI entrypoint for quality pipeline (`--latest-brief` or `--brief-id`) |
 | `pages/01_Ingest.py` | PDF upload → LLM extraction → postprocess → validate → store |
 | `pages/02_Review_Approve.py` | Queue review, record detail/edit, approve/disapprove |
 | `pages/03_Weekly_Executive_Brief.py` | Weekly brief generation and saved-brief review |
@@ -157,6 +159,17 @@ To run specific suites:
 ```bash
 python -m pytest tests/test_scenarios.py tests/test_macro_themes.py tests/test_regions_bucketed.py -v
 ```
+
+## Quality monitoring
+
+Automated QC runs post-hoc on records and briefs via `python scripts/run_quality.py`.
+
+- **Record checks**: evidence grounding (PDF text overlap), geo determinism (country→footprint completeness, display bucket leakage), macro theme rule validation (min_groups, premium gate, region requirements), confidence-evidence alignment, priority reason audit.
+- **Brief checks**: REC citation consistency, uncertainty section compliance, overreach detection.
+- **Shared constants**: `UNCERTAINTY_WORDS` and `UNCERTAINTY_TOPICS` in `constants.py` — single source of truth consumed by both `briefing.py` (synthesis prompt) and `quality.py` (QC checker). Do not define uncertainty word lists elsewhere.
+- **Quality standards**: `References/Quality/` contains QUALITY_CHECKLIST.md, QUALITY_KPIS.md, BRIEF_GENERATION_STANDARDS.md.
+- **Output**: append-only JSONL logs in `data/quality/`, Excel report with 4 sheets.
+- **Read-only invariant**: the quality module never modifies records or briefs. It observes and reports.
 
 ## TODO (next session)
 

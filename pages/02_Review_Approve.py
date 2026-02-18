@@ -324,7 +324,7 @@ for rec in records:
             "priority": str(rec.get("priority") or "Medium"),
             "confidence": str(rec.get("confidence") or "Medium"),
             "review_status": normalize_review_status(rec.get("review_status")),
-            "exclude_from_brief": bool(rec.get("exclude_from_brief", False)),
+            "is_duplicate": bool(rec.get("is_duplicate", False)),
             "_sort_dt": created_dt if pd.notna(created_dt) else publish_dt,
             "_companies_joined": " ".join(str(x) for x in safe_list(rec.get("companies_mentioned"))).lower(),
         }
@@ -362,9 +362,9 @@ fdf = fdf.sort_values(by="_sort_dt", ascending=False, na_position="last")
 pending_count = int((fdf["review_status"] == "Pending").sum()) if not fdf.empty else 0
 approved_count = int((fdf["review_status"] == "Approved").sum()) if not fdf.empty else 0
 disapproved_count = int((fdf["review_status"] == "Disapproved").sum()) if not fdf.empty else 0
-excluded_count = int(fdf["exclude_from_brief"].fillna(False).sum()) if not fdf.empty else 0
+excluded_count = int(fdf["is_duplicate"].fillna(False).sum()) if not fdf.empty else 0
 eligible_count = int(
-    ((fdf["review_status"] == "Approved") & (~fdf["exclude_from_brief"].fillna(False))).sum()
+    ((fdf["review_status"] == "Approved") & (~fdf["is_duplicate"].fillna(False))).sum()
 ) if not fdf.empty else 0
 
 st.caption(
@@ -523,7 +523,7 @@ with st.container():
         )
         exclude_value = st.checkbox(
             "Exclude from brief",
-            value=bool(rec.get("exclude_from_brief", False)),
+            value=bool(rec.get("is_duplicate", False)),
             key=f"exclude_{record_id}",
         )
     with rc2:
@@ -551,7 +551,7 @@ with st.container():
             rec_obj["review_status"] = status_value
             rec_obj["reviewed_by"] = reviewed_by
             rec_obj["notes"] = notes
-            rec_obj["exclude_from_brief"] = bool(exclude_value)
+            rec_obj["is_duplicate"] = bool(exclude_value)
             ok, errs = validate_record(rec_obj)
         except Exception as exc:
             rec_obj = None
@@ -590,7 +590,7 @@ with st.container():
                 "review_status": "Approved",
                 "reviewed_by": reviewed_by or "analyst",
                 "notes": notes,
-                "exclude_from_brief": bool(exclude_value),
+                "is_duplicate": bool(exclude_value),
             }
             for key, value in updated.items():
                 if rec.get(key) != value:
@@ -609,7 +609,7 @@ with st.container():
                 "review_status": "Disapproved",
                 "reviewed_by": reviewed_by or "analyst",
                 "notes": notes or "Marked disapproved during review.",
-                "exclude_from_brief": bool(exclude_value),
+                "is_duplicate": bool(exclude_value),
             }
             for key, value in updated.items():
                 if rec.get(key) != value:
@@ -752,7 +752,7 @@ with st.container():
                 replaced["reviewed_by"] = str(rec.get("reviewed_by") or "")
                 replaced["notes"] = merged_notes
                 replaced["review_status"] = "Pending"
-                replaced["exclude_from_brief"] = bool(rec.get("exclude_from_brief", False))
+                replaced["is_duplicate"] = bool(rec.get("is_duplicate", False))
                 replaced["source_pdf_path"] = source_pdf_path or replaced.get("source_pdf_path")
                 replaced["_router_log"] = new_router_log
                 if not replaced.get("original_url") and rec.get("original_url"):

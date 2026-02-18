@@ -38,7 +38,7 @@ def sample_record(
     confidence: str = "High",
     publish_date: str = "2026-02-12",
     created_at: str = None,
-    exclude_from_brief: bool = False,
+    is_duplicate: bool = False,
     duplicate_story_of: str = None,
     story_primary: bool = True,
 ) -> dict:
@@ -66,7 +66,7 @@ def sample_record(
         "key_insights": ["Insight 1", "Insight 2"],
         "review_status": "Approved",
         "notes": "",
-        "exclude_from_brief": exclude_from_brief,
+        "is_duplicate": is_duplicate,
         "duplicate_story_of": duplicate_story_of,
         "story_primary": story_primary,
     }
@@ -182,13 +182,15 @@ class TestSourceQualityScoring:
         assert score_source_quality(primary) > score_source_quality(secondary)
 
     def test_source_hierarchy_respected(self):
-        """Source ranking should follow: S&P > Bloomberg > Reuters > AutoNews > MarkLines > Press > Patent > Other."""
+        """Source ranking should follow the canonical publisher hierarchy."""
         sources_in_order = [
             "S&P",
             "Bloomberg",
             "Reuters",
-            "Automotive News",
+            "Financial News",
             "MarkLines",
+            "Automotive News",
+            "Industry Publication",
             "Press Release",
             "Patent",
             "Other",
@@ -256,9 +258,9 @@ class TestOWeeklyBriefing:
         assert candidates[0]["confidence"] == "High"
 
     def test_excluded_items_suppressed_by_default(self):
-        """Items marked exclude_from_brief should be filtered unless flag is set."""
-        primary = sample_record(exclude_from_brief=False)
-        duplicate = sample_record(exclude_from_brief=True, duplicate_story_of=primary["record_id"])
+        """Items marked is_duplicate should be filtered unless flag is set."""
+        primary = sample_record(is_duplicate=False)
+        duplicate = sample_record(is_duplicate=True, duplicate_story_of=primary["record_id"])
 
         records = [primary, duplicate]
 
@@ -430,6 +432,35 @@ class TestPreprocessRetention:
 
         assert "February 1, 2026 at 9:00 PM PST" in clean
         assert "OpenAI and Microsoft voice controls" in clean
+
+
+class TestCompanyCanonicalization:
+    """Ensure company name dedup and canonicalization works correctly."""
+
+    def test_vw_volkswagen_dedup(self):
+        from src.postprocess import postprocess_record
+        rec = sample_record()
+        rec["companies_mentioned"] = ["VW", "Volkswagen Group AG", "Porsche"]
+        rec = postprocess_record(rec)
+        companies = rec["companies_mentioned"]
+        assert "Volkswagen" in companies
+        assert "VW" not in companies
+        assert companies.count("Volkswagen") == 1
+        assert "Porsche" in companies
+
+    def test_volkswagen_standalone(self):
+        from src.postprocess import postprocess_record
+        rec = sample_record()
+        rec["companies_mentioned"] = ["Volkswagen"]
+        rec = postprocess_record(rec)
+        assert rec["companies_mentioned"] == ["Volkswagen"]
+
+    def test_vw_standalone(self):
+        from src.postprocess import postprocess_record
+        rec = sample_record()
+        rec["companies_mentioned"] = ["VW"]
+        rec = postprocess_record(rec)
+        assert rec["companies_mentioned"] == ["Volkswagen"]
 
 
 if __name__ == "__main__":

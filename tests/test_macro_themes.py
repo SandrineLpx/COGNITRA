@@ -481,6 +481,23 @@ class TestMacroThemePriorityEscalation:
         assert out.get("priority") == "High"
         assert out.get("priority_reason") == "footprint_and_key_oem"
 
+    def test_toyota_motor_corporation_hits_key_oem_priority_path(self):
+        rec = _base_record(
+            title="Toyota Motor Corporation updates sourcing in Japan",
+            priority="Medium",
+            companies_mentioned=["Toyota Motor Corporation"],
+            keywords=["sourcing", "platform", "production", "automotive", "oem"],
+            country_mentions=["Japan"],
+            regions_mentioned=[],
+            regions_relevant_to_kiekert=[],
+        )
+        out = postprocess_record(rec)
+
+        assert "Japan" in out.get("regions_relevant_to_kiekert", [])
+        assert "Toyota" in out.get("companies_mentioned", [])
+        assert out.get("priority") == "High"
+        assert out.get("priority_reason") == "footprint_and_key_oem"
+
 
 # ============================================================================
 # Regression: Mercedes Bloomberg issues

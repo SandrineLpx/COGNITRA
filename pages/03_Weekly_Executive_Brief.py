@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -108,6 +108,82 @@ def _save_brief(brief_text: str, week_range: str, selected_ids: List[str], usage
     return path
 
 
+def _parse_publish_date(value: Any) -> Optional[date]:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _parse_created_at(value: Any) -> Optional[date]:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(s).date()
+    except Exception:
+        return None
+
+
+def _record_date_by_basis(rec: Dict[str, Any], basis_field: str) -> Optional[date]:
+    if basis_field == "created_at":
+        return _parse_created_at(rec.get("created_at"))
+    return _parse_publish_date(rec.get("publish_date"))
+
+
+def _load_brief_history() -> Dict[str, List[Dict[str, str]]]:
+    by_record_id: Dict[str, List[Dict[str, str]]] = {}
+    seen_rows: set[Tuple[str, str]] = set()
+
+    def _ingest_row(row: Dict[str, Any], default_file: str = "") -> None:
+        ids = row.get("selected_record_ids") or []
+        if not isinstance(ids, list):
+            return
+        file_name = Path(str(row.get("file") or default_file)).name
+        week_range = str(row.get("week_range") or "")
+        created_at = str(row.get("created_at") or "")
+        row_key = (file_name, created_at)
+        if row_key in seen_rows:
+            return
+        seen_rows.add(row_key)
+        for rid in ids:
+            rid_s = str(rid or "").strip()
+            if not rid_s:
+                continue
+            by_record_id.setdefault(rid_s, []).append({
+                "file": file_name,
+                "week_range": week_range,
+                "created_at": created_at,
+            })
+
+    for row in _read_jsonl(BRIEF_INDEX):
+        if isinstance(row, dict):
+            _ingest_row(row)
+
+    if not BRIEFS_DIR.exists():
+        return by_record_id
+
+    for sidecar in sorted(BRIEFS_DIR.glob("brief_*.meta.json")):
+        try:
+            row = json.loads(sidecar.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(row, dict):
+            continue
+        fallback_file = sidecar.name.replace(".meta.json", ".md")
+        _ingest_row(row, default_file=fallback_file)
+    return by_record_id
+
+
 def _diff_text(previous: str, current: str) -> Tuple[str, int, int]:
     diff_lines = list(unified_diff(previous.splitlines(), current.splitlines(), fromfile="previous", tofile="current", lineterm=""))
     added = sum(1 for ln in diff_lines if ln.startswith("+") and not ln.startswith("+++"))
@@ -127,11 +203,21 @@ if isinstance(meta_seed.get("week_range"), str):
     if len(parts) >= 2 and parts[0].lower() == "last" and parts[1].isdigit():
         default_days = max(3, min(90, int(parts[1])))
 
-c1, c2 = st.columns(2)
+c1, c2, c3 = st.columns(3)
 with c1:
     days = st.number_input("Days back", min_value=3, max_value=90, value=default_days, step=1)
 with c2:
+    basis_label = st.selectbox(
+        "Time basis",
+        options=["Published date (publish_date)", "Record added date (created_at)"],
+        index=0,
+    )
+with c3:
+    hide_already_shared = st.checkbox("Hide records already included in a saved brief", value=True)
+with c2:
     st.caption("Approved records are preselected by default.")
+
+date_basis_field = "publish_date" if "publish_date" in basis_label else "created_at"
 
 with st.expander("Candidate Filters (Advanced)", expanded=False):
     f1, f2, f3 = st.columns(3)
@@ -142,25 +228,78 @@ with st.expander("Candidate Filters (Advanced)", expanded=False):
     with f3:
         share_ready_only = st.checkbox("Share-ready only (High/High)", value=False)
 
-week_range = f"Last {int(days)} days"
-candidates = select_weekly_candidates(records, days=int(days), include_excluded=include_excluded)
+week_range = f"Last {int(days)} days by {date_basis_field}"
+candidates_seed = select_weekly_candidates(records, days=36500, include_excluded=include_excluded)
+cutoff = date.today() - timedelta(days=int(days))
+
+missing_basis_dates = 0
+time_window_candidates: List[Dict[str, Any]] = []
+for rec in candidates_seed:
+    rd = _record_date_by_basis(rec, date_basis_field)
+    if not rd:
+        missing_basis_dates += 1
+        continue
+    if rd >= cutoff:
+        time_window_candidates.append(rec)
+
+brief_history = _load_brief_history()
+annotated_candidates: List[Dict[str, Any]] = []
+for rec in time_window_candidates:
+    rec_id = str(rec.get("record_id") or "")
+    shared_rows = brief_history.get(rec_id, [])
+    latest_shared = shared_rows[-1] if shared_rows else {}
+    out = dict(rec)
+    out["already_shared"] = "Yes" if shared_rows else "No"
+    out["shared_brief_file"] = str(latest_shared.get("file") or "")
+    out["shared_brief_week_range"] = str(latest_shared.get("week_range") or "")
+    out["shared_brief_created_at"] = str(latest_shared.get("created_at") or "")
+    out["_already_shared_bool"] = bool(shared_rows)
+    annotated_candidates.append(out)
+
+already_shared_count = sum(1 for r in annotated_candidates if r.get("_already_shared_bool"))
+not_yet_shared_count = len(annotated_candidates) - already_shared_count
+approved_included_count = sum(
+    1
+    for r in annotated_candidates
+    if normalize_review_status(r.get("review_status")) == "Approved" and not bool(r.get("is_duplicate", False))
+)
+
+candidates = [r for r in annotated_candidates if not r.get("_already_shared_bool")] if hide_already_shared else annotated_candidates
+
 if only_approved:
     candidates = [r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved"]
 if share_ready_only:
     candidates = [r for r in candidates if r.get("priority") == "High" and r.get("confidence") == "High"]
+
+if missing_basis_dates:
+    st.caption(f"{missing_basis_dates} records missing `{date_basis_field}` were excluded from the time window.")
 
 if not candidates:
     st.warning("No candidates found for this period.")
     st.stop()
 
 approved_non_excluded = [
-    r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved" and not bool(r.get("exclude_from_brief", False))
+    r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved" and not bool(r.get("is_duplicate", False))
 ]
 default_ids = [str(r.get("record_id")) for r in approved_non_excluded if r.get("record_id")]
 
 with st.expander("Candidate Records", expanded=False):
     df_candidates = pd.json_normalize(candidates)
-    show_cols = ["record_id", "title", "source_type", "publish_date", "priority", "confidence", "review_status", "exclude_from_brief"]
+    show_cols = [
+        "record_id",
+        "title",
+        "source_type",
+        "publish_date",
+        "created_at",
+        "already_shared",
+        "shared_brief_file",
+        "shared_brief_week_range",
+        "shared_brief_created_at",
+        "priority",
+        "confidence",
+        "review_status",
+        "is_duplicate",
+    ]
     show_cols = [c for c in show_cols if c in df_candidates.columns]
     st.dataframe(df_candidates[show_cols], use_container_width=True, hide_index=True)
 
@@ -195,10 +334,11 @@ with st.expander("Advanced AI Settings", expanded=False):
     with ai3:
         model_override = st.text_input("Model override", value="")
 
-k1, k2, k3 = st.columns(3)
-k1.metric("Candidates", len(candidates))
-k2.metric("Approved + Included", len(default_ids))
-k3.metric("Selected", len(selected_records))
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Candidates (time window)", len(annotated_candidates))
+k2.metric("Approved + Included", approved_included_count)
+k3.metric("Not Yet Shared", not_yet_shared_count)
+k4.metric("Already Shared", already_shared_count)
 
 if st.button("Generate AI Brief", type="primary", disabled=not selected_records):
     with st.spinner("Synthesizing executive brief..."):

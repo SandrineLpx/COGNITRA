@@ -13,7 +13,7 @@ No emojis. Keep the language executive-friendly and evidence-based.
 ```markdown
 INTELLIGENCE BRIEF
 Summary Date: [YYYY-MM-DD]
-Source Type: [Automotive News | Bloomberg | Financial News | Industry Publication | MarkLines | Other | Patent | Press Release | Reuters | S&P]
+Source Type: [Automotive News | Bloomberg | Financial News | GlobalData | Industry Publication | MarkLines | Other | Patent | Press Release | Reuters | S&P]
 Publish Date: [YYYY-MM-DD or Unknown]
 Original URL: [optional]
 
@@ -25,38 +25,30 @@ Companies Mentioned
 - [Company 2]
 
 Actor Type
-- [oem | supplier | tech_partner | government | regulator | industry_group | media | other]
+- [oem | supplier | technology | industry | other]
 Government/Regulators (if applicable)
 - [Entity]
 
 Geography
 Countries Mentioned: [list]
-Regions Relevant (Footprint): [India | China | Europe (including Russia) | Africa | US | Mexico | Thailand]
-Region Signal Type: [trade_policy | geopolitics | regulation | oem_activity | supplier_activity | demand | logistics | fx_financing]
-Supply Flow Hint (optional): [e.g., China->EU]
+Regions Mentioned (display buckets): [Asia | Western Europe | Eastern Europe | Africa | US | Latin America]
+Regions Relevant to Kiekert (footprint): [India | China | Japan | Thailand | US | Mexico | Russia | Western Europe | Eastern Europe | Africa | Latin America | Asia]
 
 Topics Covered (canonical)
-- [1–3 topics from the canonical list]
+- [1-4 topics from the canonical list]
 
 Priority and Confidence
 Priority: [High | Medium | Low]
-Confidence: [High | Medium | Low]
+Confidence: [High | Medium | Low] (computed from observable signals)
 
 Evidence (verifiable facts)
-- [2–4 bullets; include short quote fragments if available]
+- [2-4 bullets; include short quote fragments if available]
 
 Key Insights (interpretation)
-- [2–4 bullets]
-
-Strategic Implications (closure systems supplier lens)
-- [2–4 bullets]
-
-Recommended Actions (optional but preferred)
-- [1–3 bullets]
+- [2-4 bullets]
 
 Review
-Reviewed By: [name]
-Review Status: [Not Reviewed | Reviewed | Approved]
+Review Status: [Pending | Approved | Disapproved]
 Notes (optional): [free text]
 ```
 
@@ -72,37 +64,37 @@ Prepared by: [Name/Role]
 ============================================================
 
 EXECUTIVE SUMMARY
-[2–3 sentences highlighting the most significant developments and why they matter.]
+[2-3 sentences highlighting the most significant developments and why they matter.]
 
 HIGH PRIORITY DEVELOPMENTS
-- [3–6 bullets max; each bullet should mention company/OEM + what happened + why it matters.]
+- [3-6 bullets max; each bullet should mention company/OEM + what happened + why it matters.]
 
 FOOTPRINT REGION SIGNALS
-Do not include region that are not relevant.
+Do not include regions that are not relevant.
 
 Western Europe
-- [1–3 bullets; include Countries: ... when applicable]
+- [1-3 bullets; include Countries: ... when applicable]
 
 Eastern Europe
-- [1–3 bullets; include Countries: ... when applicable]
+- [1-3 bullets; include Countries: ... when applicable]
 
 North America
-- [1–3 bullets; include Countries: ... when applicable]
+- [1-3 bullets; include Countries: ... when applicable]
 
 Asia
-- [1–3 bullets; include Countries: ... when applicable]
+- [1-3 bullets; include Countries: ... when applicable]
 
 China
-- [1–3 bullets]
+- [1-3 bullets]
 
 India
-- [1–3 bullets]
+- [1-3 bullets]
 
 Thailand
-- [1–3 bullets]
+- [1-3 bullets]
 
 Any other important
-- 
+-
 
 KEY DEVELOPMENTS BY TOPIC
 Include only topics present this period. Use canonical labels exactly.
@@ -135,10 +127,20 @@ Executive & Organizational
 - [Key developments]
 
 EMERGING TRENDS
-- [1–3 bullets. Trends should be based on multiple items or clear signal strength.]
+- [1-3 bullets. Trends should be based on multiple items or clear signal strength.]
+
+CONFLICTS & UNCERTAINTY
+Required (at least 1 item) when any record has:
+  - Uncertainty language in evidence (forecast, could, weighing, sources said, expected)
+  - Confidence = Medium or Low
+  - Topic = OEM Strategy & Powertrain Shifts or Financial & Business Performance
+Otherwise optional ("None observed this period." is acceptable).
+- [Flag contradictory figures, dates, or claims between records]
+- [Flag claims with Low/Medium confidence or single-sourced evidence]
+- [Flag forecast language and strategy shifts lacking concrete commitments]
 
 RECOMMENDED ACTIONS
-- [3–6 bullets; who should do what next.]
+- [3-6 bullets; who should do what next.]
 
 APPENDIX (optional)
 Items Covered: [#]

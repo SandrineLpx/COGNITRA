@@ -59,7 +59,18 @@ def record_response_schema() -> Dict[str, Any]:
         "notes": {"type": "STRING"},
     }
     # Fields added by postprocess, not the LLM — intentionally absent from schema.
-    _COMPUTED_FIELDS = {"priority", "confidence"}
+    # Only fields that appear in REQUIRED_KEYS need to be here for the guardrail,
+    # but we list all computed fields so the whitelist stays complete.
+    _COMPUTED_FIELDS = {
+        "priority", "confidence",
+        "macro_themes_detected",
+        "priority_llm", "priority_final", "priority_reason",
+        "_publisher_date_override_applied", "_publisher_date_override_source",
+        "_confidence_detail",
+        "_macro_theme_detail", "_macro_theme_strength", "_macro_theme_rollups",
+        "_region_migrations", "_region_ambiguity", "_region_validation_flags",
+        "_provenance", "_mutations", "_rule_impact",
+    }
     # Guardrail: any REQUIRED_KEY missing from both properties AND the
     # known-computed set is a bug — fail loud at import time.
     unexpected = set(REQUIRED_KEYS) - set(properties.keys()) - _COMPUTED_FIELDS

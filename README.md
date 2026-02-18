@@ -1,4 +1,4 @@
-# Auto Intelligence (MVP) - Streamlit Multi-page Skeleton
+# COGNITRA — Automotive Competitive Intelligence Platform
 
 ## Run locally
 1) Create a virtual environment
@@ -18,6 +18,7 @@
 ## Data
 - Records: `data/records.jsonl` (JSON Lines)
 - PDFs saved to: `data/pdfs/`
+- Quality logs: `data/quality/` (record_qc.jsonl, brief_qc.jsonl, quality_runs.jsonl, quality_report.xlsx)
 
 ## Ingest behavior
 - Chunking is automatic based on cleaned document structure (`chunks_count`).
@@ -30,8 +31,15 @@
 - `Advanced / Admin` contains developer/analyst utilities and maintenance actions.
 
 ## Footprint regions
-- `India`, `China`, `Western Europe`, `Eastern Europe`, `Russia`, `Africa`, `US`, `Mexico`, `Latin America`, `Thailand`
+- `India`, `China`, `Western Europe`, `Eastern Europe`, `Russia`, `Africa`, `US`, `Mexico`, `Latin America`, `Thailand`, `Japan`, `Asia`
 - Legacy `Europe (including Russia)` values are migrated to `Western Europe` unless Russia is explicitly present.
+
+## Quality monitoring
+- Run: `python scripts/run_quality.py` (checks latest brief + its records)
+- Checks: evidence grounding, geo determinism, macro theme rules, confidence alignment, uncertainty compliance, overreach detection
+- KPIs: R1–R5 (records) + B1–B5 (briefs), weighted scores 0–100
+- Outputs: append-only JSONL logs + Excel report in `data/quality/`
+- Standards: `References/Quality/` (QUALITY_CHECKLIST.md, QUALITY_KPIS.md, BRIEF_GENERATION_STANDARDS.md)
 
 ## Tests
 - `pytest` is required for tests.

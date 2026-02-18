@@ -317,3 +317,15 @@ class TestSchemaRelaxation:
         rec = postprocess_record(rec)
         ok, errs = validate_record(rec)
         assert ok, f"Industry Publication source_type rejected: {errs}"
+
+    def test_marklines_alias_normalized(self):
+        """source_type='Marklines' should normalize to canonical 'MarkLines'."""
+        from src.schema_validate import validate_record
+        rec = _base_record(
+            source_type="Marklines",
+            keywords=["supplier", "automotive", "market", "forecast", "oem"],
+        )
+        rec = postprocess_record(rec)
+        ok, errs = validate_record(rec)
+        assert ok, f"Marklines alias normalization failed validation: {errs}"
+        assert rec.get("source_type") == "MarkLines"

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import altair as alt
 from src.storage import load_records
 from src.dedupe import dedupe_records
+from src.quality import QUALITY_RUNS_LOG, _read_jsonl
 from src.ui_helpers import safe_list, workflow_ribbon
 
 
@@ -140,7 +141,7 @@ if sel_status and "review_status" in df:
 if sel_sources and "source_type" in df:
     mask = mask & df["source_type"].astype(str).isin(sel_sources)
 if only_brief_included:
-    excl = df["exclude_from_brief"].fillna(False) if "exclude_from_brief" in df.columns else pd.Series(False, index=df.index)
+    excl = df["is_duplicate"].fillna(False) if "is_duplicate" in df.columns else pd.Series(False, index=df.index)
     mask = mask & (~excl)
 if sel_topics:
     topic_set = set(sel_topics)
@@ -162,7 +163,7 @@ k1.metric("Records", len(fdf))
 k2.metric("Approved", int((fdf.get("review_status") == "Approved").sum()) if "review_status" in fdf else 0)
 k3.metric("Pending", int((fdf.get("review_status") == "Pending").sum()) if "review_status" in fdf else 0)
 k4.metric("Disapproved", int((fdf.get("review_status") == "Disapproved").sum()) if "review_status" in fdf else 0)
-k5.metric("Excluded", int(fdf.get("exclude_from_brief", pd.Series(False)).fillna(False).sum()))
+k5.metric("Duplicates", int(fdf.get("is_duplicate", pd.Series(False)).fillna(False).sum()))
 k6.metric("High Priority", int((fdf.get("priority") == "High").sum()) if "priority" in fdf else 0)
 
 # ── Weekly Histogram ───────────────────────────────────────────────────────
@@ -307,86 +308,90 @@ if "companies_mentioned" in fdf:
 else:
     st.caption("No company data available.")
 
-# ── Priority Distribution Over Time + High-Ratio Line ────────────────────
-st.subheader("Priority Distribution Over Time")
-if not dated_rows.empty and "priority" in dated_rows:
-    weekly = dated_rows.copy()
-    weekly["week"] = week_start(weekly["event_day"])
-    pri_weekly = weekly.groupby(["week", "priority"]).size().reset_index(name="count")
-    if not pri_weekly.empty:
-        pivot_pri = pri_weekly.pivot(index="week", columns="priority", values="count").fillna(0)
-        for col in ["High", "Medium", "Low"]:
-            if col not in pivot_pri.columns:
-                pivot_pri[col] = 0
-        pivot_pri = pivot_pri[["High", "Medium", "Low"]]
+# ── Quality Score Trend ───────────────────────────────────────────────────
+st.subheader("Extraction Quality Score")
+st.caption("Quality scores from automated QC runs. Higher is better (0–100). Run `python scripts/run_quality.py` to generate data.")
 
-        # Stacked bar chart
-        fig_p, ax_p = plt.subplots(figsize=(8, 3))
-        pivot_pri.plot.bar(stacked=True, ax=ax_p)
-        ax_p.set_xlabel("Week")
-        ax_p.set_ylabel("Records")
-        ax_p.set_title("Priority Distribution by Week")
-        ax_p.set_xticklabels([d.strftime("%b %d") for d in pivot_pri.index], rotation=35, ha="right", fontsize=8)
-        ax_p.legend(title="Priority")
-        fig_p.tight_layout()
-        st.pyplot(fig_p)
+qc_runs = _read_jsonl(QUALITY_RUNS_LOG)
+if qc_runs and len(qc_runs) >= 1:
+    qc_df = pd.DataFrame(qc_runs)
 
-        # High-ratio + volatility index line chart
-        totals = pivot_pri.sum(axis=1).clip(lower=1)
-        ratio_df = pd.DataFrame({
-            "Week": pivot_pri.index,
-            "High Ratio": (pivot_pri["High"] / totals).round(2),
-            "Volatility Index": ((pivot_pri["High"] + 0.5 * pivot_pri["Medium"]) / totals).round(2),
-        }).set_index("Week")
+    # --- KPI metrics row (latest run vs prior) ---
+    latest = qc_runs[-1]
+    prior = qc_runs[-2] if len(qc_runs) >= 2 else {}
 
-        st.caption("High Ratio = High / Total per week. Volatility Index = (High + 0.5 * Medium) / Total.")
-        st.line_chart(ratio_df)
+    def _delta(key):
+        cur = latest.get(key)
+        prev = prior.get(key)
+        if cur is not None and prev is not None:
+            return round(float(cur) - float(prev), 2)
+        return None
+
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric(
+        "Overall Score",
+        f"{latest.get('weighted_overall_score', '—')}",
+        delta=_delta("weighted_overall_score"),
+    )
+    q2.metric(
+        "Evidence Grounding",
+        f"{latest.get('KPI-R3', 0):.0%}",
+        delta=f"{_delta('KPI-R3'):+.0%}" if _delta("KPI-R3") is not None else None,
+    )
+    q3.metric(
+        "Canonicalization",
+        f"{latest.get('KPI-R4', 0):.0%}",
+        delta=f"{_delta('KPI-R4'):+.0%}" if _delta("KPI-R4") is not None else None,
+    )
+    q4.metric(
+        "Geo Determinism",
+        f"{latest.get('KPI-R5', 0):.0%}",
+        delta=f"{_delta('KPI-R5'):+.0%}" if _delta("KPI-R5") is not None else None,
+    )
+
+    # --- Quality score trend line chart ---
+    if "created_at" in qc_df.columns and len(qc_df) >= 2:
+        qc_df["run_date"] = pd.to_datetime(qc_df["created_at"], errors="coerce")
+        score_cols = ["weighted_overall_score", "weighted_record_score", "weighted_brief_score"]
+        available = [c for c in score_cols if c in qc_df.columns]
+        if available:
+            plot_df = qc_df[["run_date"] + available].dropna(subset=["run_date"])
+            melted = plot_df.melt(id_vars="run_date", value_vars=available, var_name="Score Type", value_name="Score")
+            melted["Score Type"] = melted["Score Type"].map({
+                "weighted_overall_score": "Overall",
+                "weighted_record_score": "Record",
+                "weighted_brief_score": "Brief",
+            })
+
+            # Threshold reference lines
+            thresholds = pd.DataFrame([
+                {"Score": 80, "label": "Good (80)"},
+                {"Score": 60, "label": "Warning (60)"},
+            ])
+
+            lines = alt.Chart(melted).mark_line(point=True, strokeWidth=2).encode(
+                x=alt.X("run_date:T", title="QC Run Date"),
+                y=alt.Y("Score:Q", title="Quality Score", scale=alt.Scale(domain=[0, 100])),
+                color=alt.Color("Score Type:N", scale=alt.Scale(
+                    domain=["Overall", "Record", "Brief"],
+                    range=["#1f77b4", "#2ca02c", "#ff7f0e"],
+                )),
+                tooltip=["run_date:T", "Score Type:N", "Score:Q"],
+            )
+
+            rules = alt.Chart(thresholds).mark_rule(strokeDash=[4, 4], opacity=0.5).encode(
+                y="Score:Q",
+                color=alt.Color("label:N", scale=alt.Scale(
+                    domain=["Good (80)", "Warning (60)"],
+                    range=["#2ca02c", "#d62728"],
+                ), legend=alt.Legend(title="Thresholds")),
+            )
+
+            st.altair_chart(lines + rules, use_container_width=True)
     else:
-        st.caption("Not enough data for priority chart.")
+        st.caption("Need at least 2 QC runs to show trend chart.")
 else:
-    st.caption("Not enough dated records for priority chart.")
-
-# ── Confidence Distribution + LLM Override Rate ─────────────────────────
-st.subheader("Confidence Distribution (Computed)")
-st.caption("Extraction quality trend based on computed confidence scores.")
-if not dated_rows.empty and "confidence" in dated_rows:
-    conf_weekly = dated_rows.copy()
-    conf_weekly["week"] = week_start(conf_weekly["event_day"])
-    cw = conf_weekly.groupby(["week", "confidence"]).size().reset_index(name="count")
-    if not cw.empty:
-        pivot_conf = cw.pivot(index="week", columns="confidence", values="count").fillna(0)
-        for col in ["High", "Medium", "Low"]:
-            if col not in pivot_conf.columns:
-                pivot_conf[col] = 0
-        pivot_conf = pivot_conf[["High", "Medium", "Low"]]
-
-        fig_conf, ax_conf = plt.subplots(figsize=(8, 3))
-        pivot_conf.plot.bar(stacked=True, ax=ax_conf)
-        ax_conf.set_xlabel("Week")
-        ax_conf.set_ylabel("Records")
-        ax_conf.set_title("Computed Confidence by Week")
-        ax_conf.set_xticklabels([d.strftime("%b %d") for d in pivot_conf.index], rotation=35, ha="right", fontsize=8)
-        ax_conf.legend(title="Confidence")
-        fig_conf.tight_layout()
-        st.pyplot(fig_conf)
-
-        # LLM override summary (how many records had confidence changed)
-        detail_col = "_confidence_detail.llm_original"
-        if detail_col in fdf.columns:
-            has_detail = fdf[detail_col].notna()
-            if has_detail.any():
-                detail_df = fdf[has_detail].copy()
-                overridden = detail_df[detail_col] != detail_df["confidence"]
-                total_with_detail = len(detail_df)
-                n_overridden = int(overridden.sum())
-                ov1, ov2, ov3 = st.columns(3)
-                ov1.metric("Records with computed confidence", total_with_detail)
-                ov2.metric("LLM overridden", n_overridden)
-                ov3.metric("Override rate", f"{100 * n_overridden / max(total_with_detail, 1):.0f}%")
-    else:
-        st.caption("Not enough data for confidence chart.")
-else:
-    st.caption("Not enough dated records for confidence chart.")
+    st.info("No quality runs found. Run `python scripts/run_quality.py` to generate quality data.")
 
 # ── Drilldown ─────────────────────────────────────────────────────────────
 st.subheader("Drilldown")
@@ -398,7 +403,7 @@ show_cols = [
     "confidence",
     "review_status",
     "publish_date",
-    "exclude_from_brief",
+    "is_duplicate",
 ]
 show_cols = [c for c in show_cols if c in fdf.columns]
 st.dataframe(fdf[show_cols].sort_values(by=["publish_date"], ascending=False), use_container_width=True, hide_index=True)

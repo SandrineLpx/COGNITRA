@@ -244,12 +244,16 @@ _ACTOR_TYPE_ALIASES = {
     "government": "other",
     "regulator": "other",
 }
+_SOURCE_TYPE_ALIASES = {
+    "marklines": "MarkLines",
+}
 
 _OUR_COMPANY_ALIASES = {"kiekert", "kiekert ag", "kiekert group"}
 
 _KEY_OEMS = {
     "vw", "volkswagen", "bmw", "hyundai", "kia", "ford", "gm",
-    "general motors", "stellantis", "toyota", "mercedes", "mercedes-benz",
+    "general motors", "stellantis", "toyota", "toyota motor", "toyota motor corporation",
+    "mercedes", "mercedes-benz",
     "audi", "porsche", "nissan", "honda", "renault", "peugeot",
     "tata", "mahindra", "byd", "geely", "chery", "great wall",
 }
@@ -260,7 +264,11 @@ _OEM_CANONICAL_BY_LOWER = {
     "gm": "GM",
     "mercedes-benz": "Mercedes-Benz",
     "mercedes": "Mercedes",
-    "vw": "VW",
+    "toyota": "Toyota",
+    "toyota motor": "Toyota",
+    "toyota motor corporation": "Toyota",
+    "vw": "Volkswagen",
+    "volkswagen": "Volkswagen",
 }
 
 _LEGAL_SUFFIX_TOKENS = {
@@ -272,6 +280,8 @@ _COMPANY_SPECIAL_CANONICAL = {
     "mercedes-benz group ag": "Mercedes-Benz",
     "mercedes-benz ag": "Mercedes-Benz",
     "bmw ag": "BMW",
+    "volkswagen group ag": "Volkswagen",
+    "volkswagen ag": "Volkswagen",
 }
 
 
@@ -680,6 +690,18 @@ def postprocess_record(
         _apply_field_policy(rec, "original_url", None, source="postprocess", reason="empty_url_to_null")
 
     combined_text = _record_text(rec, source_text=source_text)
+    source_type_raw = str(rec.get("source_type") or "").strip()
+    if source_type_raw:
+        source_type_norm = _SOURCE_TYPE_ALIASES.get(source_type_raw.lower(), source_type_raw)
+        if source_type_norm in ALLOWED_SOURCE_TYPES and source_type_norm != source_type_raw:
+            _apply_field_policy(
+                rec,
+                "source_type",
+                source_type_norm,
+                source="postprocess",
+                reason="source_type_alias_normalization",
+            )
+
     mentions_our_company = _detect_mentions_our_company(rec, source_text=source_text)
     set_field(
         rec,
