@@ -241,6 +241,8 @@ def choose_extraction_strategy(meta: Dict[str, Any]) -> Dict[str, Any]:
         "routing_metrics": {
             "noise_level": noise_level,
             "chunks_count": chunks_count,
+            "raw_chars": raw,
+            "clean_chars": int(meta.get("clean_chars", raw - removed) or 0),
             "removed_ratio": round(removed_ratio, 3),
             "removed_line_count": removed_lines,
             "top_removed_patterns": meta.get("top_removed_patterns", []),

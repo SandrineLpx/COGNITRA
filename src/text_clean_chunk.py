@@ -13,7 +13,7 @@ JUNK_PATTERNS = {
         r"newsletter",
         r"cookie",
         r"privacy policy",
-        r"\bterms\b",
+        r"\bterms\s+(?:and\s+conditions|of\s+(?:use|service|sale|access))\b",  # narrowed: was \bterms\b (too broad — dropped "terms of the deal")
         r"contact us",
         r"follow us",
     ],
@@ -42,9 +42,26 @@ JUNK_PATTERNS = {
         r"for unlimited access",
         r"subscribe to continue",
     ],
+    # Legal boilerplate common in S&P Global, Bloomberg, financial/industry publications.
+    "legal": [
+        r"©\s*\d{4}",
+        r"copyright\s+\d{4}",
+        r"all rights reserved",
+        r"no portion of this (?:report|document|material|publication)",
+        r"without (?:prior )?written (?:permission|consent)",
+        r"for informational purposes only",
+        r"this (?:report|document|publication) (?:is|has been) (?:prepared|produced|provided|compiled)",
+        r"reproduction (?:in whole or in part)",
+    ],
 }
 
 URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+# Matches a line that IS a bare URL (entire line = one URL, no other content).
+_BARE_URL_RE = re.compile(r"^(?:https?://|www\.)\S+$", re.IGNORECASE)
+# Matches standalone page number lines: "3", "12", "Page 4", "Page 4 of 22", "4/22".
+_PAGE_NUM_RE = re.compile(r"^(?:(?:page|p\.?)\s*)?\d{1,4}(?:\s*(?:of|/)\s*\d{1,4})?$", re.IGNORECASE)
+# Matches short byline lines: "By John Smith", "Author: Jane Doe", "Reported by A. Jones".
+_BYLINE_RE = re.compile(r"^(?:by|authors?|written\s+by|reported\s+by)\b", re.IGNORECASE)
 PHOTO_CREDIT_RE = re.compile(r"\b(photo|credit|getty|stock|source)\b", re.IGNORECASE)
 PUBLISH_TS_RE = re.compile(
     r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec|"
@@ -208,7 +225,12 @@ def clean_and_chunk(raw_text: str, *, max_chars_per_chunk: int = 9000, overlap_c
 
         if ln in repeated and len(ln.split()) <= 12:
             drop_reason = "repeated_header_footer"
+        elif _PAGE_NUM_RE.match(ln):
+            drop_reason = "page_number"
         elif URL_RE.findall(ln_l) and len(URL_RE.findall(ln_l)) >= 2:
+            drop_reason = "link_heavy"
+        elif idx > 10 and _BARE_URL_RE.match(ln.strip()):
+            # Single bare URL mid-document (not near top, where original_url often appears).
             drop_reason = "link_heavy"
         elif _non_letter_ratio(ln) > 0.35 and not _line_is_table_fact(ln) and not _looks_like_publish_timestamp(ln):
             drop_reason = "symbol_heavy"
@@ -226,6 +248,9 @@ def clean_and_chunk(raw_text: str, *, max_chars_per_chunk: int = 9000, overlap_c
                 kept_short_caps_in_top = True
             else:
                 drop_reason = "short_allcaps_menu"
+
+        if not drop_reason and _BYLINE_RE.match(ln) and len(ln.split()) <= 8:
+            drop_reason = "byline"
 
         if drop_reason:
             removed_line_count += 1
