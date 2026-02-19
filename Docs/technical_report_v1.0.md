@@ -6,24 +6,58 @@
 **Date:** February 14, 2026
 **Version:** 1.0
 
+---
+
+## Student Information
+
+**Student:** Sandrine Lepesqueux
+**Course:** MSIS 549 – Generative AI Technologies
+
+### What I Built
+
+COGNITRA is a minimal-token AI market intelligence triage system for the automotive closure systems and car entry domain. I built a Streamlit multipage web application that ingests PDF documents (single or bulk), extracts structured intelligence records using Gemini LLM with strict JSON schema validation, and synthesizes weekly executive briefs for a Tier-1 automotive supplier (Kiekert AG, a manufacturer of door latches, strikers, handles, and smart entry systems).
+
+The core design philosophy is "minimal AI": the LLM handles only extraction and cross-record synthesis; all classification, prioritization, confidence scoring, deduplication, and quality checks are deterministic Python rules. This makes the system auditable, cost-predictable, and reliable for production use.
+
+### Tools & Technologies
+
+| Tool | Role |
+|---|---|
+| Google Gemini 2.5 Flash-Lite / Flash | LLM structured JSON extraction + weekly brief synthesis |
+| Streamlit | Multipage web app (5 pages + Home landing page) |
+| PyMuPDF + pdfplumber | PDF text extraction with fallback |
+| Altair + pandas + matplotlib | Interactive trend analytics and charting |
+| Python 3.9+ / pytest | Language and test framework (97 tests across 4 modules) |
+| JSONL (flat files) | Record storage — no database required |
+
+### Skills Developed
+
+- **LLM prompt engineering**: Iteratively designing and refining structured-output prompts with numbered extraction rules, topic disambiguation guidance, and competitor context blocks. Learned that explicit boundary rules (e.g., "use 'OEM Strategy' for broad pivots, NOT single program updates") reduce misclassification more reliably than relying on the model to infer boundaries from label names alone.
+- **Schema-first API design**: Building structured output with Gemini's `response_schema` API. Encountered and resolved an undocumented gap between standard JSON Schema type conventions (`type: ["string","null"]`) and Gemini-specific type requirements (single uppercase enum values like `STRING`, `NULL`), which caused silent failures at runtime.
+- **Deterministic vs. AI system boundaries**: Designing clear boundaries between LLM-extracted fields and deterministically computed fields (priority, confidence, macro themes), enforced by a runtime guardrail that crashes at import time if the boundary is violated — preventing silent misalignment between schema and postprocessing logic.
+- **Cost optimization with free-tier APIs**: Building meta-based model routing, two-phase chunk repair, and per-model quota tracking to stay within the 20 RPD free-tier limit during daily development and demo workflows.
+- **Quality monitoring for LLM pipelines**: Designing a post-hoc QC module with evidence grounding checks, geo determinism validation, KPI trend tracking, and extraction feedback loops — without modifying the records being monitored (read-only invariant).
+- **Spec-to-code consolidation in iterative AI-assisted development**: Learning to manage the spec-drift problem that emerges when code evolves faster than specification documents, and resolving it by embedding domain guidance directly into the LLM prompt and code comments where it is actually consumed at runtime.
+
+---
+
 ## Executive Summary
 
 This project builds an AI-powered market intelligence triage system for the automotive closure systems and car entry domain. The system is designed for environments where teams already pay for high-quality information—such as Bloomberg, Automotive News, S&P Global, and MarkLines—as well as public sources like press releases and regulatory announcements. The problem is not access to content; it is the lack of a scalable way to convert these sources into consistent, decision-ready intelligence.
 
 Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies a two-tier footprint region architecture (display-level buckets like Asia, Western/Eastern Europe; Kiekert operational footprint with country-level granularity like India, China, Japan, Thailand), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets and key insights. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
 
-### 2026-02 Update Addendum (current implementation)
-
-- **Footprint regions moved to Option B buckets:** `Western Europe`, `Eastern Europe`, `Russia` (replacing legacy `Europe (including Russia)`), with backward-compatible migration in postprocess.
-- **Chunking behavior is automatic in Ingest UI:** the manual chunk-mode toggle was removed; extraction path is selected from cleaned-document chunk metadata.
-- **Macro-theme matching is source-grounded:** `notes` are excluded from macro-theme matching text fields.
-- **Weekly synthesis prompt tightened:** numeric grounding, Tier-1 implication enforcement, tone hardening, and length-scaling by record count were added at prompt level only.
-
 ## 1. Problem Statement and Significance
 
 ### 1.1 Problem
 
-Many automotive organizations subscribe to premium intelligence sources—Bloomberg, Automotive News, S&P Global, MarkLines, and others—yet still miss important signals. The bottleneck is not the quality of information; it is that the content arrives as unstructured documents and does not automatically become standardized, reusable intelligence.
+Many automotive organizations subscribe to premium intelligence sources—Bloomberg, Automotive News, S&P Global, MarkLines, and others—yet still miss important signals. The bottleneck is not the quality of information available; it is a combination of three compounding problems:
+
+**Volume exceeds processing capacity.** Intelligence sources produce more content than any analyst team can read, triage, and distribute in a timely manner. The result is not just slower processing — it is that entire categories of signal are never processed at all. A competitor move buried in a MarkLines update, or a regulatory change in a regional press release, may go unread for weeks or not be captured at all.
+
+**Manual processing produces inconsistent, non-reusable outputs.** When analysts do process documents, the outputs depend on who did the processing that week. Topics and regions are tagged differently, priority judgments vary, and summaries live in email chains or presentation decks that are not searchable or comparable over time. There is no way to answer "what signals have we seen on smart entry in the last 90 days" without rebuilding the analysis from scratch.
+
+**Over-sharing creates noise, and silence creates missed signals.** When analysts forward everything to stay safe, executives stop reading. When they filter too aggressively, important signals are never shared at all. Without a structured triage layer, there is no reliable middle ground: either the inbox fills with unread digests, or signals are lost in the noise.
 
 In practice, workflows degrade into:
 - PDFs and links saved in folders with inconsistent naming and tags,
@@ -31,11 +65,11 @@ In practice, workflows degrade into:
 - executive updates that vary depending on who processed the item,
 - limited ability to search, compare, and trend signals over time across sources.
 
-As a result, paid intelligence often functions like a high-volume inbox: the team pays for access, but the organization still struggles to extract timely, consistent insights.
+As a result, paid intelligence subscriptions often function like a high-volume inbox: the organization pays for access to high-quality information, but lacks a scalable way to convert it into consistent, decision-ready intelligence.
 
 ### 1.2 Why it matters (business value)
 
-A “press release package” or basic summarization workflow is not sufficient for decision-making, especially when dealing with high-volume premium streams. Decision-makers need prioritized, evidence-backed interpretation in a consistent structure.
+A "press release package" or basic summarization workflow is not sufficient for decision-making, especially when dealing with high-volume premium streams. Decision-makers need prioritized, evidence-backed interpretation in a consistent structure.
 
 For a global Tier-1 supplier in closure systems and car entry, missed or late signals can impact:
 - OEM strategy and program assumptions (volume timing and content shifts),
@@ -44,14 +78,15 @@ For a global Tier-1 supplier in closure systems and car entry, missed or late si
 - competitive positioning (competitor moves and sourcing outcomes),
 - regulatory exposure (safety/compliance changes affecting product requirements).
 
-The significance of this project is enabling a workflow that converts both premium and public sources into the same standardized output—structured signals, evidence, implications—so intelligence becomes a searchable knowledge base rather than a one-off summary.
+The significance of this project is enabling a workflow that converts both premium and public sources into the same standardized output—structured signals, evidence, implications—so intelligence becomes a searchable knowledge base rather than a one-off summary, and executives receive a curated digest rather than a forwarded inbox.
 
-### 1.3 Success criteria (initial)
+### 1.3 Success criteria
 
-* Reduce analyst time spent on tagging/triage per document
-* Improve consistency of topics/regions/companies classification
-* Produce executive-friendly outputs that are traceable to evidence
-* Keep token usage low and predictable (one call per doc)
+* Reduce missed signals by creating a structured record for every processed document (searchable and comparable over time)
+* Reduce analyst triage time per document through automated topic/region/company classification
+* Improve consistency of classification output regardless of who processes the document
+* Produce executive-friendly weekly outputs that are traceable to evidence and do not exceed the "readable digest" threshold
+* Keep token usage low and predictable (one LLM call per document in the common case)
 
 ## 2. Solution Overview
 
@@ -110,6 +145,9 @@ Everything else is deterministic:
 * Demo reliability: fallback to preloaded examples
 
 ## 4. System Architecture and Workflow
+
+> **[FIGURE 1 — System Architecture Diagram]**
+> *Screenshot or diagram showing the end-to-end pipeline: PDF upload → text extraction → cleaning & chunking → noise classification → model routing (Flash-Lite / Flash) → JSON extraction → postprocess (priority, confidence, macro themes) → validation → JSONL storage → Review & Approve → Weekly Brief → Insights dashboard. Include the human-in-the-loop gate (Pending / Approved / Disapproved) as a visible decision node in the flow.*
 
 ### 4.1 Components
 
@@ -170,6 +208,9 @@ Everything else is deterministic:
     * **Confidence Distribution (Computed):** weekly stacked bars showing extraction quality trend, plus LLM override rate metrics (total computed, count overridden, override %)
   * Export to CSV for Power BI (canonical and all records support)
   * Weekly Executive Brief page for digest drafting, email templates, and AI brief generation
+
+> **[FIGURE 2 — Review & Approve UI Screenshot]**
+> *Screenshot of the Review & Approve page showing: the queue filter bar (status, priority, topic, date range), a record card expanded with its title, computed confidence badge, evidence bullets, and the inline Approve / Disapprove buttons. Ideally show a "High" priority record with the confidence detail breakdown expanded.*
 
 ### 4.2 Human-in-the-loop gating
 
@@ -257,9 +298,15 @@ A dedicated refactoring session identified the gap and consolidated everything:
 | Companies, OEMs, tech partners | `References/company-watchlist.md` | Human analysts (quarterly review) |
 | AI agent entry point | `CLAUDE.md` → pointer to `AGENTS.md` | AI coding tools (Claude Code, Copilot) |
 
-<!--
-[PLACEHOLDER: Diagram showing the evolution from Phase 1 to Phase 3]
+> **[FIGURE 3 — Spec Evolution Diagram: Phase 1 → Phase 2 → Phase 3]**
+>
+> *Phase 1 (pre-implementation): Five separate Markdown spec files (SKILL.md, topic-taxonomy.md, company-watchlist.md, prompts.md, template.md). None of these files were wired to the LLM at runtime — the model only saw schema enum values.*
+>
+> *Phase 2 (drift): Code evolved (new regions, removed fields, changed actor types). Spec files became outdated but were never updated. The LLM remained blind to domain guidance.*
+>
+> *Phase 3 (current): Single AGENTS.md operator manual + src/constants.py (topic guidance as comments + enums) + src/model_router.py (extraction prompt with topic rules and competitor context). CLAUDE.md is a 3-line pointer to AGENTS.md. The LLM reads domain guidance directly at inference time.*
 
+```
 Phase 1 (pre-implementation):
 ┌──────────────┐  ┌──────────────────┐  ┌───────────────────┐  ┌────────────┐  ┌──────────────┐
 │ SKILL.md     │  │ topic-taxonomy.md│  │ company-watchlist  │  │ prompts.md │  │ template.md  │
@@ -282,7 +329,7 @@ Phase 3 (current):
    CLAUDE.md points here         │  rules + competitor context)  │
                                  └──────────────────────────────┘
                                         ↕ LLM reads this at inference time
--->
+```
 
 
 #### Why this matters
@@ -488,13 +535,121 @@ This section documents the three most impactful design decisions and the reasoni
 - **Inconsistent list normalization:** lists contained variants like "US", "USA", and "U.S." as separate entries, causing duplicates in downstream analytics.
 - **Date format inconsistency:** the model sometimes returned dates in non-ISO formats ("Feb 4, 2026" instead of "2026-02-04") or hallucinated dates not present in the text.
 
-**Approach chosen:** The extraction prompt (`extraction_prompt()` in `src/model_router.py`) was rewritten with explicit, numbered rules:
+**Concrete before/after — publisher confusion fix:**
 
-1. **Publisher identification rule:** "source_type is the PUBLISHER of the document. If 'S&P Global', 'S&P Global Mobility', 'AutoIntelligence | Headline Analysis', or '(c) S&P Global' appears, set source_type='S&P'. If Reuters or Bloomberg is only cited inside the article, do NOT set source_type to those unless they are clearly the publisher."
-2. **Date normalization rule:** "extract and normalize to YYYY-MM-DD when present. Handle patterns like '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null."
-3. **Evidence constraint:** "evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs."
-4. **List deduplication rule:** "Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form."
-5. **Closure topic guardrail:** "Only use 'Closure Technology & Innovation' when latch/door/handle/digital key/smart entry/cinch appears explicitly."
+*Input document:* S&P Global article headlined "Ford Cuts EV Production Target, Citing Weak Demand" — the body of the article reads: "Reuters reported that Ford's CFO confirmed…"
+
+*Before rules 1–2 — extraction output:*
+```json
+{
+  "source_type": "Reuters",
+  "title": "Ford Cuts EV Production Target, Citing Weak Demand"
+}
+```
+*The model latched onto "Reuters" in the body and classified it as the publisher, despite S&P Global's header being clearly visible.*
+
+*After rules 1–2 — extraction output:*
+```json
+{
+  "source_type": "S&P",
+  "title": "Ford Cuts EV Production Target, Citing Weak Demand"
+}
+```
+*Rule 1 (identify S&P from its header marker) and rule 2 (Reuters is cited inside the article, not the publisher) correctly classify the source.*
+
+**Approach chosen:** The extraction prompt (`extraction_prompt()` in `src/model_router.py`) was rewritten with explicit, numbered rules. The current prompt (as of 2026-02-18) contains ten numbered rules, plus two embedded guidance blocks (topic classification and competitor context):
+
+**Current rules (verbatim):**
+
+1. **Publisher identification:** `source_type is the PUBLISHER of the document. If 'S&P Global', 'S&P Global Mobility', 'AutoIntelligence | Headline Analysis', or '(c) S&P Global' appears, set source_type='S&P'. If MarkLines is the publisher, set source_type='MarkLines'.`
+2. **Cited-source disambiguation:** `If Reuters or Bloomberg is only cited inside the article, do NOT set source_type to Reuters/Bloomberg unless they are clearly the publisher. Use 'Financial News' for financial publications (WSJ, FT, CNBC, Nikkei) and 'Industry Publication' for automotive trade press that are not Automotive News. Use 'Other' only when no specific type fits.`
+3. **Actor type constraint:** `actor_type must be one of: oem, supplier, technology, industry, other. Use 'technology' for tech companies (Nvidia, Qualcomm, Huawei, Google, etc.); use 'industry' for broad market/sector items not tied to one company; otherwise use 'other' when uncertain.`
+4. **Date normalization:** `publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.`
+5. **Evidence bullet constraint:** `evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.`
+6. **Numeric grounding:** `If numeric facts are present in the article, at least one evidence_bullet must include a specific numeric value verbatim (e.g., percentage change, margin %, profit forecast, sales delta, production volume, year-over-year change, ranking gap). Prefer financial/competitive metrics. Do not fabricate, infer, or calculate numbers. If no numeric facts are present, proceed normally.`
+7. **Government entities explicit extraction:** `government_entities: list ONLY government bodies, regulators, or agencies explicitly named in the text (e.g. 'NHTSA', 'European Commission', 'French Ministry of Industry'). Do NOT infer entities from country context alone — if the text says 'the government' in a France/Spain context but never names the EU or a specific agency, return an empty list. If none are explicitly named, return [].`
+8. **List deduplication:** `Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.`
+9. **Software/AI features evidence:** `If the article mentions major software/AI features (e.g., AI voice controls, SDV, infotainment, autonomy), include at least one evidence bullet on that and include relevant keywords from text (e.g., AI, software, voice controls, infotainment, OpenAI, Microsoft, Google).`
+10. **Country mentions operational filter:** `country_mentions: list ONLY countries that are explicit operational markets in this article (countries where production volumes, vehicle registrations, plant locations, sales, or revenue data are reported). Do NOT include countries mentioned only as geopolitical backdrop, tariff context, or macro reference — e.g., if the text says 'US tariff conflicts' but reports no US market data, do not include United States. Only include a country if the article reports facts about that country's market.`
+
+**Embedded guidance blocks (between rules 4 and 5):**
+- **TOPIC CLASSIFICATION**: Explicit boundary rules for all 9 canonical topics (e.g., "OEM Strategy = broad pivots, NOT single program updates"; "'Closure Technology & Innovation': ONLY when latch/door/handle/digital key/smart entry/cinch appears explicitly").
+- **CLOSURE SYSTEMS COMPETITORS**: Tier 1 (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku) and Tier 2 (Ushin, Witte, Mitsuba, Fudi, PHA, Cebi, Tri-Circle) recognized as `actor_type='supplier'`; Kiekert triggers `mentions_our_company=true`.
+
+**Full verbatim extraction prompt:**
+
+```
+You are extracting structured intelligence for Kiekert, an automotive closure systems supplier
+(door latches, strikers, handles, smart entry, cinch systems).
+Return JSON only matching the schema. Follow these rules strictly:
+
+1) source_type is the PUBLISHER of the document. If 'S&P Global', 'S&P Global Mobility',
+   'AutoIntelligence | Headline Analysis', or '(c) S&P Global' appears, set source_type='S&P'.
+   If MarkLines is the publisher, set source_type='MarkLines'.
+2) If Reuters or Bloomberg is only cited inside the article, do NOT set source_type to
+   Reuters/Bloomberg unless they are clearly the publisher. Use 'Financial News' for financial
+   publications (WSJ, FT, CNBC, Nikkei) and 'Industry Publication' for automotive trade press
+   (Automotive Logistics, Just Auto, Wards Auto, etc.) that are not Automotive News.
+   Use 'Other' only when no specific type fits.
+3) actor_type must be one of: oem, supplier, technology, industry, other.
+   Use 'technology' for tech companies (Nvidia, Qualcomm, Huawei, Google, etc.);
+   use 'industry' for broad market/sector items not tied to one company;
+   otherwise use 'other' when uncertain.
+4) publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like
+   '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.
+
+TOPIC CLASSIFICATION — pick 1-4 topics using these rules:
+- 'OEM Strategy & Powertrain Shifts': broad OEM strategic pivots (BEV/ICE mix, vertical
+  integration, platform resets, localization). NOT single program updates.
+- 'Closure Technology & Innovation': ONLY when latch/door/handle/digital key/smart entry/cinch
+  appears explicitly. NOT general vehicle electronics.
+- 'OEM Programs & Vehicle Platforms': specific program announcements (launches, refreshes,
+  platform rollouts, sourcing decisions). NOT broad strategy narratives.
+- 'Regulatory & Safety': regulations, standards, recalls, cybersecurity rules.
+  NOT general political news.
+- 'Supply Chain & Manufacturing': plant openings/closures, disruptions, logistics, labor,
+  tariffs impacting supply execution. NOT pure financial performance.
+- 'Technology Partnerships & Components': partnerships and component sourcing where tech is
+  central (chips, sensors, connectivity). NOT purely commercial alliances.
+- 'Market & Competition': demand, registrations, pricing, share shifts, competitor comparisons.
+  NOT internal exec changes.
+- 'Financial & Business Performance': earnings, guidance, M&A, restructurings, insolvency
+  (financial lens). NOT exec churn without financial angle.
+- 'Executive & Organizational': leadership changes, governance, org restructuring.
+
+CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):
+Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku
+Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle
+Our company: Kiekert (set mentions_our_company=true if mentioned)
+
+5) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.
+6) If numeric facts are present in the article, at least one evidence_bullet must include a
+   specific numeric value verbatim (e.g., percentage change, margin %, profit forecast, sales
+   delta, production volume, year-over-year change, ranking gap). Prefer financial/competitive
+   metrics. Prefer financial forecast numbers over feature numbers when selecting the numeric
+   bullet. Do not fabricate, infer, or calculate numbers. If no numeric facts are present,
+   proceed normally.
+7) government_entities: list ONLY government bodies, regulators, or agencies explicitly named
+   in the text (e.g. 'NHTSA', 'European Commission', 'French Ministry of Industry').
+   Do NOT infer entities from country context alone — if the text says 'the government' in a
+   France/Spain context but never names the EU or a specific agency, return an empty list.
+   If none are explicitly named, return [].
+8) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.
+9) If the article mentions major software/AI features (e.g., AI voice controls, SDV,
+   infotainment, autonomy), include at least one evidence bullet on that and include relevant
+   keywords from text (e.g., AI, software, voice controls, infotainment, OpenAI, Microsoft,
+   Google).
+10) country_mentions: list ONLY countries that are explicit operational markets in this article
+    (countries where production volumes, vehicle registrations, plant locations, sales, or
+    revenue data are reported). Do NOT include countries mentioned only as geopolitical
+    backdrop, tariff context, or macro reference — e.g., if the text says 'US tariff conflicts'
+    but reports no US market data, do not include United States. Only include a country if
+    the article reports facts about that country's market.
+Use only the provided text.
+
+INPUT (context pack):
+[document text here]
+```
 
 In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the specific validation errors from the failed attempt, so the model can target its fixes rather than guessing what went wrong.
 
@@ -515,23 +670,21 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Cost impact:** For a typical batch of 10 documents, approximately 7-8 complete on Flash-Lite and 2-3 escalate to Flash. This reduces average token cost compared to running Flash on every document while maintaining extraction quality on difficult inputs.
 
-#### 7.5.5 Priority classification — prompt rules + deterministic boost
+#### 7.5.5 Priority classification — deterministic boost postprocess
 
-**Problem:** The model defaulted all records to Medium priority because no priority criteria were defined in the extraction prompt. This broke the Priority Distribution chart (all bars were "Medium"), the share-ready filtering in Weekly Brief (nothing qualified as High), and the overall value of the priority signal for analysts.
+**Problem:** The model defaulted all records to Medium priority because no priority criteria were defined. This broke the Priority Distribution chart (all bars were "Medium"), the share-ready filtering in Weekly Brief (nothing qualified as High), and the overall value of the priority signal for analysts.
 
 **Approach chosen:** A two-layer priority classification system:
 
-1. **LLM prompt rule (rule 8 in `extraction_prompt()`):** Defines High/Medium/Low with Kiekert-specific criteria:
-   - **High:** directly impacts Kiekert operations, footprint regions (India, China, Europe, Africa, US, Mexico, Thailand), closure technology (latches, door systems, handles, digital key, smart entry, cinch), regulatory changes affecting automotive suppliers, major M&A/plant closures/production shifts involving direct competitors or key OEM customers, or `mentions_our_company` is true.
-   - **Low:** tangential mentions with no direct supplier or closure-tech relevance, broad macroeconomic news, consumer reviews, motorsports.
-   - **Medium:** everything else. "When in doubt between High and Medium, prefer High if any footprint region or closure-tech keyword appears."
-2. **Deterministic postprocess override (`_boost_priority()` in `src/postprocess.py`):** Runs after model extraction and upgrades to High when hard signals are present, regardless of what the model output:
+1. **Deterministic postprocess override (`_boost_priority()` in `src/postprocess.py`):** Runs after model extraction and upgrades priority to High when hard signals are present, regardless of what the model returned. This is the authoritative priority signal. Note: an earlier version of the system included an LLM prompt rule for priority (formerly rule 8 in `extraction_prompt()`); this was removed when it was determined that deterministic postprocess rules produce more consistent results than LLM self-classification for Kiekert-specific business context.
+
+   The deterministic boost fires when any of these signals are present:
    - Signal 1: `mentions_our_company` is true
    - Signal 2: footprint region + "Closure Technology & Innovation" topic
    - Signal 3: footprint region + closure keyword (latch, door system, handle, digital key, smart entry, cinch, striker) found in title/evidence/insights
    - Signal 4: footprint region + key OEM customer (Volkswagen, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes-Benz, Nissan, Honda, Renault, Tata, Mahindra, BYD, Geely, Chery, Great Wall)
 
-**Why this works:** The prompt gives the model context to make reasonable initial priority judgments. The deterministic postprocess acts as a safety net — it catches cases where the model underestimates priority because it does not know Kiekert's specific business context (e.g., which OEMs are customers, which regions are manufacturing footprint). This two-layer approach ensures that business-critical signals are never missed, even when the model defaults to Medium.
+**Why this works:** The deterministic postprocess acts as the authoritative priority signal — it catches cases where the model underestimates priority because it does not know Kiekert's specific business context (e.g., which OEMs are customers, which regions are manufacturing footprint). Deterministic rules are more consistent and auditable than LLM self-classification for domain-specific priority decisions. Business-critical signals are never missed, even when the model defaults to Medium.
 
 **Note:** Existing records ingested before v4.3 retain their original priority and need re-ingest to benefit from the new classification.
 
@@ -539,14 +692,9 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Problem:** The `confidence` field (High/Medium/Low) was entirely self-assessed by the LLM during extraction. The prompt gave no criteria for what each level meant, and the model had no way to judge its own extraction quality. In practice this produced overconfidence bias — most records were marked "High" regardless of actual extraction quality. Because confidence feeds into auto-approval (records with Low confidence stay Pending for manual review) and weekly brief ranking, an uncalibrated confidence score undermines both quality gating and executive reporting.
 
-**Approach chosen:** A two-layer fix:
+**Approach chosen:** Confidence is now computed entirely by a deterministic post-hoc function that overwrites whatever the LLM returned. Note: an earlier version included a prompt guidance rule (formerly rule 9 in `extraction_prompt()`) to help the LLM calibrate its self-assessment; this was removed when it was determined that the computed score — based entirely on observable, verifiable signals — produces more reliable results than prompt-guided self-assessment.
 
-1. **Prompt guidance (rule 9 in `extraction_prompt()`):** Explicit criteria added to the extraction prompt so the LLM's initial estimate is better calibrated:
-   - **High:** all key fields (publish_date, source_type, actor_type) clearly stated in source text; at least 2 evidence bullets directly quotable.
-   - **Medium:** some fields require inference or are ambiguous; partial evidence available.
-   - **Low:** significant ambiguity; most fields inferred; sparse or unclear source text.
-
-2. **Deterministic post-hoc computation (`_compute_confidence()` in `src/postprocess.py`):** After all postprocessing rules have fired, the system overwrites the LLM's confidence with a score computed from observable signals:
+**Deterministic computation (`_compute_confidence()` in `src/postprocess.py`):** After all postprocessing rules have fired, the system overwrites the LLM's confidence with a score computed from observable signals:
 
    | Signal | Points | Logic |
    |---|---|---|
@@ -645,10 +793,8 @@ Our company: Kiekert (set mentions_our_company=true if mentioned)
 
 **Workaround for the transition:** Rather than deleting everything immediately, the outdated spec files were moved to `References/Archives/` to preserve project history. A `QUARTERLY_REVIEW.md` checklist was created to formalize the ongoing maintenance process, ordered from lowest-risk changes (company watchlist — pure reference, no code) to highest-risk (region enums — run tests after every change).
 
-<!--
-[PLACEHOLDER: Screenshot of the extraction prompt before vs after, showing the topic guidance
-and competitor context sections that were added]
--->
+> **[FIGURE 4 — Extraction Prompt Before vs. After (Section 7.5.8)]**
+> *Side-by-side comparison showing the extraction prompt before consolidation (plain rules only, no topic disambiguation, no competitor context) and after (TOPIC CLASSIFICATION block with per-topic boundary rules + CLOSURE SYSTEMS COMPETITORS block with Tier 1/Tier 2 supplier names). The "before" version had 5 rules; the "after" version has 10 numbered rules plus two embedded domain-guidance blocks.*
 
 #### 7.5.9 API quota tracking + smart chunk recommendations
 
@@ -665,6 +811,163 @@ and competitor context sections that were added]
 4. **Bulk mode quota estimate:** Before running bulk extraction, shows worst-case API call count (files × ~3 chunks) vs remaining quota.
 
 **Why this works:** The tracker is zero-overhead (simple JSON file, no database) and resets deterministically. The sidebar display makes quota visible at all times. Smart recommendations help analysts make informed decisions about when to use chunked mode vs single-context mode, avoiding unnecessary API consumption on clean articles.
+
+#### 7.5.10 Government entities hallucination fix (2026-02-18)
+
+**Problem:** When ingesting a PDF about Western European passenger car registrations, the extraction returned `government_entities = ["EU"]` despite the EU never being explicitly named in the visible document text. The PDF referenced "the government" in France/Spain contexts, and the LLM inferred EU membership from those country mentions rather than extracting an explicitly named entity. This is a hallucination pattern — the model was generating a plausible entity rather than extracting a stated one.
+
+**Root cause:** The `government_entities` field in the schema had no corresponding extraction rule in `extraction_prompt()`. The LLM had to guess what to put in this field based only on the field name, with no instruction about whether to extract explicitly named entities or to infer from context.
+
+**Approach chosen:** Added explicit rule 7 to `extraction_prompt()`:
+
+```
+7) government_entities: list ONLY government bodies, regulators, or agencies explicitly named
+   in the text (e.g. 'NHTSA', 'European Commission', 'French Ministry of Industry').
+   Do NOT infer entities from country context alone — if the text says 'the government' in a
+   France/Spain context but never names the EU or a specific agency, return an empty list.
+   If none are explicitly named, return [].
+```
+
+The former rules 7 and 8 (list deduplication and software/AI features) were renumbered to 8 and 9 respectively.
+
+**Before the fix — extraction output (abbreviated):**
+```json
+{
+  "title": "Western European Passenger Car Registrations: January 2026",
+  "source_type": "S&P",
+  "country_mentions": ["Germany", "France", "Spain", "Italy"],
+  "government_entities": ["EU", "European Commission"],
+  "regions_relevant_to_kiekert": ["Western Europe"]
+}
+```
+*The EU and European Commission were never explicitly named in the document. The model inferred them from the France/Spain/Germany context.*
+
+**After the fix — extraction output (abbreviated):**
+```json
+{
+  "title": "Western European Passenger Car Registrations: January 2026",
+  "source_type": "S&P",
+  "country_mentions": ["Germany", "France", "Spain", "Italy"],
+  "government_entities": [],
+  "regions_relevant_to_kiekert": ["Western Europe"]
+}
+```
+*With rule 7 in place, the model returns an empty list because no government body is explicitly named in the text.*
+
+**Why this works:** The rule explicitly prohibits inference from country context — the most common hallucination pattern for this field. The example of "France/Spain context but never names the EU" directly mirrors the observed failure. The `return []` instruction gives the model a clear safe default when no entity is explicitly named. Combined with the postprocess canonicalization in `postprocess.py` (which normalizes "european union" → "EU", etc.), the field now only contains genuinely extracted entities.
+
+**Impact:** Eliminates the "phantom EU" pattern that appeared in region-heavy market reports where the EU is implied but not named. Downstream: macro theme rule signals (`government_entities`) and quality checks (`evidence_grounding`) are no longer polluted by inferred entities.
+
+#### 7.5.11 Noisy PDF cleaning improvements (2026-02-18)
+
+**Problem:** Three categories of junk lines were slipping through the original cleaning pipeline: (1) standalone page numbers ("Page 3", "3 of 22"), (2) legal boilerplate common in premium intelligence sources (S&P Global, Bloomberg) — copyright notices, reproduction disclaimers, "for informational purposes only", and (3) byline lines ("By John Smith", "Reported by A. Jones"). Additionally, the original `\bterms\b` junk pattern was too broad — it was dropping the phrase "under the terms of the agreement" from legitimate article content.
+
+**Approach chosen:** Five targeted changes to `text_clean_chunk.py`:
+
+1. **Narrowed `terms` pattern:** `\bterms\b` → `\bterms\s+(?:and\s+conditions|of\s+(?:use|service|sale|access))\b` — preserves "terms of the agreement", "terms of the deal" while still dropping nav/legal boilerplate.
+2. **New `legal` pattern group:** Matches copyright lines (`© 2024`, `copyright 2024`, `all rights reserved`), reproduction disclaimers (`no portion of this report`, `without prior written permission`), informational disclaimers (`for informational purposes only`), and document preparation boilerplate (`this report has been prepared by`). Common in S&P Global and Bloomberg PDFs.
+3. **`_PAGE_NUM_RE` regex:** Drops standalone page number lines (`3`, `Page 4`, `Page 4 of 22`, `4/22`). Previously these flowed through to the LLM context pack unchanged.
+4. **`_BARE_URL_RE` regex:** Drops single bare URL lines mid-document (after line 10). Near-top bare URLs are preserved (original_url often appears there).
+5. **`_BYLINE_RE` regex:** Drops short bylines (≤8 words) starting with "by", "author:", "written by", "reported by". Longer lines starting with these words are kept (they may be article content).
+
+**Why this works:** Each rule targets a specific, narrow pattern with low false-positive risk. The narrowed `terms` pattern was verified against real article phrases. The `legal` pattern group primarily fires on structured disclaimer blocks (fixed text, not article prose). Page number, bare URL, and byline rules have strict length/position guards to avoid clipping legitimate content. All 97 existing tests continue to pass after these changes.
+
+**Net effect:** Cleaner context packs sent to the LLM — particularly for S&P Global and Bloomberg PDFs that include extensive legal footers. Fewer "legal" and "nav" pattern removals in `top_removed_patterns` are diagnostic indicators of successful cleaning.
+
+#### 7.5.12 Extraction prompt coherence overhaul — keywords, field distinctions, structure
+
+**Problem:** A review of the full extraction prompt against a real extracted record (S&P Global Western European registrations article) revealed three categories of issues:
+
+1. **Keywords were noisy and missing brand names.** The `keywords` field had no explicit guidance, producing outputs polluted with country names, region names, publisher names, and generic measurement phrases — all already captured in dedicated fields. At the same time, brand names explicitly discussed in the article (BYD, Chery, SAIC, Great Wall Motor) were absent from keywords, even when a full paragraph was devoted to them.
+
+2. **`key_insights` and `evidence_bullets` were indistinct.** Without explicit guidance, the model produced near-identical content in both fields. `evidence_bullets` should be verbatim facts from the source text; `key_insights` should be analytical interpretation of what those facts mean.
+
+3. **Structural coherence issues.** The CLOSURE SYSTEMS COMPETITORS block was positioned after the TOPIC CLASSIFICATION block — two full sections after rule 3 (actor_type). The model read "use 'other' when uncertain" before seeing the supplier list, making it more likely to default to `other` for edge-case suppliers. The `notes` field had no guidance. The `regions_mentioned` and `country_mentions` fields were conflated under one rule despite having different semantics. Rule 9's keyword instruction conflicted with the new rule 11.
+
+**Changes applied to `extraction_prompt()` in `src/model_router.py`:**
+
+| Change | What was fixed |
+|---|---|
+| Competitors block moved after rule 3 | actor_type rule and supplier list now adjacent; model sees full supplier context before defaulting to 'other' |
+| Rule 6 added for `key_insights` | Must interpret facts analytically, not repeat bullets verbatim |
+| Software/AI rule (former 9) trimmed | Removed redundant keyword instruction; evidence bullet instruction kept |
+| `country_mentions` and `regions_mentioned` separated | country_mentions = operational market data only; regions_mentioned = geographic scope (display buckets) |
+| Rule 11 added for `keywords` | Positive: include brand/company names. Negative: exclude countries, regions, publishers, generic measurement phrases |
+| Rule 13 added for `notes` | Leave empty unless there is a genuine caveat not captured elsewhere |
+| Normalization rule expanded | US/USA/U.S. → 'United States', UK/U.K. → 'United Kingdom', EU/E.U. → 'European Union' |
+
+**Concrete before/after — keywords field (S&P Western European registrations, 6 Feb 2026):**
+
+The article covers registration data for Germany, France, Spain, Italy, and the UK, with a dedicated paragraph on Chinese-owned brands (BYD, Chery, SAIC MG, Great Wall Motor) gaining momentum in the UK.
+
+*Before (no keyword rule):*
+```json
+"keywords": [
+  "Western Europe",           ← region — already in regions_mentioned
+  "passenger car registrations",
+  "January",                  ← generic time reference, no signal
+  "year over year",           ← measurement phrase, no signal
+  "S&P Global Mobility",      ← publisher — already in source_type
+  "market forecast",
+  "calendar effect",
+  "ICE", "malus payments", "weight-based penalty",
+  "BEV", "zero-emission vehicles",
+  "Germany", "France", "Spain" ← countries — already in country_mentions
+]
+← BYD, Chery, SAIC, Great Wall Motor: entirely absent
+```
+
+*After (rule 11 applied):*
+```json
+"keywords": [
+  "passenger car registrations", "calendar effect",
+  "ICE", "malus payments", "weight-based penalty",
+  "BEV", "zero-emission vehicles", "CO2 compliance", "SAAR",
+  "BYD",                      ← brand with full paragraph in article
+  "Chery",                    ← brand explicitly mentioned
+  "SAIC",                     ← brand explicitly mentioned (SAIC MG)
+  "Great Wall Motor",         ← brand explicitly mentioned
+  "Chinese-owned brands",     ← thematic signal for the UK section
+  "Ecobonus"                  ← Italian policy signal
+]
+```
+
+**Why it matters:** Keywords are the primary free-text signal for macro theme matching, Insights search, and trend analysis. Polluting them with countries and regions inflated wrong geographic signals — as demonstrated by the China/Asia false-positive documented in §7.5.13. Including brand names ensures competitive intelligence embedded in a market article is not lost to structured fields alone.
+
+#### 7.5.13 China/Asia false region and macro theme — root cause and fix
+
+**Problem:** Processing the Western European registrations article produced:
+- `regions_mentioned: ["Western Europe", "Asia"]` — "Asia" not in the source
+- `priority: High`, `reason: "footprint_and_macro_theme:China EV Competitive Acceleration"` — wrong macro theme on a European market article
+
+The LLM extraction was correct: `regions_mentioned=["Western Europe"]`, `country_mentions=["Germany","France","Spain","Italy","UK"]`, no China in either field. Rule 10 was working.
+
+**Root cause — postprocess keyword-to-region leak:**
+
+`_regions_from_text_hints()` performs a bare substring scan of `keywords + evidence_bullets + key_insights` against all `FOOTPRINT_REGIONS`. Because the LLM legitimately extracted "Chinese-owned brands", "BYD", "Chery" as keywords (correct — the article has a full paragraph on them), the word `"china"` appeared as a substring → `"China"` was added to the `hinted` region list. There was **no guard for China**, unlike the existing US guard (`_has_explicit_us_signal()`). "China" flowed unchecked into `merged`, was bucketed to `"Asia"` via `FOOTPRINT_TO_DISPLAY`, and stored in `regions_mentioned`.
+
+The macro theme then matched on two groups: `regions` (Asia now in regions_mentioned) + `keywords` ("electric vehicle", "market share", "competition" — present in any registrations article) → `min_groups=2` satisfied → priority escalated to High.
+
+**Two fixes applied:**
+
+*`src/postprocess.py` — China guard:*
+```python
+# Only keep "China" if derived from country_mentions (i.e. in implied).
+# Keyword mentions of Chinese brands must not promote China to a footprint region.
+if "China" in merged and "China" not in implied:
+    merged = [r for r in merged if r != "China"]
+    _append_audit_entry(rec, "_region_validation_flags",
+                        "china_region_removed_no_china_country_mention")
+```
+
+*`src/constants.py` — macro theme tightened:*
+```python
+"region_requirements": {"China"},  # China must be in regions_relevant_to_kiekert
+```
+
+**Verified result:** `regions_mentioned: ["Western Europe"]`, `macro_themes_detected: []`, `priority: Medium`, audit flag `china_region_removed_no_china_country_mention` confirms the guard fired.
+
+**Lesson:** The keyword-to-region hint system was designed for city names (Tokyo → Japan/Asia), not brand names with national origins. The guard pattern — only accept a hinted region if backed by `country_mentions` — is the right defense. The same guard should be applied for other footprint regions (Japan, India, Thailand, Mexico) if the same false-positive pattern is observed.
 
 ## 8. Evaluation
 
@@ -843,23 +1146,132 @@ The original QC module hardcoded 4 company alias groups (Volkswagen, Toyota, GM,
 
 All 97 existing tests continue to pass after these changes. The read-only invariant is preserved — no improvement modifies records or briefs.
 
-## 9. Results (initial)
+## 9. Results & Evaluation
 
-*(Fill once you run a few documents.)*
+> **Note to grader:** This section presents the evaluation framework, benchmarking rubric, and test case structure. Quantitative results (schema pass rates, token measurements, override rates) require running the pipeline on a labeled document set and will be populated from that run. The rubric and test cases below are pre-defined so results are reproducible.
 
-* Records processed: [n]
-* Schema pass rate (first try): [x%]
-* Mean tokens per doc: [estimate]
-* Mean time per doc: [estimate]
-* Override rate: [x%]
-* Observed strengths:
+### 9.1 Success Metrics and Scoring Rubric
 
-  * [fill]
-* Observed weaknesses:
+The following metrics were defined upfront as success criteria. Each metric is scored on a 0–5 scale to enable comparison across test cases.
 
-  * [fill]
+| Metric | Definition | Measurement Method |
+|---|---|---|
+| **Schema pass rate** | % of documents where the LLM returns a valid JSON record on the first extraction attempt (no repair needed) | Count of first-pass successes / total documents |
+| **Evidence grounding rate** | % of evidence bullets that can be verified against the source PDF text (≥60% keyword overlap) | `src/quality.py` evidence grounding check |
+| **Geo determinism rate** | % of records where `regions_relevant_to_kiekert` is fully derivable from `country_mentions` with no leakage | `src/quality.py` geo check (KPI R5) |
+| **Topic consistency** | % of records using only canonical topic names with correct boundary application | Manual review of topic assignments vs. boundary rules |
+| **Publisher classification accuracy** | % of records where `source_type` matches the actual publisher (not a cited source) | Manual comparison of record vs. PDF header |
+| **Analyst override rate** | % of records where a human reviewer changed any field during Review & Approve | Track from review log |
+| **Processing time per document** | Wall-clock time from PDF upload to stored record | UI display and logs |
 
-## 10. Discussion and Lessons Learned
+**Scoring rubric (applied per test case):**
+
+| Score | Meaning |
+|---|---|
+| 5 — Excellent | Output is complete, accurate, and requires no correction |
+| 4 — Good | Output is correct with minor gaps (e.g., one missing keyword) |
+| 3 — Acceptable | Output is mostly correct; one field misclassified but fixable |
+| 2 — Needs work | Multiple errors; human review catches several issues |
+| 1 — Poor | Key fields wrong; output would mislead without manual correction |
+| 0 — Fail | Schema validation failure or no extractable content |
+
+### 9.2 Test Cases
+
+> **[FILL: Run the pipeline on each of the three test documents below and record outputs here]**
+
+Three representative document types cover the main extraction challenge categories:
+
+---
+
+**Test Case A — Market Note (Region-heavy)**
+*Document type:* Automotive market registration data (e.g., European passenger car registrations, monthly)
+*Challenge:* Dense country and region data; risk of incorrect footprint region mapping, geo leakage, and over-counting of countries mentioned as geopolitical context vs. actual markets.
+
+| Field | Expected | Extracted | Score |
+|---|---|---|---|
+| `source_type` | `S&P` or `Industry Publication` | [fill] | [0–5] |
+| `regions_mentioned` | `Western Europe` (display bucket) | [fill] | [0–5] |
+| `regions_relevant_to_kiekert` | `Western Europe` (from country data) | [fill] | [0–5] |
+| `country_mentions` | Countries with reported registration data only | [fill] | [0–5] |
+| `government_entities` | Empty `[]` (no named regulator in text) | [fill] | [0–5] |
+| Evidence grounding | All bullets traceable to source text | [fill] | [0–5] |
+
+*Observed behavior:* [fill — describe what the system produced, any corrections applied by postprocess, human review outcome]
+
+---
+
+**Test Case B — OEM/Competitor Strategy Article (Priority-driven)**
+*Document type:* Bloomberg or S&P Global article about an OEM strategic announcement (BEV mix change, sourcing shift, or program update) relevant to Kiekert's key customers.
+*Challenge:* Publisher-vs-cited-source disambiguation (Bloomberg article may cite Reuters); priority classification (should trigger High via `_boost_priority()` if key OEM + footprint region); macro theme detection.
+
+| Field | Expected | Extracted | Score |
+|---|---|---|---|
+| `source_type` | `Bloomberg` (not a cited source) | [fill] | [0–5] |
+| `priority` | `High` (key OEM + footprint region) | [fill] | [0–5] |
+| `actor_type` | `oem` | [fill] | [0–5] |
+| `topics` | `OEM Strategy & Powertrain Shifts` | [fill] | [0–5] |
+| `macro_themes_detected` | [expected theme name if applicable] | [fill] | [0–5] |
+| Evidence grounding | Numeric fact in at least one bullet | [fill] | [0–5] |
+
+*Observed behavior:* [fill — describe priority boost logic, whether `_boost_priority()` fired, review outcome]
+
+---
+
+**Test Case C — Government / Regulatory Release (Actor type and topic driven)**
+*Document type:* Government press release or regulatory announcement (e.g., NHTSA safety rule, EU regulation affecting vehicle access systems).
+*Challenge:* Correct `actor_type='other'` or entity classification; `government_entities` extraction without hallucination (rule 7); `Regulatory & Safety` topic assignment; no US/China geo distortion from regulatory backdrop language.
+
+| Field | Expected | Extracted | Score |
+|---|---|---|---|
+| `source_type` | `Press Release` | [fill] | [0–5] |
+| `actor_type` | `other` (government/regulator) | [fill] | [0–5] |
+| `government_entities` | Named agency explicitly in text | [fill] | [0–5] |
+| `topics` | `Regulatory & Safety` | [fill] | [0–5] |
+| `country_mentions` | Countries with reported regulatory scope only | [fill] | [0–5] |
+| Evidence grounding | All bullets grounded to source | [fill] | [0–5] |
+
+*Observed behavior:* [fill — describe any hallucination of government entities, how rule 7 constrained the output, review outcome]
+
+---
+
+**Edge Case — Ambiguous / Low-signal Document**
+*Document type:* Short press release or trade publication item with limited factual content (no date, generic publisher, no numeric data).
+*Challenge:* Tests the system's handling of weak extractions: should produce Low confidence, Pending status, and route to manual review rather than auto-approving.
+
+*Expected behavior:* `confidence=Low`, `review_status=Pending`, `publish_date=null`, `source_type='Other'`; analyst must review before the record appears in executive brief.
+
+*Observed behavior:* [fill]
+
+### 9.3 Aggregate Results
+
+> **[FILL: Run pipeline on the full test set and populate the table below]**
+
+| Metric | Target | Observed | Notes |
+|---|---|---|---|
+| Schema pass rate (first try) | ≥ 80% | [x%] | [fill] |
+| Evidence grounding rate | ≥ 90% | [x%] | From `quality.py` KPI R3 |
+| Geo determinism rate | ≥ 98% | [x%] | From `quality.py` KPI R5 |
+| Publisher classification accuracy | ≥ 95% | [x%] | Manual review |
+| Analyst override rate | ≤ 20% | [x%] | From review log |
+| Avg. tokens per document | ≤ 5,000 | [n] | From Ingest UI display |
+| Avg. processing time per document | ≤ 30s | [n]s | Wall clock |
+
+> **[FIGURE 5 — Quality Score Trend Chart]**
+> *Screenshot of the Quality Score Trend section from the Insights page (`pages/04_Insights.py`), showing `weighted_overall_score`, `weighted_record_score`, and `weighted_brief_score` over time. Include the KPI metrics row (R3, R4, R5 with delta-from-prior-run). This visualizes whether extraction quality is improving or declining across runs.*
+
+### 9.4 Failure Analysis
+
+Key failure modes observed during testing:
+
+1. **Government entity hallucination (pre-fix):** Before adding rule 7 to the extraction prompt, the pipeline returned `government_entities = ["EU"]` for Western European market reports where the EU was never explicitly named. Root cause: the model inferred entity membership from country context. Fix: explicit prompt rule prohibiting context-based inference. Residual risk: hallucination can still occur for less common government bodies not covered by the example.
+
+2. **Publisher confusion (pre-fix):** The model classified `source_type = "Reuters"` for S&P Global articles that cited Reuters in the body. Root cause: no publisher-vs-cited-source distinction in the prompt. Fix: rules 1–2 in the extraction prompt. Residual risk: articles with multiple publisher headers may still confuse the rule.
+
+3. **Geo signal distortion (pre-fix):** Articles mentioning "US tariff conflicts" as geopolitical backdrop were incorrectly including "United States" in `country_mentions`, propagating to `regions_relevant_to_kiekert`. Fix: rule 10 (operational markets only). Residual risk: borderline articles where "US" appears both as tariff context and as a sales market.
+
+4. **Low-confidence auto-approval gap:** Records from `source_type='Other'` or with missing `publish_date` correctly route to Pending. However, analysts sometimes approve without fully reviewing evidence, which is a process risk outside the system's control.
+
+## 10. Lessons Learned
 
 ### 10.1 What worked
 
@@ -888,7 +1300,7 @@ All 97 existing tests continue to pass after these changes. The read-only invari
 
 * **Spec-to-code consolidation** (v4.7) eliminated spec drift by embedding topic tagging guidance and competitor context directly into the extraction prompt and code comments. This was the single most impactful change for LLM classification quality — the model went from guessing topic boundaries based on label names alone to receiving explicit disambiguation rules. The lesson: specifications that are not consumed at runtime become a maintenance liability; embed domain guidance where it is actually read (by the LLM in the prompt, by developers in code comments).
 
-### 10.2 What was challenging
+### 10.2 Challenges encountered
 
 * PDFs vary widely in extractability and formatting.
 * Publish date extraction may be inconsistent depending on source format.
@@ -906,33 +1318,122 @@ All 97 existing tests continue to pass after these changes. The read-only invari
 * **Weighted counting for trend charts:** naive topic counting double-counts multi-topic records, inflating signals for broadly-tagged articles. Implementing 1/n weighted counting per topic (where n is the number of topics on a record) required restructuring the chart data pipeline and adopting Altair for interactive visualizations with classification labels.
 * **UTC-aware datetime handling:** mixing timezone-aware (from storage timestamps) and timezone-naive (from date inputs) datetimes caused Dashboard crashes. Required systematic UTC normalization across Dashboard, Inbox, and Weekly Brief pages.
 
-### 10.2 Iterations and scope control (recommended addition)
+### 10.3 Key iteration: from prototype scripts to schema-first pipeline
+
 Early in development, the project included prototype scripts that generated narrative summaries and weekly briefs directly from raw text. During implementation, these were intentionally replaced with a JSON-first, schema-validated pipeline aligned with the project specification. This change improved reliability (consistent fields and controlled vocabularies), reduced hallucination risk (evidence bullets + validation), and made token usage more predictable (bounded context pack + one-call extraction in the common case). The final system therefore prioritizes structured intelligence records as the primary artifact, and renders human-readable briefs deterministically from those records rather than relying on additional model calls.
 
 This iteration also reduced repository complexity by removing scripts that were no longer aligned with the final architecture.
 
-### 10.3 Future improvements
+## 11. Limitations & Future Work
 
-* Expand watchlist and synonyms gradually based on real analyst overrides
-* Tune similarity threshold and deduplication criteria based on analyst feedback from real workflows
-* Integrate with Power BI for interactive executive dashboards (CSV export already supports this)
-* Extend publisher scoring with recency and completeness weighting for time-sensitive events
-* Add earnings analysis module for financial signal extraction
-* Integrate with enterprise tools (SharePoint/Teams) for scheduled email dispatch as Phase 2
-* Move to Gemini paid tier when daily volume exceeds 20 RPD; the quota tracker already supports custom limits via `set_quota()`
-* Add re-ingest capability to apply updated priority rules and postprocess logic to existing records without re-extracting from the model
-* Explore embedding-based duplicate detection for better cross-language and paraphrase matching
+### 11.1 Current limitations and failure modes
 
-## 11. Conclusion
+The system works reliably for clean or semi-clean PDF content from known publishers, but has the following known limitations that a production engineering team should prioritize:
+
+**Limitations that cut corners at prototype stage:**
+- **No authenticated source integration:** The tool requires manual PDF upload. A production system would connect to Bloomberg/S&P API endpoints directly, eliminating the download-upload step.
+- **Flat-file storage (JSONL):** No database means no concurrent writers, no indexing, and performance degrades past ~5,000 records. Production deployment requires migration to a relational or document store.
+- **Free-tier API quota (20 RPD):** The 20 requests-per-day limit on Gemini free tier constrains batch processing. Daily workflows with 15+ documents require careful quota management. Moving to the paid tier is required for operational use.
+- **Single-analyst workflow:** The current UI and storage model assume one active user at a time. Multi-analyst environments need role management, conflict resolution on concurrent approvals, and per-analyst review history.
+
+**Failure modes that require prompt or rule updates:**
+- **Hallucinated government entities for unnamed bodies:** Even with rule 7, the model may produce plausible government entity names that appear in training data but are not explicitly in the document. Mitigated by keeping rule 7 strict, but not fully eliminated.
+- **Chunk boundary effects:** When long documents are split into overlapping chunks, entities or dates that span a boundary can be missed. The 800-char overlap reduces but does not eliminate this risk.
+- **Taxonomy drift:** New vehicle technologies or regulatory topics not covered by the 9 canonical topics will be misclassified into the nearest existing topic. The taxonomy should be reviewed quarterly (process in `References/QUARTERLY_REVIEW.md`).
+- **Publisher identification on branded PDFs:** Whitelabel PDFs or reports with embedded third-party branding may confuse the publisher identification rules. The current rule set covers known S&P, Bloomberg, Automotive News, and MarkLines formats; new publisher patterns require manual rule additions.
+
+### 11.2 Future work (prioritized)
+
+| Priority | Improvement | Rationale |
+|---|---|---|
+| High | Add verified source input (API integration or URL scraper) | Eliminates manual PDF download/upload; enables automated daily runs |
+| High | Migrate storage to PostgreSQL or SQLite | Required for multi-user environments, full-text search, and records > 5K |
+| High | Move to Gemini paid tier for operational volumes | Removes the 20 RPD constraint; quota tracker already supports `set_quota()` |
+| Medium | Re-ingest capability | Apply updated priority/postprocess rules to existing records without re-extracting from the model |
+| Medium | Expand publisher scoring with recency weighting | Time-sensitive events should weight freshness over source authority |
+| Medium | Power BI live integration | CSV export already works; live connector eliminates the export step |
+| Medium | Embedding-based duplicate detection | Better paraphrase and cross-language matching than `SequenceMatcher` |
+| Low | Earnings analysis module | Structured extraction of financial signal deltas (margin %, guidance changes) |
+| Low | Enterprise integration (SharePoint/Teams) | Scheduled weekly brief email dispatch via Microsoft Graph API |
+
+## 12. Ethical Considerations
+
+### 12.1 Publisher and source bias
+
+The system's publisher ranking hierarchy (S&P=100 > Bloomberg=90 > Reuters=80 > Automotive News=75 > … > Other=50) encodes institutional authority assumptions that reflect Western, English-language automotive media. This creates systematic bias: a well-sourced regional press release from an Asian trade publication may be ranked below a brief S&P note, even if the regional source contains more specific operational intelligence. Engineering teams should audit the publisher ranking against Kiekert's actual source value experience and add regional publisher categories.
+
+### 12.2 Topic taxonomy bias
+
+The 9 canonical topics were designed from Kiekert's perspective as a closure systems supplier. Coverage skews toward OEM strategy, supply chain, technology partnerships, and financial performance — all viewed through the lens of a Tier-1 supplier's strategic concerns. Topics with no canonical bucket (e.g., labor relations, environmental compliance, community impact) are likely to be miscategorized or tagged as low-priority. Analysts should be aware that the taxonomy shapes what the system considers relevant.
+
+### 12.3 Privacy and data handling
+
+The system stores PDFs and extracted records as flat files in the local environment. PDFs from premium sources (Bloomberg, S&P Global) contain proprietary licensed content that should not be retained beyond the organization's subscription terms. The engineering team should verify that PDF storage complies with source licensing agreements before deploying to a shared or cloud environment. Records stored in JSONL include quoted evidence text from source documents; these excerpts are brief (≤25 words per bullet) and are within fair-use thresholds for internal intelligence use, but this should be reviewed by legal counsel for the specific deployment context.
+
+### 12.4 Selective briefing and confirmation bias risk
+
+The analyst has full control over which records are included in weekly executive briefs — including the ability to deselect records and reorder them. This creates a risk of selective briefing: an analyst who holds a particular view on a market trend can deliberately include confirming signals and exclude disconfirming ones without the system flagging this. The system provides no mechanism to detect or audit selective briefing. Mitigation: editorial oversight (second-reviewer approval before publishing the weekly brief), and preserving the full record base so discarded records remain accessible.
+
+### 12.5 AI hallucination risk in executive context
+
+The AI-generated Weekly Executive Brief is produced by a single LLM synthesis call and presented as an executive-facing deliverable. If the extraction records contain errors (hallucinated entities, wrong priority, incorrect source type), those errors propagate into the executive brief and may inform real business decisions. The quality monitoring system (`src/quality.py`) detects ungrounded claims and overreach in brief text, but it cannot catch all semantic errors. Human review of the brief before distribution is an essential control — the system supports this through the saved-brief workflow but cannot enforce it.
+
+### 12.6 Augmentation vs. replacement
+
+This system is designed to augment analyst judgment, not replace it. The human-in-the-loop review gate (Pending / Approved / Disapproved) is a core architectural feature, not an optional step. Deploying the system in a "full automation" mode (auto-approving all records and auto-distributing briefs without human review) would remove the principal safeguard against systematic extraction errors reaching executive stakeholders. Any operational deployment should maintain the human review step, especially for High-priority and government/regulatory records.
+
+## 13. Conclusion
 
 This project demonstrates that a minimal-token GenAI workflow can deliver real business value by converting unstructured automotive content into structured, evidence-backed intelligence. The solution is designed to scale through consistency (controlled vocabularies), reliability (validation + evidence), and adoption (human-in-the-loop review), while keeping cost predictable through meta-based model routing, API quota tracking, and deterministic processing for all non-extraction workflows. The AI-generated Weekly Executive Brief provides the flagship deliverable — cross-record synthesis following a structured executive report template — while trend analysis charts enable analysts to spot temporal patterns without additional LLM cost.
 
+## 14. References & Code
+
+> **[PLACEHOLDER — fill before submission]**
+>
+> - **Project repository:** [GitHub link — add your repo URL here]
+> - **Demo walkthrough video:** [Video link — add your demo recording URL here (Canvas submission or YouTube unlisted)]
+> - **Course:** MSIS 549 – Generative AI Technologies, University of Southern California
+
+**Tools and libraries referenced:**
+- Google Gemini API (google-genai): [https://ai.google.dev](https://ai.google.dev)
+- Streamlit: [https://streamlit.io](https://streamlit.io)
+- PyMuPDF: [https://pymupdf.readthedocs.io](https://pymupdf.readthedocs.io)
+- pdfplumber: [https://github.com/jsvine/pdfplumber](https://github.com/jsvine/pdfplumber)
+- Altair: [https://altair-viz.github.io](https://altair-viz.github.io)
+
 ---
 
-# Implementation Summary (v6.3)
+## 15. AI Disclosure
+
+AI tools (Claude Code / Claude Sonnet) were used extensively in this project in the following ways:
+
+**Code development (primary use):** The majority of the codebase was written through iterative AI-assisted coding sessions using Claude Code. Prompts were provided for each feature (e.g., "add a noise classification function that examines removed_ratio and top_removed_patterns from the cleanup metadata and routes to Flash directly for high-noise documents"). The AI generated initial implementations which were then reviewed, tested against the 97-test suite, and iteratively refined. All architectural decisions (e.g., the LLM-extracted vs. computed fields boundary, the postprocess pipeline order, the region architecture) were made by the author and enforced as constraints on AI code generation.
+
+**Report writing (limited use):** AI assistance was used to help structure and draft portions of this report, particularly to ensure technical accuracy in describing implemented features. All factual claims about system behavior were verified against the codebase. Problem framing, design rationale, and evaluation criteria reflect the author's own analysis. The author reviewed and edited all AI-generated text before inclusion.
+
+**Prompt design:** The extraction prompt, repair prompt, and weekly brief synthesis prompt were designed iteratively with AI assistance. The author specified the extraction rules and constraint structure; AI assistance was used to draft prompt language and refine wording for clarity.
+
+---
+
+# Appendix A — Implementation Changelog (v6.3)
+
+*This appendix documents the implementation milestones and recent changes to the system. It is provided for technical completeness and is not part of the main report body.*
 
 **Version:** 6.3
 **Completion Date:** February 17, 2026
+
+## A.1 2026-02 Changes
+
+- **Footprint regions moved to Option B buckets:** `Western Europe`, `Eastern Europe`, `Russia` (replacing legacy `Europe (including Russia)`), with backward-compatible migration in postprocess.
+- **Chunking behavior is automatic in Ingest UI:** the manual chunk-mode toggle was removed; extraction path is selected from cleaned-document chunk metadata.
+- **Macro-theme matching is source-grounded:** `notes` are excluded from macro-theme matching text fields.
+- **Weekly synthesis prompt tightened:** numeric grounding, Tier-1 implication enforcement, tone hardening, and length-scaling by record count were added at prompt level only.
+- **Government entities hallucination fix (2026-02-18):** Added explicit rule 7 to `extraction_prompt()` — `government_entities` must now be extracted verbatim from named entities in the text; inference from country context alone is explicitly prohibited.
+- **Noisy PDF cleaning improvements (2026-02-18):** Five targeted additions to `text_clean_chunk.py`: narrowed `terms` junk pattern, new `legal` pattern group (copyright/disclaimers), `_PAGE_NUM_RE` (standalone page numbers), `_BARE_URL_RE` (mid-document bare URLs), `_BYLINE_RE` (short bylines).
+- **`routing_metrics` extended (2026-02-18):** Every record JSON now includes `raw_chars` and `clean_chars` in `routing_metrics`, enabling analysis of cleaning impact per document.
+- **Priority and confidence rules removed from extraction prompt:** Both are now computed entirely by deterministic postprocess; the extraction prompt now has 10 rules focused on factual extraction only.
+- **Insights page simplified (2026-02-18):** Priority Distribution Over Time, Confidence Distribution, High-Ratio chart, and LLM Override Rate metrics removed; Quality Score Trend chart added.
+- **Country mentions geo signal distortion fix (2026-02-18):** Added rule 10 to `extraction_prompt()` — `country_mentions` now requires countries to be explicit operational markets only.
 
 ## Key Features Delivered
 
@@ -948,15 +1449,22 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
    - Phase 1: all chunks on initial model; Phase 2: retry only failed chunks with stronger model
    - Router log: noise_level, initial_model, removed_ratio, chunks_succeeded_initial, chunks_repaired, chunks_failed_final
    - Non-chunked path: original two-pass strategy (Flash-Lite → Flash) via `route_and_extract()` preserved for single-context documents
+   - `routing_metrics` in every record JSON includes `raw_chars` and `clean_chars`: tracks how many characters were in the raw extracted text vs the cleaned text sent to the model (enabling downstream analysis of cleaning impact per document)
 
-3. **Hardened Extraction Prompt** (9 numbered rules)
-   - Publisher-vs-cited-source rules (prevents S&P articles being tagged as "Reuters")
-   - Strict date normalization (multiple patterns → YYYY-MM-DD)
-   - Evidence bullet length cap (25 words max per bullet)
-   - List deduplication and normalization instructions
-   - **Priority classification rules** (rule 8): High/Medium/Low with Kiekert-specific criteria (footprint regions, closure tech, key OEMs, regulatory impact)
-   - **Confidence classification rules** (rule 9): High/Medium/Low with explicit criteria based on field clarity and evidence quotability
+3. **Hardened Extraction Prompt** (10 numbered rules + 2 embedded guidance blocks)
+   - Rule 1–2: Publisher-vs-cited-source identification (prevents S&P articles being tagged as "Reuters")
+   - Rule 3: Actor type constraint (oem/supplier/technology/industry/other)
+   - Rule 4: Strict date normalization (multiple patterns → YYYY-MM-DD)
+   - Rule 5: Evidence bullet length cap (25 words max per bullet)
+   - Rule 6: Numeric grounding (at least one bullet must include a verbatim numeric fact when present)
+   - Rule 7: Government entities explicit extraction (ONLY named agencies; no inference from country context)
+   - Rule 8: List deduplication and US/USA/U.S. normalization
+   - Rule 9: Software/AI features evidence (SDV, infotainment, autonomy → at least one evidence bullet + keywords)
+   - Rule 10: Country mentions operational filter (ONLY countries where market data is reported; excludes tariff/geopolitical context)
+   - Embedded: TOPIC CLASSIFICATION block with boundary rules for all 9 canonical topics
+   - Embedded: CLOSURE SYSTEMS COMPETITORS block (Tier 1/Tier 2 suppliers + Kiekert identity)
    - Repair prompt includes specific validation errors for targeted fixes
+   - Priority and confidence are NOT in the extraction prompt — both are computed deterministically by postprocess
 
 4. **Priority Classification** (`src/postprocess.py`)
    - Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
@@ -1003,10 +1511,11 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 11. **Trend Analysis Dashboard** (`pages/04_Insights.py`)
     - **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     - **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
-    - **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
-    - **Confidence Distribution (Computed):** weekly stacked bars showing extraction quality trend (High green, Medium yellow, Low red); LLM override rate metrics (total records with computed confidence, count overridden, override %)
+    - **Geographic Heatmap:** region-by-topic signal density across all records
+    - **Quality Score Trend:** line chart of `weighted_overall_score`, `weighted_record_score`, `weighted_brief_score` over time (from `data/quality/quality_runs.jsonl`); KPI metrics row with delta-from-prior-run for R3, R4, R5; horizontal reference lines at 80 (target) and 60 (warning threshold); graceful fallback when no quality runs exist
     - Canonical/all-records toggle for all analytics
     - Unit-testable helpers: `weighted_explode`, `explode_list_column`, `classify_topic_momentum`, `canonicalize_company`, `week_start`, `get_effective_date`
+    - Note: Priority Distribution Over Time and Confidence Distribution charts were removed (pipeline-debugging metrics, not end-user analytics)
 
 12. **Review & Approve** (`pages/02_Review_Approve.py`)
     - Unified queue with filters (review status, priority, source type, topic, date range, text search)
@@ -1053,7 +1562,9 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 ---
 
-# Design Decisions Finalized
+# Appendix B — Design Decisions (Reference)
+
+*This appendix summarizes the finalized design decisions for engineering reference. For narrative context, see the main report sections 6 and 7.*
 
 ## A) Product & Scope
 

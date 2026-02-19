@@ -1,8 +1,9 @@
 import streamlit as st
 
-from src.ui_helpers import workflow_ribbon
+from src.ui_helpers import enforce_navigation_lock, workflow_ribbon
 
 st.set_page_config(page_title="Auto Intelligence (MVP)", layout="wide")
+enforce_navigation_lock("home")
 
 st.title("Automotive Market Intelligence (MVP)")
 workflow_ribbon(1)

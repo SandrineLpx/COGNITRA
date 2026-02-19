@@ -4,8 +4,10 @@ import json
 from pathlib import Path
 from src.storage import load_records, overwrite_records, RECORDS_PATH
 from src.dedupe import dedupe_records
+from src.ui_helpers import enforce_navigation_lock
 
 st.set_page_config(page_title="Advanced / Admin", layout="wide")
+enforce_navigation_lock("admin")
 st.title("Advanced / Admin")
 st.caption("Developer/analyst utilities.")
 

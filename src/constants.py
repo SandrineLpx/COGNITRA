@@ -46,40 +46,29 @@ CANON_TOPICS = [
 ]
 
 FOOTPRINT_REGIONS = [
-    "India",
-    "China",
-    "Western Europe",
-    "Eastern Europe",
-    "Russia",
-    "Africa",
-    "US",
-    "Mexico",
-    "Latin America",
-    "Thailand",
-    "Japan",
-    "Asia",
+    # Individual Kiekert countries (display = their own name)
+    "Czech Republic", "France", "Germany", "Italy", "Morocco",
+    "Mexico", "Portugal", "Russia", "Spain", "Sweden",
+    "United Kingdom", "United States", "Thailand", "India",
+    "China", "Taiwan", "Japan", "South Korea",
+    # Sub-regional buckets
+    "West Europe", "Central Europe", "East Europe",
+    "Africa", "Middle East",
+    "NAFTA", "ASEAN", "Indian Subcontinent",
+    "Andean", "Mercosul", "Central America",
+    "Oceania", "Rest of World",
+    # Generic catch-alls (from broad aliases: eu→Europe, asia→South Asia, etc.)
+    "Europe", "South America", "South Asia",
 ]
 
-# Display-level region buckets for regions_mentioned (no individual countries).
-# regions_relevant_to_kiekert keeps using FOOTPRINT_REGIONS for granularity.
-DISPLAY_REGIONS = [
-    "Asia",
-    "Western Europe",
-    "Eastern Europe",
-    "Africa",
-    "US",
-    "Latin America",
-]
+# Display regions = same set as FOOTPRINT_REGIONS.
+# In the new design every footprint value is its own display value
+# (individual Kiekert countries display by name; sub-regions display by market bucket).
+DISPLAY_REGIONS = FOOTPRINT_REGIONS
 
-# Collapse country-level footprint entries to display-region buckets.
-FOOTPRINT_TO_DISPLAY = {
-    "India": "Asia",
-    "China": "Asia",
-    "Japan": "Asia",
-    "Thailand": "Asia",
-    "Mexico": "Latin America",
-    "Russia": "Eastern Europe",
-}
+# No collapse mapping needed: every footprint value is already a display value.
+# Code uses FOOTPRINT_TO_DISPLAY.get(r, r) — empty dict means identity mapping.
+FOOTPRINT_TO_DISPLAY: dict = {}
 
 ALLOWED_SOURCE_TYPES = {"Bloomberg", "Automotive News", "Reuters", "Patent", "Press Release", "S&P", "MarkLines", "Financial News", "GlobalData", "Industry Publication", "Other"}
 ALLOWED_ACTOR_TYPES = {"oem", "supplier", "technology", "industry", "other"}
@@ -141,9 +130,13 @@ MACRO_THEME_RULES = [
             "keywords": [r"price\s*war", r"ev\s*export", r"electric\s*vehicle",
                          r"\bev\b", r"\bnev\b", r"battery\s*cost",
                          r"competition", r"market\s*share"],
-            "regions": {"China", "Asia"},
+            "regions": {"China", "South Asia"},
         },
         "anti_keywords": [r"ev\s*sales\s*stall", r"ev\s*slow"],
+        # Require China as an explicitly operational market (in regions_relevant_to_kiekert,
+        # derived from country_mentions). Prevents theme firing when Chinese EV brands are
+        # mentioned only as competitive backdrop in a European market registrations article.
+        "region_requirements": {"China"},
     },
     {
         "name": "Software-Defined Premium Shift",
@@ -186,10 +179,10 @@ MACRO_THEME_RULES = [
             "keywords": [r"tariff", r"trade\s*war", r"import\s*dut", r"customs",
                          r"section\s*301", r"nearshoring", r"reshoring",
                          r"trade\s*barrier", r"countervailing"],
-            "regions": {"US", "Mexico", "China", "Western Europe", "Eastern Europe", "Russia",
-                       "Latin America"},
+            "regions": {"United States", "Mexico", "China", "West Europe", "East Europe", "Russia",
+                       "South America"},
         },
-        "region_requirements": {"US", "China", "Western Europe", "Eastern Europe", "Russia"},
+        "region_requirements": {"United States", "China", "West Europe", "East Europe", "Russia"},
     },
     {
         "name": "EV Transition Slowdown",

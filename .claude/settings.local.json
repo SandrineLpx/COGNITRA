@@ -12,7 +12,8 @@
       "Bash(python:*)",
       "Bash(cd:*)",
       "Bash(head:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(findstr:*)"
     ]
   }
 }

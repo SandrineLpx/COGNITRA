@@ -24,24 +24,42 @@ COUNTRY_ALIASES = {
 }
 
 REGION_ALIASES = {
-    "u.s.": "US",
-    "usa": "US",
-    "us": "US",
-    "united states": "US",
-    "latin america": "Latin America",
-    "latam": "Latin America",
-    "south america": "Latin America",
-    "europe": "Western Europe",
-    "eu": "Western Europe",
-    "e.u.": "Western Europe",
-    "western europe": "Western Europe",
-    "eastern europe": "Eastern Europe",
+    # United States variants ("us" intentionally omitted — causes pronoun false positives)
+    "u.s.": "United States",
+    "usa": "United States",
+    "united states": "United States",
+    # Latin America / South America catch-all
+    "latin america": "South America",
+    "latam": "South America",
+    "south america": "South America",
+    # Europe generic catch-all
+    "europe": "Europe",
+    "eu": "Europe",
+    "e.u.": "Europe",
+    "europe (including russia)": "Europe",
+    # Sub-regional Europe (old long-form names → new short names)
+    "western europe": "West Europe",
+    "west europe": "West Europe",
+    "eastern europe": "East Europe",
+    "east europe": "East Europe",
+    "central europe": "Central Europe",
+    # Individual country aliases
     "russia": "Russia",
-    "europe (including russia)": "Western Europe",
-    "asia": "Asia",
-    "asia-pacific": "Asia",
-    "asia pacific": "Asia",
-    "apac": "Asia",
+    "south korea": "South Korea",
+    "korea": "South Korea",
+    # Asia generic catch-all
+    "asia": "South Asia",
+    "asia-pacific": "South Asia",
+    "asia pacific": "South Asia",
+    "apac": "South Asia",
+    "south asia": "South Asia",
+    # Sub-regional Asia / Americas
+    "asean": "ASEAN",
+    "nafta": "NAFTA",
+    "north america": "NAFTA",
+    # MEA buckets
+    "middle east": "Middle East",
+    "africa": "Africa",
 }
 
 REGULATOR_ENTITY_ALIASES = {
@@ -53,73 +71,103 @@ REGULATOR_ENTITY_ALIASES = {
     "e.u.": "EU",
 }
 
-# Country -> footprint region mapping (Option B: Western Europe / Eastern Europe / Russia)
+# Country -> footprint region mapping (derived from new_country_mapping.csv)
+# Rule: if "relevant to Kiekert" != "" → use that value; else use market bucket.
 COUNTRY_TO_FOOTPRINT = {
-    "United States": "US",
-    "Canada": "US",
-    "Russia": "Russia",
-    "Germany": "Western Europe",
-    "France": "Western Europe",
-    "Italy": "Western Europe",
-    "Spain": "Western Europe",
-    "United Kingdom": "Western Europe",
-    "Switzerland": "Western Europe",
-    "Norway": "Western Europe",
-    "Sweden": "Western Europe",
-    "Austria": "Western Europe",
-    "Belgium": "Western Europe",
-    "Netherlands": "Western Europe",
-    "Portugal": "Western Europe",
-    "Denmark": "Western Europe",
-    "Finland": "Western Europe",
-    "Ireland": "Western Europe",
-    "Poland": "Eastern Europe",
-    "Czech Republic": "Eastern Europe",
-    "Slovakia": "Eastern Europe",
-    "Hungary": "Eastern Europe",
-    "Romania": "Eastern Europe",
-    "Bulgaria": "Eastern Europe",
-    "Ukraine": "Eastern Europe",
-    "Belarus": "Eastern Europe",
-    "Serbia": "Eastern Europe",
-    "Croatia": "Eastern Europe",
-    "Slovenia": "Eastern Europe",
-    "Turkey": "Eastern Europe",
-    "Morocco": "Africa",
-    "South Africa": "Africa",
-    "Egypt": "Africa",
-    "Nigeria": "Africa",
-    "Kenya": "Africa",
-    "India": "India",
-    "China": "China",
+    # --- North America ---
+    "United States": "United States",
     "Mexico": "Mexico",
-    "Argentina": "Latin America",
-    "Brazil": "Latin America",
-    "Chile": "Latin America",
-    "Colombia": "Latin America",
-    "Peru": "Latin America",
-    "Uruguay": "Latin America",
-    "Paraguay": "Latin America",
-    "Ecuador": "Latin America",
-    "Bolivia": "Latin America",
-    "Venezuela": "Latin America",
-    "Guatemala": "Latin America",
-    "Costa Rica": "Latin America",
-    "Panama": "Latin America",
-    "Honduras": "Latin America",
-    "El Salvador": "Latin America",
-    "Nicaragua": "Latin America",
-    "Thailand": "Thailand",
+    "Canada": "NAFTA",
+    # --- West Europe (individual Kiekert countries) ---
+    "France": "France",
+    "Germany": "Germany",
+    "Italy": "Italy",
+    "Portugal": "Portugal",
+    "Spain": "Spain",
+    "Sweden": "Sweden",
+    "United Kingdom": "United Kingdom",
+    # --- West Europe (bucket countries) ---
+    "Austria": "West Europe",
+    "Belgium": "West Europe",
+    "Denmark": "West Europe",
+    "Finland": "West Europe",
+    "Ireland": "West Europe",
+    "Netherlands": "West Europe",
+    "Norway": "West Europe",
+    "Switzerland": "West Europe",
+    # --- Central Europe ---
+    "Czech Republic": "Czech Republic",  # individual Kiekert entry
+    "Bulgaria": "Central Europe",
+    "Croatia": "Central Europe",
+    "Hungary": "Central Europe",
+    "Poland": "Central Europe",
+    "Romania": "Central Europe",
+    "Serbia": "Central Europe",
+    "Slovakia": "Central Europe",
+    "Slovenia": "Central Europe",
+    # --- East Europe ---
+    "Belarus": "East Europe",
+    "Kazakhstan": "East Europe",
+    "Turkey": "East Europe",
+    "Ukraine": "East Europe",
+    "Uzbekistan": "East Europe",
+    # --- Russia (individual Kiekert entry) ---
+    "Russia": "Russia",
+    # --- Greater China ---
+    "China": "China",
+    "Taiwan": "Taiwan",
+    # --- Japan/Korea ---
     "Japan": "Japan",
-    "South Korea": "Asia",
-    "Taiwan": "Asia",
-    "Indonesia": "Asia",
-    "Vietnam": "Asia",
-    "Malaysia": "Asia",
-    "Philippines": "Asia",
-    "Singapore": "Asia",
-    "Australia": "Asia",
-    "New Zealand": "Asia",
+    "South Korea": "South Korea",
+    # --- Africa ---
+    "Algeria": "Africa",
+    "Egypt": "Africa",
+    "Kenya": "Africa",
+    "Nigeria": "Africa",
+    "South Africa": "Africa",
+    "Morocco": "Morocco",  # individual Kiekert entry
+    # --- Middle East ---
+    "Iran": "Middle East",
+    "Saudi Arabia": "Middle East",
+    # --- South America ---
+    "Argentina": "Mercosul",
+    "Brazil": "Mercosul",
+    "Paraguay": "Mercosul",
+    "Uruguay": "Mercosul",
+    "Bolivia": "Andean",
+    "Chile": "Andean",
+    "Colombia": "Andean",
+    "Ecuador": "Andean",
+    "Peru": "Andean",
+    "Venezuela": "Andean",
+    # --- Central America ---
+    "Costa Rica": "Central America",
+    "El Salvador": "Central America",
+    "Guatemala": "Central America",
+    "Honduras": "Central America",
+    "Nicaragua": "Central America",
+    "Panama": "Central America",
+    # --- South Asia / ASEAN ---
+    "India": "India",
+    "Pakistan": "Indian Subcontinent",
+    "Indonesia": "ASEAN",
+    "Malaysia": "ASEAN",
+    "Philippines": "ASEAN",
+    "Singapore": "ASEAN",
+    "Thailand": "Thailand",
+    "Vietnam": "ASEAN",
+    # --- Oceania ---
+    "Australia": "Oceania",
+    "New Zealand": "Oceania",
+    # --- Rest of World (countries not in any defined market) ---
+    "Estonia": "Rest of World",
+    "Greece": "Rest of World",
+    "Israel": "Rest of World",
+    "Kuwait": "Rest of World",
+    "Latvia": "Rest of World",
+    "Lithuania": "Rest of World",
+    "Qatar": "Rest of World",
+    "United Arab Emirates": "Rest of World",
 }
 
 _US_TEXT_RE = re.compile(
@@ -338,7 +386,7 @@ def _normalize_regions_with_migrations(regions: List[str]) -> tuple[List[str], L
         key = r0.lower()
         mapped = REGION_ALIASES.get(key, r0)
         if key == "europe (including russia)":
-            migrations.append({"from": "Europe (including Russia)", "to": "Western Europe"})
+            migrations.append({"from": "Europe (including Russia)", "to": "Europe"})
         out.append(mapped)
     return _dedupe_keep_order(out), migrations
 
@@ -608,12 +656,12 @@ def _record_text_for_region_hints(rec: Dict[str, Any]) -> str:
 
 
 _CITY_REGION_HINTS: Dict[str, List[str]] = {
-    "tokyo": ["Japan", "Asia"],
-    "osaka": ["Japan", "Asia"],
-    "nagoya": ["Japan", "Asia"],
-    "seoul": ["Asia"],
-    "taipei": ["Asia"],
-    "jakarta": ["Asia"],
+    "tokyo": ["Japan"],
+    "osaka": ["Japan"],
+    "nagoya": ["Japan"],
+    "seoul": ["South Korea"],
+    "taipei": ["Taiwan"],
+    "jakarta": ["ASEAN"],
 }
 
 
@@ -639,8 +687,8 @@ def _has_generic_europe_mention(text_l: str) -> bool:
         return False
     if not _GENERIC_EUROPE_RE.search(text_l):
         return False
-    # Generic "Europe" with no explicit sub-region marker defaults to Western Europe.
-    if re.search(r"\b(western europe|eastern europe|russia)\b", text_l):
+    # Generic "Europe" with no explicit sub-region marker defaults to catch-all "Europe".
+    if re.search(r"\b(west(?:ern)?\s*europe|east(?:ern)?\s*europe|central\s*europe|russia)\b", text_l):
         return False
     return True
 
@@ -834,15 +882,27 @@ def postprocess_record(
     hints_text = _record_text_for_region_hints(rec)
     hinted = _regions_from_text_hints(hints_text)
     if not rec["country_mentions"] and _has_generic_europe_mention(hints_text):
-        _append_audit_entry(rec, "_region_ambiguity", "Europe_generic_defaulted_to_Western_Europe")
-        if "Western Europe" not in hinted:
-            hinted.append("Western Europe")
+        _append_audit_entry(rec, "_region_ambiguity", "Europe_generic_defaulted_to_Europe")
+        if "Europe" not in hinted:
+            hinted.append("Europe")
     merged = region_items + implied + hinted
     merged = _dedupe_keep_order([r for r in _normalize_regions(merged) if r in FOOTPRINT_REGIONS])
 
-    if "US" in merged and not _has_explicit_us_signal(combined_text, rec["country_mentions"]):
-        merged = [r for r in merged if r != "US"]
+    # Use only LLM-extracted record fields (not raw source text) so that a contextual
+    # "US tariff conflicts" mention in the PDF doesn't falsely confirm a US market signal.
+    record_fields_text = _record_text(rec)
+    if "United States" in merged and not _has_explicit_us_signal(record_fields_text, rec["country_mentions"]):
+        merged = [r for r in merged if r != "United States"]
         _append_audit_entry(rec, "_region_validation_flags", "us_region_removed_no_us_evidence")
+
+    # Same principle for China: _regions_from_text_hints() can inject "China" via bare keyword
+    # substring matching (e.g. "chinese ev", "byd" in keywords/evidence triggers "china" match).
+    # Only keep "China" if it was derived from country_mentions (i.e. is already in implied).
+    # Articles that mention Chinese EV competition as context — but report no Chinese market
+    # data — should not have China promoted to a footprint region.
+    if "China" in merged and "China" not in implied:
+        merged = [r for r in merged if r != "China"]
+        _append_audit_entry(rec, "_region_validation_flags", "china_region_removed_no_china_country_mention")
 
     # Collapse country-level footprint entries to display-region buckets
     # so regions_mentioned contains only regions, not individual countries.

@@ -1,11 +1,12 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import altair as alt
 from src.storage import load_records
 from src.dedupe import dedupe_records
 from src.quality import QUALITY_RUNS_LOG, _read_jsonl
-from src.ui_helpers import safe_list, workflow_ribbon
+from src.ui_helpers import enforce_navigation_lock, safe_list, workflow_ribbon
 
 
 # ── Pure helpers (unit-testable) ──────────────────────────────────────────
@@ -74,6 +75,7 @@ def week_start(ts: pd.Series) -> pd.Series:
 # ── Page setup ────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Insights", layout="wide")
+enforce_navigation_lock("insights")
 st.title("Insights")
 workflow_ribbon(4)
 st.caption("Exploratory analytics — not required for weekly executive output.")
@@ -203,11 +205,18 @@ if "regions_relevant_to_kiekert" in fdf and "topics" in fdf:
     if not hm.empty:
         ct = pd.crosstab(hm["regions_relevant_to_kiekert"], hm["topics"])
         fig, ax = plt.subplots(figsize=(8, 2.8))
-        im = ax.imshow(ct.values, aspect="auto")
+        heatmap_cmap = LinearSegmentedColormap.from_list(
+            "region_topic_heatmap",
+            ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"],
+        )
+        im = ax.imshow(ct.values, aspect="auto", cmap=heatmap_cmap)
         ax.set_xticks(range(len(ct.columns)))
         ax.set_xticklabels(ct.columns, rotation=35, ha="right", fontsize=8)
         ax.set_yticks(range(len(ct.index)))
         ax.set_yticklabels(ct.index, fontsize=8)
+        label_size = plt.rcParams.get("axes.labelsize", 10)
+        ax.set_xlabel("Topic", fontsize=label_size)
+        ax.set_ylabel("Region", fontsize=label_size)
         ax.set_title("Signals by Footprint Region and Topic")
         fig.colorbar(im, ax=ax)
         fig.tight_layout()
@@ -393,24 +402,80 @@ if qc_runs and len(qc_runs) >= 1:
 else:
     st.info("No quality runs found. Run `python scripts/run_quality.py` to generate quality data.")
 
-# ── Drilldown ─────────────────────────────────────────────────────────────
-st.subheader("Drilldown")
-show_cols = [
-    "record_id",
-    "title",
-    "source_type",
-    "priority",
-    "confidence",
-    "review_status",
-    "publish_date",
-    "is_duplicate",
+# ── Quality KPI Breakdown ─────────────────────────────────────────────────
+st.subheader("Quality KPI Breakdown")
+st.caption("Individual KPIs that compose the scores in the Extraction Quality Score graph above.")
+
+_KPI_META = [
+    # code, label, group, format, direction, target
+    ("KPI-R1", "High-severity error rate",       "Record", "pct",   "lower",  "< 5%"),
+    ("KPI-R2", "Medium-severity error rate",     "Record", "pct",   "lower",  "< 15%"),
+    ("KPI-R3", "Evidence grounding pass rate",   "Record", "pct",   "higher", "> 80%"),
+    ("KPI-R4", "Canonicalization pass rate",     "Record", "pct",   "higher", "> 90%"),
+    ("KPI-R5", "Geo determinism pass rate",      "Record", "pct",   "higher", "> 80%"),
+    ("weighted_record_score", "Record score",    "Record", "score", "higher", "≥ 80"),
+    ("KPI-B1", "Ungrounded claims (count)",      "Brief",  "int",   "lower",  "= 0"),
+    ("KPI-B2", "Overreach citations (count)",    "Brief",  "int",   "lower",  "= 0"),
+    ("KPI-B3", "Uncertainty compliance rate",    "Brief",  "pct",   "higher", "> 80%"),
+    ("KPI-B4", "Cross-record themes cited",      "Brief",  "int",   "higher", "↑ higher"),
+    ("KPI-B5", "Action specificity (count)",     "Brief",  "int",   "higher", "↑ higher"),
+    ("weighted_brief_score",  "Brief score",     "Brief",  "score", "higher", "≥ 80"),
+    ("weighted_overall_score","Overall score",   "Overall","score", "higher", "≥ 80"),
 ]
-show_cols = [c for c in show_cols if c in fdf.columns]
-st.dataframe(fdf[show_cols].sort_values(by=["publish_date"], ascending=False), use_container_width=True, hide_index=True)
+
+if qc_runs and len(qc_runs) >= 1:
+    latest_run = qc_runs[-1]
+    prior_run  = qc_runs[-2] if len(qc_runs) >= 2 else {}
+
+    rows = []
+    for code, label, group, fmt, direction, target in _KPI_META:
+        cur  = latest_run.get(code)
+        prev = prior_run.get(code)
+
+        # Format latest value
+        if cur is None:
+            val_str = "—"
+        elif fmt == "pct":
+            val_str = f"{cur:.0%}"
+        elif fmt == "score":
+            val_str = f"{cur:.1f}"
+        else:
+            val_str = str(int(cur))
+
+        # Delta vs prior
+        if cur is not None and prev is not None:
+            delta = float(cur) - float(prev)
+            if fmt == "pct":
+                delta_str = f"{delta:+.0%}"
+            elif fmt == "score":
+                delta_str = f"{delta:+.1f}"
+            else:
+                delta_str = f"{delta:+.0f}"
+            # Arrow: ✓ good move, ✗ bad move
+            good = (direction == "higher" and delta > 0) or (direction == "lower" and delta < 0)
+            flat = delta == 0
+            arrow = "→" if flat else ("✓" if good else "✗")
+            delta_str = f"{delta_str} {arrow}"
+        else:
+            delta_str = "—"
+
+        rows.append({
+            "Group": group,
+            "KPI": code if code.startswith("KPI") else "Score",
+            "Description": label,
+            "Latest": val_str,
+            "vs Prior": delta_str,
+            "Target": target,
+        })
+
+    kpi_table = pd.DataFrame(rows)
+    st.dataframe(kpi_table, use_container_width=True, hide_index=True)
+else:
+    st.info("Run `python scripts/run_quality.py` to populate quality KPI data.")
 
 csv = fdf.to_csv(index=False).encode("utf-8")
 st.download_button(
-    "Download filtered CSV",
+    "Download filtered records CSV",
     data=csv,
     file_name="dashboard_filtered_records.csv",
     mime="text/csv",

@@ -1,13 +1,18 @@
 """
 Regression tests for regions_bucketed_deduped logic.
 
-regions_mentioned contains display-level region buckets only (no individual countries).
-regions_relevant_to_kiekert retains country-level footprint granularity.
-Country detail lives in country_mentions.
+New design (new_country_mapping.csv):
+- FOOTPRINT_TO_DISPLAY = {} (identity mapping; every footprint value is its own display value).
+- Individual Kiekert countries (France, Germany, Japan, South Korea, etc.) appear by name in
+  both regions_mentioned and regions_relevant_to_kiekert.
+- Non-individual countries collapse to their market bucket (Canada→NAFTA, Vietnam→ASEAN, etc.).
+- regions_relevant_to_kiekert is derived strictly from country_mentions.
+- regions_mentioned adds hints from record text on top of the derived values.
 
 Run with: pytest tests/test_regions_bucketed.py -v
 """
 import pytest
+from src.constants import FOOTPRINT_REGIONS
 from src.postprocess import postprocess_record
 
 
@@ -38,16 +43,15 @@ def _base_record(**overrides):
 
 
 class TestRegionsBucketedDeduped:
-    """regions_mentioned must contain only display-level region buckets."""
+    """regions_mentioned must contain only valid FOOTPRINT_REGIONS values."""
 
-    def test_bloomberg_toyota_ceo_regions_are_display_level(self):
-        """Bloomberg Toyota CEO article: regions_mentioned should have
-        display buckets (Asia, US) — not countries (Japan, China).
-        Country detail preserved in regions_relevant_to_kiekert.
+    def test_bloomberg_toyota_ceo_regions_are_valid_footprint_values(self):
+        """Bloomberg Toyota CEO article: regions_mentioned should have valid footprint
+        values — individual Kiekert countries (Japan, United States, China) appear by name.
         """
         rec = _base_record(
             title="Toyota CEO Discusses Tariff Impact in Tokyo Press Conference",
-            regions_mentioned=["Asia"],
+            regions_mentioned=["South Asia"],
             country_mentions=["Japan", "United States", "China"],
             keywords=["tariff", "Toyota", "CEO", "Tokyo"],
             evidence_bullets=[
@@ -58,19 +62,20 @@ class TestRegionsBucketedDeduped:
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
         kiekert = rec["regions_relevant_to_kiekert"]
-        # Display regions only
-        assert "Asia" in regions, f"Asia missing; got {regions}"
-        assert "US" in regions, f"US missing; got {regions}"
-        # No country-level entries in regions_mentioned
-        assert "Japan" not in regions, f"Japan should not be in regions_mentioned; got {regions}"
-        assert "China" not in regions, f"China should not be in regions_mentioned; got {regions}"
-        # Country-level detail preserved in kiekert field
+        # Individual Kiekert countries appear by name in regions_mentioned
+        assert "Japan" in regions, f"Japan missing; got {regions}"
+        assert "United States" in regions, f"United States missing; got {regions}"
+        assert "China" in regions, f"China missing; got {regions}"
+        # All values are valid footprint entries
+        for r in regions:
+            assert r in FOOTPRINT_REGIONS, f"{r} is not a valid FOOTPRINT_REGIONS value"
+        # Country-level detail also preserved in kiekert field
         assert "Japan" in kiekert, f"Japan missing from regions_relevant_to_kiekert; got {kiekert}"
         assert "China" in kiekert, f"China missing from regions_relevant_to_kiekert; got {kiekert}"
 
-    def test_japan_country_maps_to_asia_display(self):
-        """Japan in country_mentions produces 'Asia' in regions_mentioned
-        and 'Japan' in regions_relevant_to_kiekert."""
+    def test_japan_country_maps_to_own_name(self):
+        """Japan in country_mentions produces 'Japan' in both regions_mentioned
+        and regions_relevant_to_kiekert (Japan is an individual Kiekert entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Japan"],
@@ -78,13 +83,11 @@ class TestRegionsBucketedDeduped:
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
         kiekert = rec["regions_relevant_to_kiekert"]
-        assert "Asia" in regions, f"Japan did not map to Asia display; got {regions}"
-        assert "Japan" not in regions, f"Japan should not be in regions_mentioned; got {regions}"
+        assert "Japan" in regions, f"Japan missing from regions_mentioned; got {regions}"
         assert "Japan" in kiekert, f"Japan missing from regions_relevant_to_kiekert; got {kiekert}"
 
-    def test_china_country_maps_to_asia_display(self):
-        """China in country_mentions produces 'Asia' in regions_mentioned
-        and 'China' in regions_relevant_to_kiekert."""
+    def test_china_country_maps_to_own_name(self):
+        """China in country_mentions produces 'China' in both fields."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["China"],
@@ -92,12 +95,11 @@ class TestRegionsBucketedDeduped:
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
         kiekert = rec["regions_relevant_to_kiekert"]
-        assert "Asia" in regions, f"China did not map to Asia display; got {regions}"
-        assert "China" not in regions, f"China should not be in regions_mentioned; got {regions}"
+        assert "China" in regions, f"China missing from regions_mentioned; got {regions}"
         assert "China" in kiekert, f"China missing from regions_relevant_to_kiekert; got {kiekert}"
 
-    def test_india_country_maps_to_asia_display(self):
-        """India in country_mentions produces 'Asia' display region."""
+    def test_india_country_maps_to_own_name(self):
+        """India in country_mentions produces 'India' (individual Kiekert entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["India"],
@@ -105,12 +107,11 @@ class TestRegionsBucketedDeduped:
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
         kiekert = rec["regions_relevant_to_kiekert"]
-        assert "Asia" in regions, f"India did not map to Asia display; got {regions}"
-        assert "India" not in regions, f"India should not be in regions_mentioned; got {regions}"
+        assert "India" in regions, f"India missing from regions_mentioned; got {regions}"
         assert "India" in kiekert
 
-    def test_mexico_country_maps_to_latin_america_display(self):
-        """Mexico in country_mentions produces 'Latin America' display region."""
+    def test_mexico_country_maps_to_own_name(self):
+        """Mexico in country_mentions produces 'Mexico' (individual Kiekert entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Mexico"],
@@ -118,12 +119,11 @@ class TestRegionsBucketedDeduped:
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
         kiekert = rec["regions_relevant_to_kiekert"]
-        assert "Latin America" in regions, f"Mexico did not map to Latin America; got {regions}"
-        assert "Mexico" not in regions, f"Mexico should not be in regions_mentioned; got {regions}"
+        assert "Mexico" in regions, f"Mexico missing from regions_mentioned; got {regions}"
         assert "Mexico" in kiekert
 
-    def test_russia_country_maps_to_eastern_europe_display(self):
-        """Russia in country_mentions produces 'Eastern Europe' display region."""
+    def test_russia_country_maps_to_own_name(self):
+        """Russia in country_mentions produces 'Russia' (individual Kiekert entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Russia"],
@@ -131,12 +131,23 @@ class TestRegionsBucketedDeduped:
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
         kiekert = rec["regions_relevant_to_kiekert"]
-        assert "Eastern Europe" in regions, f"Russia did not map to Eastern Europe; got {regions}"
-        assert "Russia" not in regions, f"Russia should not be in regions_mentioned; got {regions}"
+        assert "Russia" in regions, f"Russia missing from regions_mentioned; got {regions}"
         assert "Russia" in kiekert
 
-    def test_tokyo_text_hint_adds_asia(self):
-        """Tokyo in text should hint Asia display region."""
+    def test_south_korea_country_maps_to_own_name(self):
+        """South Korea in country_mentions produces 'South Korea' (individual Kiekert entry)."""
+        rec = _base_record(
+            regions_mentioned=[],
+            country_mentions=["South Korea"],
+        )
+        rec = postprocess_record(rec)
+        regions = rec["regions_mentioned"]
+        kiekert = rec["regions_relevant_to_kiekert"]
+        assert "South Korea" in regions, f"South Korea missing from regions_mentioned; got {regions}"
+        assert "South Korea" in kiekert
+
+    def test_tokyo_text_hint_adds_japan(self):
+        """Tokyo in text should hint Japan (not generic Asia)."""
         rec = _base_record(
             title="Toyota announces expansion from Tokyo headquarters",
             regions_mentioned=[],
@@ -145,108 +156,120 @@ class TestRegionsBucketedDeduped:
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "Asia" in regions, f"Tokyo hint did not produce Asia; got {regions}"
+        assert "Japan" in regions, f"Tokyo hint did not produce Japan; got {regions}"
 
-    def test_south_korea_implies_asia(self):
-        """South Korea in country_mentions should derive Asia display region."""
+    def test_west_europe_bucket_preserved(self):
+        """'West Europe' is a valid bucket — should pass through unchanged."""
         rec = _base_record(
-            regions_mentioned=[],
-            country_mentions=["South Korea"],
+            regions_mentioned=["West Europe"],
+            country_mentions=[],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "Asia" in regions, f"South Korea did not derive Asia; got {regions}"
+        assert "West Europe" in regions, f"West Europe dropped; got {regions}"
 
-    def test_western_europe_unchanged(self):
-        """Western Europe is already a display region — should pass through."""
+    def test_western_europe_alias_normalized_to_west_europe(self):
+        """Legacy 'Western Europe' in regions_mentioned normalizes to 'West Europe'."""
         rec = _base_record(
             regions_mentioned=["Western Europe"],
             country_mentions=["Germany", "France"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "Western Europe" in regions, f"Western Europe dropped; got {regions}"
+        assert "West Europe" in regions, f"West Europe missing after alias normalization; got {regions}"
+        assert "Western Europe" not in regions, f"Old name should be gone; got {regions}"
+        # Individual Kiekert countries appear directly
+        assert "Germany" in regions, f"Germany missing; got {regions}"
+        assert "France" in regions, f"France missing; got {regions}"
 
-    def test_us_display_region_preserved(self):
-        """US is a display-level region — should survive."""
+    def test_us_replaced_by_united_states(self):
+        """country_mentions=['United States'] produces 'United States' in regions."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["United States"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "US" in regions, f"US dropped; got {regions}"
+        assert "United States" in regions, f"United States missing; got {regions}"
 
-    def test_multiple_asian_countries_collapse_to_single_asia(self):
-        """Multiple Asian countries should all collapse to one 'Asia' entry."""
+    def test_multiple_individual_kiekert_countries_appear_separately(self):
+        """Japan, China, India, Thailand each appear by name — no collapse to generic 'Asia'."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Japan", "China", "India", "Thailand"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert regions.count("Asia") == 1, f"Expected single Asia; got {regions}"
-        assert len(regions) == 1, f"Expected only ['Asia']; got {regions}"
-        # But kiekert retains granularity
+        assert "Japan" in regions, f"Japan missing; got {regions}"
+        assert "China" in regions, f"China missing; got {regions}"
+        assert "India" in regions, f"India missing; got {regions}"
+        assert "Thailand" in regions, f"Thailand missing; got {regions}"
+        assert "South Asia" not in regions, f"Generic South Asia should not appear; got {regions}"
+        # kiekert retains granularity
         kiekert = rec["regions_relevant_to_kiekert"]
         assert "Japan" in kiekert
         assert "China" in kiekert
         assert "India" in kiekert
         assert "Thailand" in kiekert
 
-    def test_primary_display_region_preserved_order(self):
-        """Primary region should appear before secondary derived regions."""
+    def test_primary_region_preserved_before_derived(self):
+        """Primary region_mentioned item should appear before derived items."""
         rec = _base_record(
-            regions_mentioned=["Asia"],
+            regions_mentioned=["South Asia"],
             country_mentions=["Japan", "United States"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        asia_idx = regions.index("Asia")
-        us_idx = regions.index("US")
-        assert asia_idx < us_idx, f"Asia should come before US; got {regions}"
+        # South Asia (from regions_mentioned, normalized from "Asia") comes first
+        assert "South Asia" in regions, f"South Asia missing; got {regions}"
+        south_asia_idx = regions.index("South Asia")
+        assert south_asia_idx < regions.index("Japan"), f"South Asia should come before Japan; got {regions}"
 
-    def test_canada_maps_to_us_region(self):
-        """Canada should map to US display region (USMCA trade partner)."""
+    def test_canada_maps_to_nafta_bucket(self):
+        """Canada is not a Kiekert-individual country — maps to NAFTA bucket."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Canada"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "US" in regions, f"Canada did not map to US; got {regions}"
+        assert "NAFTA" in regions, f"Canada did not map to NAFTA; got {regions}"
 
-    def test_sweden_maps_to_western_europe(self):
-        """Sweden (Volvo) should map to Western Europe."""
+    def test_sweden_maps_to_west_europe_bucket(self):
+        """Sweden (not an individual Kiekert entry) maps to West Europe bucket."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Sweden"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "Western Europe" in regions, f"Sweden did not map to Western Europe; got {regions}"
+        assert "Sweden" in regions, f"Sweden missing; got {regions}"
 
-    def test_vietnam_maps_to_asia(self):
-        """Vietnam should map to Asia display region."""
+    def test_vietnam_maps_to_asean_bucket(self):
+        """Vietnam maps to ASEAN bucket."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Vietnam"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        assert "Asia" in regions, f"Vietnam did not map to Asia; got {regions}"
+        assert "ASEAN" in regions, f"Vietnam did not map to ASEAN; got {regions}"
 
-    def test_no_country_names_in_regions_mentioned(self):
-        """regions_mentioned must never contain individual country names."""
+    def test_all_regions_mentioned_are_valid_footprint_values(self):
+        """Every value in regions_mentioned must be a valid FOOTPRINT_REGIONS entry."""
         from src.constants import FOOTPRINT_TO_DISPLAY
         rec = _base_record(
-            regions_mentioned=["India", "China", "Japan", "Thailand", "Mexico", "Russia"],
-            country_mentions=["India", "China", "Japan", "Thailand", "Mexico", "Russia"],
+            regions_mentioned=["India", "China", "Japan", "Thailand", "Mexico", "Russia",
+                               "South Korea", "United States"],
+            country_mentions=["India", "China", "Japan", "Thailand", "Mexico", "Russia",
+                              "South Korea", "United States"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        for country in FOOTPRINT_TO_DISPLAY:
-            assert country not in regions, f"{country} leaked into regions_mentioned; got {regions}"
+        for r in regions:
+            assert r in FOOTPRINT_REGIONS, f"{r} is not a valid FOOTPRINT_REGIONS value; got {regions}"
+        # FOOTPRINT_TO_DISPLAY is now empty; all footprint values = display values
+        assert FOOTPRINT_TO_DISPLAY == {}, "FOOTPRINT_TO_DISPLAY should be empty in new design"
 
 
 class TestSchemaRelaxation:

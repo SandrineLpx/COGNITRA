@@ -12,23 +12,128 @@ import streamlit as st
 from src.context_pack import select_context_chunks
 from src.model_router import choose_extraction_strategy, extract_single_pass, route_and_extract
 from src.pdf_extract import extract_pdf_publish_date_hint, extract_text_robust
-from src.postprocess import postprocess_record
+from src.postprocess import postprocess_record, summarize_rule_impact
+from src.quota_tracker import get_usage, reset_date
+from src.quality import run_quality_pipeline, run_record_only_qc
 from src.render_brief import render_intelligence_brief
 from src.schema_validate import ALLOWED_SOURCE_TYPES, validate_record
 from src.text_clean_chunk import clean_and_chunk
 from src.storage import load_records, overwrite_records
 from src.ui_helpers import (
     best_record_link,
+    enforce_navigation_lock,
     join_list,
     normalize_review_status,
+    render_navigation_lock_notice,
     safe_list,
+    set_navigation_lock,
     workflow_ribbon,
 )
 
+_RULE_LABELS = {
+    "url_normalization": "URL normalized",
+    "regions_bucketed_deduped": "Regions bucketed/deduped",
+    "footprint_and_key_oem": "Priority boost: footprint + key OEM",
+    "final_priority_after_rules": "Final priority set",
+    "priority_changed_by_rules": "Priority changed by rules",
+    "computed_confidence": "Confidence recomputed",
+}
+
+
+def _friendly_rule_name(rule: str) -> str:
+    key = str(rule or "")
+    if key in _RULE_LABELS:
+        return _RULE_LABELS[key]
+    return key.replace("_", " ").strip().capitalize() or "Unknown rule"
+
+
+def _render_rule_impact_summary(rule_counts: dict, max_rows: int = 5) -> None:
+    if not isinstance(rule_counts, dict) or not rule_counts:
+        st.caption("No overrides yet.")
+        return
+    top = sorted(rule_counts.items(), key=lambda x: int(x[1]), reverse=True)[:max_rows]
+    total = sum(int(v) for _k, v in top)
+    st.caption(f"{total} override(s) across {len(top)} top rule(s).")
+    for rule, count in top:
+        rule_key = str(rule)
+        label = _friendly_rule_name(rule_key)
+        st.caption(f"- {label}: {int(count)}")
+
+
+def _run_qc_now(
+    trigger: str,
+    *,
+    records_only: bool = False,
+    record_ids: Optional[List[str]] = None,
+) -> None:
+    try:
+        if records_only:
+            result = run_record_only_qc(record_ids=record_ids)
+        else:
+            result = run_quality_pipeline(use_latest_brief=True)
+    except Exception as exc:
+        st.session_state["qc_run_error_msg"] = f"QC run failed ({trigger}): {exc}"
+        return
+
+    scope = str(result.get("qc_scope") or "full")
+    scope_label = "record-only" if scope == "record_only" else "full"
+    rec_high = int((result.get("record_counts") or {}).get("High", 0))
+    brief_high = int((result.get("brief_counts") or {}).get("High", 0))
+    high_total = rec_high + brief_high
+    st.session_state["qc_run_success_msg"] = (
+        f"QC completed ({trigger}, {scope_label}) - run {result.get('run_id')} | "
+        f"brief={result.get('brief_id') or '(none)'} | "
+        f"target={result.get('target_record_count')} | "
+        f"high_issues={high_total} (record={rec_high}, brief={brief_high})"
+    )
+    st.session_state["qc_run_report_path"] = str(result.get("report_path") or "")
+
+
 st.set_page_config(page_title="Review & Approve", layout="wide")
+enforce_navigation_lock("review")
 st.title("Review & Approve")
 workflow_ribbon(2)
 st.caption("Review extracted records, edit JSON, and approve for weekly briefing.")
+render_navigation_lock_notice("review")
+
+with st.sidebar:
+    st.subheader("API Quota (today)")
+    st.caption(f"Resets midnight PT - tracking date: {reset_date()}")
+    usage = get_usage()
+    for model_name, info in usage.items():
+        short = model_name.replace("gemini-", "").replace("2.5-", "").replace("2.0-", "")
+        used = info["used"]
+        quota = info["quota"]
+        remaining = info["remaining"]
+        pct = used / max(quota, 1)
+        st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
+    if not usage:
+        st.caption("No calls recorded yet today.")
+
+    st.divider()
+    with st.expander("Overrides Applied", expanded=False):
+        review_run_impact = st.session_state.get("rule_impact_review_run", {})
+        if review_run_impact:
+            st.caption("This review run")
+            _render_rule_impact_summary(review_run_impact)
+        else:
+            st.caption("This review run: no overrides yet.")
+
+        today = datetime.utcnow().date()
+        today_summary = summarize_rule_impact(load_records(), date_range=(today, today))
+        if today_summary.get("top_rules"):
+            st.caption("Today (stored records)")
+            _render_rule_impact_summary(today_summary.get("top_rules") or {})
+        else:
+            st.caption("Today: no persisted override metrics.")
+
+    st.divider()
+    st.subheader("Quality QC")
+    st.caption("Runs the same checks as `python scripts/run_quality.py` using latest saved brief.")
+    if st.button("Run QC now", key="run_qc_now_review"):
+        with st.spinner("Running quality checks..."):
+            _run_qc_now(trigger="manual button")
+        st.rerun()
 
 
 def _is_valid_iso_date(value: Any) -> bool:
@@ -70,6 +175,9 @@ def _postprocess_with_checks(
         )
     ):
         raise ValueError("postprocess changed existing valid publish_date")
+    review_run_impact = st.session_state.setdefault("rule_impact_review_run", {})
+    for rule, count in rec.get("_rule_impact", {}).items():
+        review_run_impact[rule] = int(review_run_impact.get(rule, 0)) + int(count or 0)
     return rec
 
 
@@ -190,6 +298,14 @@ def _humanize_router_failure(router_log: Dict[str, Any]) -> str:
     if saw_gemini_503:
         prefix = "Failed: Gemini is temporarily overloaded (503)."
     return prefix + " " + " ".join(lines)
+
+
+def _reset_record_editor_state(record_id: str) -> None:
+    rid = str(record_id or "")
+    if not rid:
+        return
+    for prefix in ("status_", "exclude_", "reviewed_by_", "notes_", "json_editor_"):
+        st.session_state.pop(f"{prefix}{rid}", None)
 
 
 def _process_one_pdf_reingest(
@@ -623,6 +739,16 @@ with st.container():
                 st.info("Record already in this state.")
 
     st.divider()
+    if "qc_run_success_msg" in st.session_state:
+        st.success(st.session_state.pop("qc_run_success_msg"))
+    if "qc_run_report_path" in st.session_state:
+        st.caption(f"QC report: `{st.session_state.pop('qc_run_report_path')}`")
+    if "qc_run_error_msg" in st.session_state:
+        st.error(st.session_state.pop("qc_run_error_msg"))
+    if "reingest_success_msg" in st.session_state:
+        st.success(st.session_state.pop("reingest_success_msg"))
+    if "reingest_info_msg" in st.session_state:
+        st.info(st.session_state.pop("reingest_info_msg"))
     with st.expander("Iteration / Quality Fix", expanded=False):
         st.caption("Use these controls to remove bad inputs or re-run extraction from the original PDF.")
 
@@ -724,14 +850,18 @@ with st.container():
                 st.error(f"Could not read PDF for re-ingest: {exc}")
                 st.stop()
 
-            with st.spinner("Re-ingesting from stored PDF..."):
-                new_rec, new_router_log, status_msg = _process_one_pdf_reingest(
-                    pdf_bytes=pdf_bytes,
-                    filename=(pdf_path.name if pdf_path else "source.pdf"),
-                    provider_choice=reingest_provider,
-                    override_title=str(rec.get("title") or ""),
-                    override_url=str(rec.get("original_url") or ""),
-                )
+            set_navigation_lock(True, owner_page="review", reason="PDF re-ingest")
+            try:
+                with st.spinner("Re-ingesting from stored PDF..."):
+                    new_rec, new_router_log, status_msg = _process_one_pdf_reingest(
+                        pdf_bytes=pdf_bytes,
+                        filename=(pdf_path.name if pdf_path else "source.pdf"),
+                        provider_choice=reingest_provider,
+                        override_title=str(rec.get("title") or ""),
+                        override_url=str(rec.get("original_url") or ""),
+                    )
+            finally:
+                set_navigation_lock(False, owner_page="review")
 
             if new_rec is None:
                 st.error(status_msg)
@@ -773,7 +903,22 @@ with st.container():
                             break
                     if changed:
                         overwrite_records(records)
-                        st.success("Record re-ingested and replaced. Review status reset to Pending.")
+                        with st.spinner("Running QC after re-ingest..."):
+                            _run_qc_now(
+                                trigger="auto after re-ingest",
+                                records_only=True,
+                                record_ids=[record_id],
+                            )
+                        st.session_state["reingest_success_msg"] = "Record re-ingested and replaced. Review status reset to Pending."
+                        _reset_record_editor_state(record_id)
                         st.rerun()
                     else:
-                        st.info("Re-ingest completed but no field changes were detected.")
+                        with st.spinner("Running QC after re-ingest..."):
+                            _run_qc_now(
+                                trigger="auto after re-ingest",
+                                records_only=True,
+                                record_ids=[record_id],
+                            )
+                        st.session_state["reingest_info_msg"] = "Re-ingest completed. No field changes were detected."
+                        _reset_record_editor_state(record_id)
+                        st.rerun()

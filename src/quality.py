@@ -307,6 +307,38 @@ def _rec_refs(text: str) -> List[str]:
     return [m.group(1) for m in _REC_REF_RE.finditer(text or "")]
 
 
+def _resolve_rec_refs(
+    refs: Sequence[str],
+    selected_record_ids: Sequence[str],
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """Resolve REC refs against selected_record_ids.
+
+    Supports legacy numeric REC labels (REC:1..N) by mapping them to
+    selected_record_ids in list order.
+    """
+    ordered_ids = [str(x) for x in selected_record_ids if str(x)]
+    valid_set = set(ordered_ids)
+    resolved: List[str] = []
+    mapped_pairs: List[Tuple[str, str]] = []
+
+    for raw in refs:
+        ref = str(raw or "").strip()
+        if not ref:
+            continue
+        if ref in valid_set:
+            resolved.append(ref)
+            continue
+        if ref.isdigit() and ordered_ids:
+            idx = int(ref) - 1
+            if 0 <= idx < len(ordered_ids):
+                mapped = ordered_ids[idx]
+                resolved.append(mapped)
+                mapped_pairs.append((ref, mapped))
+                continue
+        resolved.append(ref)
+    return resolved, mapped_pairs
+
+
 def _hash_claim(text: str) -> str:
     return hashlib.sha1((text or "").encode("utf-8")).hexdigest()[:12]
 
@@ -1042,11 +1074,18 @@ def run_brief_qc(
             text = line.strip()
             if not text:
                 continue
-            refs = _rec_refs(text)
+            refs_raw = _rec_refs(text)
+            refs, mapped_pairs = _resolve_rec_refs(refs_raw, selected_record_ids)
             if refs:
                 invalid = [r for r in refs if valid_ids and r not in valid_ids]
                 supported = [r for r in refs if (not valid_ids) or (r in valid_ids)]
                 if invalid:
+                    mapping_note = ""
+                    if mapped_pairs:
+                        mapping_note = (
+                            " | numeric REC mapping: "
+                            + ", ".join(f"{src}->{dst}" for src, dst in mapped_pairs)
+                        )
                     findings.append(
                         _brief_finding(
                             run_id,
@@ -1057,7 +1096,7 @@ def run_brief_qc(
                             grounded_to_records=False,
                             issue_type="rec_mismatch",
                             severity="High",
-                            notes=f"REC reference(s) not in selected_record_ids: {invalid}",
+                            notes=f"REC reference(s) not in selected_record_ids: {invalid}{mapping_note}",
                         )
                     )
             elif section in _CLAIM_HEADINGS and _is_bullet_line(text):
@@ -1664,6 +1703,103 @@ def generate_extraction_feedback(
         "chronic_issues": chronic_issues,
         "prompt_suggestions": prompt_suggestions,
         "runs_analyzed": n_runs,
+    }
+
+
+def run_record_only_qc(
+    *,
+    record_ids: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
+    """Run only record-level QC checks (no brief QC)."""
+    _ensure_quality_dir()
+    run_version = _next_run_version()
+    run_id = _new_run_id()
+    created_at = _now_iso()
+
+    all_records = load_records()
+    target_mode = "all_records"
+    target_records = all_records
+    if record_ids:
+        wanted = {str(x) for x in record_ids if str(x)}
+        target_mode = "explicit_record_ids"
+        target_records = [
+            r for r in all_records if str(r.get("record_id") or "") in wanted
+        ]
+
+    record_findings, record_metrics = run_record_qc(run_id, target_records, run_version)
+    _append_jsonl(RECORD_QC_LOG, record_findings)
+
+    rec_counts = _severity_counts(record_findings)
+    n_records = len(target_records)
+
+    evidence_pass = record_metrics.get("evidence_pass") or {}
+    canonical_pass = record_metrics.get("canonical_pass") or {}
+    geo_pass = record_metrics.get("geo_pass") or {}
+
+    kpi_r1 = (rec_counts["High"] / n_records) if n_records else 0.0
+    kpi_r2 = (rec_counts["Medium"] / n_records) if n_records else 0.0
+    kpi_r3 = (sum(1 for v in evidence_pass.values() if v) / n_records) if n_records else 0.0
+    kpi_r4 = (sum(1 for v in canonical_pass.values() if v) / n_records) if n_records else 0.0
+    kpi_r5 = (sum(1 for v in geo_pass.values() if v) / n_records) if n_records else 0.0
+
+    weighted_record = _weighted_record_score(rec_counts)
+
+    run_summary = {
+        "run_id": run_id,
+        "run_version": run_version,
+        "created_at": created_at,
+        "qc_scope": "record_only",
+        "brief_id": None,
+        "week_range": None,
+        "target_mode": target_mode,
+        "target_record_count": n_records,
+        "record_qc_high": rec_counts["High"],
+        "record_qc_medium": rec_counts["Medium"],
+        "record_qc_low": rec_counts["Low"],
+        "brief_qc_high": None,
+        "brief_qc_medium": None,
+        "brief_qc_low": None,
+        "KPI-R1": round(kpi_r1, 4),
+        "KPI-R2": round(kpi_r2, 4),
+        "KPI-R3": round(kpi_r3, 4),
+        "KPI-R4": round(kpi_r4, 4),
+        "KPI-R5": round(kpi_r5, 4),
+        "KPI-B1": None,
+        "KPI-B2": None,
+        "KPI-B3": None,
+        "KPI-B4": None,
+        "KPI-B5": None,
+        "weighted_record_score": weighted_record,
+        "weighted_brief_score": None,
+        "weighted_overall_score": weighted_record,
+    }
+    _append_jsonl(QUALITY_RUNS_LOG, [run_summary])
+
+    trend_result = compute_quality_trends(run_summary)
+    feedback = generate_extraction_feedback(lookback_runs=5)
+    report_path = export_quality_excel()
+
+    issue_counter = Counter()
+    for row in record_findings:
+        issue_counter[str(row.get("finding_type") or "")] += 1
+    top_issue_types = [k for k, _ in issue_counter.most_common(3)]
+
+    return {
+        "run_id": run_id,
+        "run_version": run_version,
+        "qc_scope": "record_only",
+        "brief_id": None,
+        "week_range": None,
+        "target_record_count": n_records,
+        "record_counts": rec_counts,
+        "brief_counts": {"High": 0, "Medium": 0, "Low": 0},
+        "weighted_record_score": weighted_record,
+        "weighted_brief_score": None,
+        "top_issue_types": top_issue_types,
+        "report_path": str(report_path),
+        "run_summary": run_summary,
+        "trends": trend_result,
+        "feedback": feedback,
     }
 
 

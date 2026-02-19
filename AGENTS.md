@@ -29,6 +29,17 @@ This is the most important boundary in the codebase. Respect it.
 - **Computed fields** (`src/postprocess.py` → `postprocess_record()`): `priority`, `confidence`, `macro_themes_detected`, and all `_` prefixed audit keys are set deterministically by Python rules, never by the LLM.
 - **Guardrail**: `_COMPUTED_FIELDS` whitelist in `record_response_schema()` prevents silent misalignment between `REQUIRED_KEYS` and schema properties. If you add a field to `REQUIRED_KEYS` that isn't in schema properties or `_COMPUTED_FIELDS`, the app crashes at import time.
 
+### Extraction prompt design constraints
+
+The prompt in `model_router.py` → `extraction_prompt()` uses 13 numbered rules. Key constraints for anyone editing the prompt or reviewing extractions:
+
+- **evidence_bullets vs key_insights**: `evidence_bullets` = verbatim facts (2–4 bullets, ≤25 words each, directly grounded in source text). `key_insights` = analytical interpretation — must not repeat bullets verbatim; must add meaning.
+- **keywords**: include brands and actors that play a material role in the article. **Exclude** country names, region names, publisher names, and generic measurement phrases (e.g. "year-over-year", "production volume"). Countries belong in `country_mentions`; regions belong in `regions_mentioned`.
+- **country_mentions**: operational markets only — countries where the article's subject operates, manufactures, or sells. Not geographic color or incidental mentions.
+- **regions_mentioned**: geographic scope framing using `DISPLAY_REGIONS` display buckets only. Not operational precision.
+- **notes**: leave empty (`""`) unless there is a genuine caveat not captured by any other field (e.g., paywall-truncated content, obvious translation artifact).
+- **COMPETITORS block placement**: the closure-systems competitor list appears immediately after the actor_type rule (rule 3), so the model sees it before deciding to default to `"other"`.
+
 ### Postprocess pipeline order
 
 `postprocess_record()` runs in this order — do not reorder:
@@ -43,16 +54,20 @@ This is the most important boundary in the codebase. Respect it.
 
 ### Two-tier region architecture
 
-Two separate region concepts, validated against different allowlists:
+Region values are driven by `data/new_country_mapping.csv`. The key design principle: **every footprint value is its own display value** — `FOOTPRINT_TO_DISPLAY` is an empty dict (identity mapping).
 
-- **`DISPLAY_REGIONS`** (for `regions_mentioned`): broad geographic buckets only — `Asia`, `Western Europe`, `Eastern Europe`, `Africa`, `US`, `Latin America`. No individual countries.
-- **`FOOTPRINT_REGIONS`** (for `regions_relevant_to_kiekert`): Kiekert operational footprint with country-level granularity — `India`, `China`, `Japan`, `Thailand`, `Mexico`, `Russia`, plus all display regions.
-- **`FOOTPRINT_TO_DISPLAY`**: collapses country-level footprint entries to display buckets (India/China/Japan/Thailand → Asia, Mexico → Latin America, Russia → Eastern Europe).
+- **`FOOTPRINT_REGIONS`** / **`DISPLAY_REGIONS`**: same list (~34 values). Includes individual Kiekert-relevant countries by name (`France`, `Germany`, `Japan`, `South Korea`, `United States`, `Czech Republic`, `Morocco`, etc.) and sub-regional buckets (`West Europe`, `Central Europe`, `East Europe`, `NAFTA`, `ASEAN`, `Andean`, `Mercosul`, `Central America`, `Indian Subcontinent`, `Africa`, `Middle East`, `Oceania`, `Rest of World`) plus generic catch-alls (`Europe`, `South America`, `South Asia`).
+- **`FOOTPRINT_TO_DISPLAY`**: `{}` (empty dict). Code uses `FOOTPRINT_TO_DISPLAY.get(r, r)` — identity for all values.
+- **`COUNTRY_TO_FOOTPRINT`** in `postprocess.py`: maps ~90 countries to footprint regions. Rule from CSV: if `relevant to Kiekert` ≠ "" → use that value; else use market bucket. Countries not in the CSV → `Rest of World`.
+- **`REGION_ALIASES`** in `postprocess.py`: normalizes LLM-returned strings to canonical names. `"us"` alias intentionally absent (pronoun false-positive problem). Old long-form names are kept as aliases for backward compatibility: `"Western Europe"` → `"West Europe"`, `"Eastern Europe"` → `"East Europe"`, `"Latin America"` → `"South America"`, `"Asia"` → `"South Asia"`.
 
-Country-level detail lives in `country_mentions` (free-form list). `COUNTRY_TO_FOOTPRINT` in `postprocess.py` maps ~60 countries to footprint regions.
+Both `regions_mentioned` and `regions_relevant_to_kiekert` use the same value set. `regions_relevant_to_kiekert` is derived strictly from `country_mentions` via `COUNTRY_TO_FOOTPRINT`. `regions_mentioned` also incorporates text hints from `_regions_from_text_hints()`.
 
 Backward compatibility:
-- Legacy `Europe (including Russia)` is migrated to `Western Europe` unless Russia is explicitly present in source signals.
+- Legacy `Europe (including Russia)` is migrated to `Europe` (generic catch-all) unless Russia is explicitly present in `country_mentions`.
+- Old values (`Western Europe`, `Eastern Europe`, `Latin America`, `Asia`, `US`) in stored records should be migrated once using `scripts/migrate_region_overhaul.py --apply`.
+
+**Region guards**: `_regions_from_text_hints()` does a bare substring scan of evidence/keywords text and can inject footprint regions from incidental text. Deterministic guards in `postprocess_record()` remove `"United States"` and `"China"` from merged regions if not backed by `country_mentions`. These guards are not redundant with the extraction prompt — the prompt is probabilistic guidance; the guards are deterministic enforcement on a different code path.
 
 ### Record lifecycle
 
@@ -63,7 +78,7 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 
 1. User uploads PDF (or pastes text).
 2. System extracts text (`pdf_extract`) or uses pasted text.
-3. System builds a bounded context pack from scored chunks.
+3. System cleans and chunks the text (`text_clean_chunk`); `choose_extraction_strategy()` classifies noise level from chunk metadata and selects the initial model.
 4. Model routing executes extraction: one model call → schema validation → single repair attempt if needed → fallback provider on schema failure.
 5. Output is postprocessed (`postprocess_record`) and validated (`validate_record`).
 6. Duplicate check (exact title + similar story dedup).
@@ -79,7 +94,8 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 | `src/schema_validate.py` | Record validation (runs after postprocess) |
 | `src/briefing.py` | Weekly brief selection, rendering, LLM synthesis prompt |
 | `src/storage.py` | JSONL read/write, record IDs, PDF storage |
-| `src/dedupe.py` / `src/dedup_rank.py` | Duplicate detection and story-level dedup |
+| `src/dedupe.py` | Duplicate detection and story-level dedup (canonical implementation) |
+| `src/dedup_rank.py` | Backward-compatible wrapper around `src/dedupe.py`; not actively imported |
 | `src/render_brief.py` | Single-record intelligence brief markdown rendering |
 | `src/quality.py` | Post-hoc QC engine: record + brief checks, KPI computation, Excel export |
 | `scripts/run_quality.py` | CLI entrypoint for quality pipeline (`--latest-brief` or `--brief-id`) |

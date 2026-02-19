@@ -17,9 +17,10 @@ from src.briefing import (
     synthesize_weekly_brief_llm,
 )
 from src.storage import load_records
-from src.ui_helpers import normalize_review_status, workflow_ribbon
+from src.ui_helpers import enforce_navigation_lock, normalize_review_status, workflow_ribbon
 
 st.set_page_config(page_title="Weekly Executive Brief", layout="wide")
+enforce_navigation_lock("weekly")
 st.title("Weekly Executive Brief")
 workflow_ribbon(3)
 st.caption("This page uses Approved + included records. Edit/approve records in Review & Approve.")

@@ -76,7 +76,7 @@ class TestMacroThemeFiring:
             title="New tariff impacts US auto imports",
             keywords=["tariff", "import duty", "customs", "auto", "trade"],
             country_mentions=["United States"],
-            regions_mentioned=["US"],
+            regions_mentioned=["United States"],
         )
         rec = postprocess_record(rec)
 
@@ -199,22 +199,22 @@ class TestRegionGating:
 
 class TestRegionBucketingOptionB:
 
-    def test_germany_maps_to_western_europe(self):
+    def test_germany_maps_to_own_name(self):
         rec = _base_record(country_mentions=["Germany"])
         out = postprocess_record(rec)
-        assert "Western Europe" in out.get("regions_relevant_to_kiekert", [])
+        assert "Germany" in out.get("regions_relevant_to_kiekert", [])
 
-    def test_poland_maps_to_eastern_europe(self):
+    def test_poland_maps_to_central_europe(self):
         rec = _base_record(country_mentions=["Poland"])
         out = postprocess_record(rec)
-        assert "Eastern Europe" in out.get("regions_relevant_to_kiekert", [])
+        assert "Central Europe" in out.get("regions_relevant_to_kiekert", [])
 
     def test_russia_maps_to_russia_bucket(self):
         rec = _base_record(country_mentions=["Russia"])
         out = postprocess_record(rec)
         assert "Russia" in out.get("regions_relevant_to_kiekert", [])
 
-    def test_generic_europe_defaults_to_western_with_ambiguity_flag(self):
+    def test_generic_europe_defaults_to_europe_catch_all_with_ambiguity_flag(self):
         rec = _base_record(
             title="Europe suppliers face margin pressure",
             country_mentions=[],
@@ -222,8 +222,8 @@ class TestRegionBucketingOptionB:
             regions_relevant_to_kiekert=[],
         )
         out = postprocess_record(rec)
-        assert "Western Europe" in out.get("regions_mentioned", [])
-        assert "Europe_generic_defaulted_to_Western_Europe" in (out.get("_region_ambiguity") or [])
+        assert "Europe" in out.get("regions_mentioned", [])
+        assert "Europe_generic_defaulted_to_Europe" in (out.get("_region_ambiguity") or [])
 
     def test_legacy_europe_including_russia_migrates_to_western_only(self):
         rec = _base_record(
@@ -232,18 +232,18 @@ class TestRegionBucketingOptionB:
             regions_relevant_to_kiekert=["Europe (including Russia)"],
         )
         out = postprocess_record(rec)
-        assert "Western Europe" in out.get("regions_mentioned", [])
+        assert "Europe" in out.get("regions_mentioned", [])
         assert "Russia" not in out.get("regions_mentioned", [])
-        assert "Western Europe" in out.get("regions_relevant_to_kiekert", [])
+        assert "Europe" in out.get("regions_relevant_to_kiekert", [])
         assert "Russia" not in out.get("regions_relevant_to_kiekert", [])
         migrations = out.get("_region_migrations") or []
-        assert {"from": "Europe (including Russia)", "to": "Western Europe"} in migrations
+        assert {"from": "Europe (including Russia)", "to": "Europe"} in migrations
 
     def test_toyota_argentina_maps_to_latin_america_and_never_us_without_us_signal(self):
         rec = _base_record(
             title="Toyota Argentina production update",
             country_mentions=["Argentina"],
-            regions_mentioned=["US"],  # Simulate bad extraction.
+            regions_mentioned=["United States"],  # Simulate bad extraction.
             regions_relevant_to_kiekert=[],
             evidence_bullets=[
                 "Toyota release Feb 4, 2026 announced local program updates.",
@@ -257,9 +257,9 @@ class TestRegionBucketingOptionB:
         )
         out = postprocess_record(rec, source_text=source_text)
 
-        assert "Latin America" in out.get("regions_mentioned", [])
-        assert "US" not in out.get("regions_mentioned", [])
-        assert "Latin America" in out.get("regions_relevant_to_kiekert", [])
+        assert "Mercosul" in out.get("regions_mentioned", [])
+        assert "United States" not in out.get("regions_mentioned", [])
+        assert "Mercosul" in out.get("regions_relevant_to_kiekert", [])
 
 
 # ============================================================================

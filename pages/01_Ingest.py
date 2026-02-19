@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import re
 from collections import Counter
 from datetime import datetime
 from src.storage import load_records, new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
@@ -12,12 +13,69 @@ from src.schema_validate import validate_record
 from src.text_clean_chunk import clean_and_chunk
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
 from src.quota_tracker import get_usage, reset_date
-from src.ui_helpers import workflow_ribbon
+from src.ui_helpers import (
+    enforce_navigation_lock,
+    render_navigation_lock_notice,
+    set_navigation_lock,
+    workflow_ribbon,
+)
+
+_RULE_LABELS = {
+    "url_normalization": "URL normalized",
+    "regions_bucketed_deduped": "Regions bucketed/deduped",
+    "footprint_and_key_oem": "Priority boost: footprint + key OEM",
+    "final_priority_after_rules": "Final priority set",
+    "priority_changed_by_rules": "Priority changed by rules",
+    "computed_confidence": "Confidence recomputed",
+}
+
+
+def _friendly_rule_name(rule: str) -> str:
+    key = str(rule or "")
+    if key in _RULE_LABELS:
+        return _RULE_LABELS[key]
+    return key.replace("_", " ").strip().capitalize() or "Unknown rule"
+
+
+def _render_rule_impact_summary(rule_counts: dict, max_rows: int = 5) -> None:
+    if not isinstance(rule_counts, dict) or not rule_counts:
+        st.caption("No overrides yet.")
+        return
+
+    top = sorted(rule_counts.items(), key=lambda x: int(x[1]), reverse=True)[:max_rows]
+    total = sum(int(v) for _k, v in top)
+    st.caption(f"{total} override(s) across {len(top)} top rule(s).")
+
+    for rule, count in top:
+        rule_key = str(rule)
+        label = _friendly_rule_name(rule_key)
+        st.caption(f"- {label}: {int(count)}")
+
+
+def _title_guess_from_filename(filename: str) -> str:
+    name = str(filename or "").strip()
+    if not name:
+        return ""
+    if "\\" in name:
+        name = name.rsplit("\\", 1)[-1]
+    if "/" in name:
+        name = name.rsplit("/", 1)[-1]
+    if name.lower().endswith(".pdf"):
+        name = name[:-4]
+    if "__" in name:
+        # Stored PDFs are often "{record_id}__{original_name}".
+        name = name.split("__", 1)[1]
+    name = re.sub(r"[_\-]+", " ", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name
+
 
 st.set_page_config(page_title="Ingest", layout="wide")
+enforce_navigation_lock("ingest")
 st.title("Ingest")
 workflow_ribbon(1)
 st.info("Upload one or more PDFs to proceed, or enable 'Paste text manually'.")
+render_navigation_lock_notice("ingest")
 
 with st.sidebar:
     provider = st.selectbox("Model", ["auto","gemini","claude","chatgpt"], index=0)
@@ -25,33 +83,31 @@ with st.sidebar:
 
     # ── API Quota display ──────────────────────────────────────────────
     st.divider()
-    with st.expander("Quota details", expanded=False):
-        st.subheader("API Quota (today)")
-        st.caption(f"Resets midnight PT - tracking date: {reset_date()}")
-        usage = get_usage()
-        for model_name, info in usage.items():
-            short = model_name.replace("gemini-", "").replace("2.5-", "").replace("2.0-", "")
-            used = info["used"]
-            quota = info["quota"]
-            remaining = info["remaining"]
-            pct = used / max(quota, 1)
-            st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
-        if not usage:
-            st.caption("No calls recorded yet today.")
+    st.subheader("API Quota (today)")
+    st.caption(f"Resets midnight PT - tracking date: {reset_date()}")
+    usage = get_usage()
+    for model_name, info in usage.items():
+        short = model_name.replace("gemini-", "").replace("2.5-", "").replace("2.0-", "")
+        used = info["used"]
+        quota = info["quota"]
+        remaining = info["remaining"]
+        pct = used / max(quota, 1)
+        st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} used ({remaining} left)")
+    if not usage:
+        st.caption("No calls recorded yet today.")
     st.divider()
     with st.expander("Overrides Applied", expanded=False):
         run_impact = st.session_state.get("rule_impact_run", {})
         if run_impact:
-            top_run = sorted(run_impact.items(), key=lambda x: x[1], reverse=True)[:10]
             st.caption("This run (top rules)")
-            st.json(dict(top_run))
+            _render_rule_impact_summary(run_impact)
         else:
             st.caption("This run: no overrides yet.")
         today = datetime.utcnow().date()
         today_summary = summarize_rule_impact(load_records(), date_range=(today, today))
         if today_summary.get("top_rules"):
             st.caption("Today (stored records, top rules)")
-            st.json(today_summary.get("top_rules"))
+            _render_rule_impact_summary(today_summary.get("top_rules") or {})
         else:
             st.caption("Today: no persisted override metrics.")
 
@@ -537,28 +593,70 @@ if has_upload and not is_bulk:
 
         records = load_records()
         proposed_title = (title or uploaded.name).strip()
-        dupe = find_exact_title_duplicate(records, proposed_title)
-        if dupe:
-            st.error("Duplicate detected: an article with the same title already exists. Skipping ingestion.")
-            st.caption(
-                f"Existing record: {dupe.get('record_id')} • {dupe.get('created_at','') or 'Unknown date'}"
-            )
-            st.stop()
+        precheck_titles = [proposed_title]
+        guessed_from_file = _title_guess_from_filename(uploaded.name)
+        if guessed_from_file and guessed_from_file.lower() != proposed_title.lower():
+            precheck_titles.append(guessed_from_file)
 
-        record_id = new_record_id()
-        pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
+        for candidate_title in precheck_titles:
+            dupe = find_exact_title_duplicate(records, candidate_title)
+            if dupe:
+                st.error("Duplicate detected: an article with the same title already exists. Skipping ingestion.")
+                st.caption(
+                    f"Existing record: {dupe.get('record_id')} | {dupe.get('created_at','') or 'Unknown date'}"
+                )
+                st.stop()
+            # Avoid spending model tokens when filename/title strongly matches an existing story.
+            if len(candidate_title.split()) >= 5:
+                similar_pre = find_similar_title_records(records, candidate_title, threshold=0.88)
+                if similar_pre:
+                    best, ratio = similar_pre[0]
+                    st.error("Duplicate detected from title/filename match. Skipping before extraction.")
+                    st.caption(
+                        f"Matched record: {best.get('record_id')} | similarity={ratio:.2f} | "
+                        f"{best.get('created_at','') or 'Unknown date'}"
+                    )
+                    st.stop()
 
-        with st.spinner("Extracting..."):
-            rec, router_log, status_msg = _process_one_pdf(
-                pdf_bytes, uploaded.name, records, provider,
-                override_title=title.strip(), override_url=original_url_input.strip(),
-            )
+        set_navigation_lock(True, owner_page="ingest", reason="Ingest pipeline")
+        try:
+            with st.spinner("Extracting..."):
+                rec, router_log, status_msg = _process_one_pdf(
+                    pdf_bytes, uploaded.name, records, provider,
+                    override_title=title.strip(), override_url=original_url_input.strip(),
+                )
+        finally:
+            set_navigation_lock(False, owner_page="ingest")
 
         if rec is None:
             st.error(status_msg)
             if router_log:
                 st.json(router_log)
             st.stop()
+
+        extracted_title = str(rec.get("title") or "").strip()
+        if extracted_title and extracted_title != proposed_title:
+            dupe2 = find_exact_title_duplicate(records, extracted_title)
+            if dupe2:
+                st.error("Duplicate detected: same article already exists (matched extracted title). Skipping ingestion.")
+                st.caption(
+                    f"Existing record: {dupe2.get('record_id')} | {dupe2.get('created_at','') or 'Unknown date'}"
+                )
+                st.stop()
+
+        similar_title = extracted_title or proposed_title
+        similar = find_similar_title_records(records, similar_title, threshold=0.88)
+        if similar:
+            best, ratio = similar[0]
+            st.error("Duplicate detected: similar story already exists. Skipping ingestion.")
+            st.caption(
+                f"Matched record: {best.get('record_id')} | similarity={ratio:.2f} | "
+                f"{best.get('created_at','') or 'Unknown date'}"
+            )
+            st.stop()
+
+        record_id = new_record_id()
+        pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
 
         rec, save_status = _finalize_record(rec, router_log, record_id, pdf_path, records)
         overwrite_records(records + [rec])
@@ -577,8 +675,8 @@ if has_upload and not is_bulk:
                 f"output={usage_summary.get('output_tokens')} "
                 f"total={usage_summary.get('total_tokens')}"
             )
-        st.subheader("JSON record")
-        st.json(rec)
+        with st.expander("JSON record", expanded=False):
+            st.json(rec)
 
         st.subheader("Rendered Intelligence Brief")
         st.code(render_intelligence_brief(rec), language="markdown")
@@ -601,6 +699,7 @@ elif is_bulk:
 
     run_bulk = st.button("Run bulk pipeline", type="primary")
     if run_bulk:
+        set_navigation_lock(True, owner_page="ingest", reason="Bulk ingest pipeline")
         records = load_records()
         results = []  # list of dicts for summary table
         progress = st.progress(0, text="Starting bulk extraction...")
@@ -701,6 +800,7 @@ elif is_bulk:
 
         df = pd.DataFrame(results)
         st.dataframe(df, use_container_width=True, hide_index=True)
+        set_navigation_lock(False, owner_page="ingest")
 
 
 # ── Manual paste only (no files) ─────────────────────────────────────────
@@ -743,11 +843,15 @@ elif manual_override and has_paste:
 
         record_id = new_record_id()
 
-        with st.spinner("Extracting..."):
-            rec, router_log, status_msg = _process_one_pdf(
-                b"", "Manual Paste", records, provider,
-                override_title=title.strip(), override_url=original_url_input.strip(),
-            )
+        set_navigation_lock(True, owner_page="ingest", reason="Ingest pipeline")
+        try:
+            with st.spinner("Extracting..."):
+                rec, router_log, status_msg = _process_one_pdf(
+                    b"", "Manual Paste", records, provider,
+                    override_title=title.strip(), override_url=original_url_input.strip(),
+                )
+        finally:
+            set_navigation_lock(False, owner_page="ingest")
 
         if rec is None:
             # For manual paste, use the pasted text directly
@@ -760,7 +864,11 @@ elif manual_override and has_paste:
                 title.strip(), cleaned_text, watch_terms, topic_terms,
                 user_provided_url=original_url_input.strip(),
             )
-            rec, router_log = route_and_extract(selected["context_pack"], provider_choice=provider)
+            set_navigation_lock(True, owner_page="ingest", reason="Ingest pipeline")
+            try:
+                rec, router_log = route_and_extract(selected["context_pack"], provider_choice=provider)
+            finally:
+                set_navigation_lock(False, owner_page="ingest")
             if rec is None:
                 st.error(_humanize_router_failure(router_log))
                 if router_log:
@@ -791,8 +899,8 @@ elif manual_override and has_paste:
                 f"output={usage_summary.get('output_tokens')} "
                 f"total={usage_summary.get('total_tokens')}"
             )
-        st.subheader("JSON record")
-        st.json(rec)
+        with st.expander("JSON record", expanded=False):
+            st.json(rec)
 
         st.subheader("Rendered Intelligence Brief")
         st.code(render_intelligence_brief(rec), language="markdown")
