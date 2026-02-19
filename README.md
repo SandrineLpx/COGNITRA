@@ -25,14 +25,42 @@
 - The app surfaces chunk-count guidance and estimated API-call impact in the Ingest UI.
 
 ## Workflow navigation
-- `Ingest` -> `Review & Approve` -> `Weekly Executive Brief` -> `Insights`
-- Record governance (approve/disapprove/edit/re-ingest/delete) is centralized in `Review & Approve`.
-- `Weekly Executive Brief` is executive-focused output generation (no record status editing).
-- `Advanced / Admin` contains developer/analyst utilities and maintenance actions.
+- `01 Ingest` -> `02 Review` -> `03 Brief` -> `04 Insights` -> `Admin`
+- Record governance (approve/disapprove/edit/re-ingest/delete) is centralized in `02 Review`.
+- `03 Brief` is executive-focused output generation (no record status editing).
+- `Admin` contains developer/analyst utilities and maintenance actions.
 
-## Footprint regions
-- `India`, `China`, `Western Europe`, `Eastern Europe`, `Russia`, `Africa`, `US`, `Mexico`, `Latin America`, `Thailand`, `Japan`, `Asia`
-- Legacy `Europe (including Russia)` values are migrated to `Western Europe` unless Russia is explicitly present.
+## Region mapping
+
+Region values are defined in `data/new_country_mapping.csv` and implemented in Python constants:
+
+| What | File | Variable |
+|---|---|---|
+| Valid region values | `src/constants.py` | `FOOTPRINT_REGIONS` / `DISPLAY_REGIONS` |
+| Country → footprint | `src/postprocess.py` | `COUNTRY_TO_FOOTPRINT` |
+| LLM string aliases | `src/postprocess.py` | `REGION_ALIASES` |
+
+**Individual Kiekert countries** (appear by name in both fields): Czech Republic, France, Germany, Italy, Morocco, Mexico, Portugal, Russia, Spain, Sweden, United Kingdom, United States, Thailand, India, China, Taiwan, Japan, South Korea.
+
+**Sub-regional buckets**: West Europe, Central Europe, East Europe, Africa, Middle East, NAFTA, ASEAN, Indian Subcontinent, Andean, Mercosul, Central America, Oceania, Rest of World.
+
+**Generic catch-alls** (from broad LLM aliases): Europe, South America, South Asia.
+
+### Updating the mapping
+
+1. Edit `data/new_country_mapping.csv` — this is the design document and source of truth.
+2. Apply the changes to the Python constants:
+   - New **country row** → add entry to `COUNTRY_TO_FOOTPRINT` in `src/postprocess.py`
+   - New **footprint_region row** → add value to `FOOTPRINT_REGIONS` in `src/constants.py`
+   - New **alias row** → add entry to `REGION_ALIASES` in `src/postprocess.py`
+3. If existing records use the old value, run the migration script:
+   ```bash
+   python scripts/migrate_region_overhaul.py          # dry run
+   python scripts/migrate_region_overhaul.py --apply  # apply
+   ```
+4. Run tests to verify: `python -m pytest -q`
+
+**Drift detection**: the Home page warns automatically if the CSV and Python constants diverge. No manual check needed — just open the app after editing the CSV.
 
 ## Quality monitoring
 - Run: `python scripts/run_quality.py` (checks latest brief + its records)

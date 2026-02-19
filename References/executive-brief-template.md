@@ -31,8 +31,8 @@ Government/Regulators (if applicable)
 
 Geography
 Countries Mentioned: [list]
-Regions Mentioned (display buckets): [Asia | Western Europe | Eastern Europe | Africa | US | Latin America]
-Regions Relevant to Kiekert (footprint): [India | China | Japan | Thailand | US | Mexico | Russia | Western Europe | Eastern Europe | Africa | Latin America | Asia]
+Regions Mentioned (display buckets): [West Europe | Central Europe | East Europe | Africa | Middle East | NAFTA | ASEAN | Indian Subcontinent | Andean | Mercosul | Central America | Oceania | Rest of World | Europe | South America | South Asia | Czech Republic | France | Germany | Italy | Morocco | Mexico | Portugal | Russia | Spain | Sweden | United Kingdom | United States | Thailand | India | China | Taiwan | Japan | South Korea]
+Regions Relevant to Kiekert (footprint): same valid values as display buckets above
 
 Topics Covered (canonical)
 - [1-4 topics from the canonical list]
@@ -72,16 +72,16 @@ HIGH PRIORITY DEVELOPMENTS
 FOOTPRINT REGION SIGNALS
 Do not include regions that are not relevant.
 
-Western Europe
+West Europe
 - [1-3 bullets; include Countries: ... when applicable]
 
-Eastern Europe
+Central Europe / East Europe
 - [1-3 bullets; include Countries: ... when applicable]
 
-North America
+North America (United States / Mexico / NAFTA)
 - [1-3 bullets; include Countries: ... when applicable]
 
-Asia
+South Asia / ASEAN
 - [1-3 bullets; include Countries: ... when applicable]
 
 China

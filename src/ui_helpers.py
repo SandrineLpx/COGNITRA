@@ -1,28 +1,105 @@
 from __future__ import annotations
 
 import ast
+import json
 import time
-from typing import Any, Iterable, List, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Tuple
 
 import streamlit as st
 
 from src.constants import _LEGACY_REVIEW_MAP
 
-WORKFLOW_STEPS = ["Ingest", "Review", "Weekly Brief", "Insights"]
+WORKFLOW_STEPS = ["Ingest", "Review", "Brief", "Insights", "Admin"]
 _NAV_LOCK_ACTIVE_KEY = "_nav_lock_active"
 _NAV_LOCK_OWNER_KEY = "_nav_lock_owner"
 _NAV_LOCK_REASON_KEY = "_nav_lock_reason"
 _NAV_LOCK_SET_AT_KEY = "_nav_lock_set_at"
 _NAV_LOCK_TTL_SECONDS = 60 * 60
+DATA_DIR = Path(__file__).resolve().parents[1] / "data"
+BRIEFS_DIR = DATA_DIR / "briefs"
+BRIEF_INDEX = BRIEFS_DIR / "index.jsonl"
 
 _PAGE_SWITCH_PATHS = {
     "home": "Home.py",
     "ingest": "pages/01_Ingest.py",
-    "review": "pages/02_Review_Approve.py",
-    "weekly": "pages/03_Weekly_Executive_Brief.py",
+    "review": "pages/02_Review.py",
+    "weekly": "pages/03_Brief.py",
     "insights": "pages/04_Insights.py",
-    "admin": "pages/08_Admin.py",
+    "admin": "pages/Admin.py",
 }
+
+
+def read_jsonl(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    out: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                out.append(obj)
+    return out
+
+
+def load_brief_history() -> Dict[str, List[Dict[str, str]]]:
+    """Record->brief membership map built from saved brief index + sidecars."""
+    by_record_id: Dict[str, List[Dict[str, str]]] = {}
+    seen_rows: set[Tuple[str, str]] = set()
+
+    def _ingest_row(row: Dict[str, Any], default_file: str = "") -> None:
+        ids = row.get("selected_record_ids") or []
+        if not isinstance(ids, list):
+            return
+        file_name = Path(str(row.get("file") or default_file)).name
+        week_range = str(row.get("week_range") or "")
+        created_at = str(row.get("created_at") or "")
+        row_key = (file_name, created_at)
+        if row_key in seen_rows:
+            return
+        seen_rows.add(row_key)
+        for rid in ids:
+            rid_s = str(rid or "").strip()
+            if not rid_s:
+                continue
+            by_record_id.setdefault(rid_s, []).append(
+                {
+                    "file": file_name,
+                    "week_range": week_range,
+                    "created_at": created_at,
+                }
+            )
+
+    for row in read_jsonl(BRIEF_INDEX):
+        _ingest_row(row)
+
+    if BRIEFS_DIR.exists():
+        for sidecar in sorted(BRIEFS_DIR.glob("brief_*.meta.json")):
+            try:
+                row = json.loads(sidecar.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(row, dict):
+                continue
+            _ingest_row(row, default_file=sidecar.name.replace(".meta.json", ".md"))
+
+    return by_record_id
+
+
+def latest_brief_entry_for_record(brief_history: Dict[str, List[Dict[str, str]]], record_id: Any) -> Dict[str, str]:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return {}
+    rows = brief_history.get(rid) or []
+    if not rows:
+        return {}
+    return rows[-1]
 
 
 def normalize_review_status(value: Any) -> str:
@@ -70,9 +147,9 @@ def workflow_ribbon(current_step: int) -> None:
     chips: List[str] = []
     for idx, name in enumerate(WORKFLOW_STEPS, start=1):
         if idx == current_step:
-            chips.append(f"**{idx} {name}**")
+            chips.append(f"**{idx:02d} {name}**")
         else:
-            chips.append(f"{idx} {name}")
+            chips.append(f"{idx:02d} {name}")
     st.caption(" -> ".join(chips))
 
 

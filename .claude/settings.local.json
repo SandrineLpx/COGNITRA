@@ -13,7 +13,10 @@
       "Bash(cd:*)",
       "Bash(head:*)",
       "Bash(git mv:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(.venv/Scripts/python.exe -m py_compile:*)",
+      "Bash(.venv/Scripts/python.exe -m pyflakes:*)",
+      "Bash(.venv/Scripts/python.exe:*)"
     ]
   }
 }

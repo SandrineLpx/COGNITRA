@@ -10,7 +10,7 @@
 |---|---|---|
 | **Home** | Landing page, workflow description | `ui_helpers` |
 | **01 Ingest** | Upload PDF or paste text → extract → clean → LLM → postprocess → dedupe → save | `pdf_extract`, `text_clean_chunk`, `model_router`, `postprocess`, `schema_validate`, `dedupe`, `storage` |
-| **02 Review & Approve** | Filter queue, inspect records, edit JSON, approve/disapprove, re-ingest from stored PDF | `storage`, `model_router`, `postprocess`, `schema_validate`, `render_brief` |
+| **02 Review** | Filter queue, inspect records, edit JSON, approve/disapprove, re-ingest from stored PDF | `storage`, `model_router`, `postprocess`, `schema_validate`, `render_brief` |
 | **03 Weekly Executive Brief** | Select approved records, generate AI brief, export as MD / email, diff vs previous brief | `briefing`, `storage` |
 | **04 Insights** | Analytics: volume histogram, region×topic heatmap, topic momentum, company mentions, quality score trend, drilldown table | `storage`, `dedupe`, `quality` |
 | **08 Admin** | CSV/JSONL export, deduplication stats, demo reset | `storage`, `dedupe` |
@@ -197,7 +197,7 @@ Deterministic normalization applied after every LLM call. `priority`, `confidenc
 |---|---|
 | Company canonicalization | Normalizes OEM names via `_OEM_CANONICAL_BY_LOWER` map |
 | Country normalization | `COUNTRY_ALIASES`: USA/U.S./us → United States |
-| Region normalization | `REGION_ALIASES`: LATAM → Latin America, EU → Western Europe |
+| Region normalization | `REGION_ALIASES`: LATAM → South America, EU → Europe, "Asia" → South Asia, "Western Europe" → West Europe |
 | `regions_relevant_to_kiekert` | Derived from `country_mentions` via `COUNTRY_TO_FOOTPRINT` map; never LLM-set |
 | `priority` | Computed from source type + topic + company signals + macro theme escalation |
 | `confidence` | Computed from evidence quality, date presence, topic clarity |

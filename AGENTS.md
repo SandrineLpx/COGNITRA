@@ -100,10 +100,10 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 | `src/quality.py` | Post-hoc QC engine: record + brief checks, KPI computation, Excel export |
 | `scripts/run_quality.py` | CLI entrypoint for quality pipeline (`--latest-brief` or `--brief-id`) |
 | `pages/01_Ingest.py` | PDF upload → LLM extraction → postprocess → validate → store |
-| `pages/02_Review_Approve.py` | Queue review, record detail/edit, approve/disapprove |
-| `pages/03_Weekly_Executive_Brief.py` | Weekly brief generation and saved-brief review |
+| `pages/02_Review.py` | Queue review, record detail/edit, approve/disapprove |
+| `pages/03_Brief.py` | Weekly brief generation and saved-brief review |
 | `pages/04_Insights.py` | Analytics and trend monitoring |
-| `pages/08_Admin.py` | Advanced/admin utilities |
+| `pages/Admin.py` | Advanced/admin utilities |
 
 ## How to add a new macro theme
 
@@ -117,12 +117,12 @@ Append a dict to `MACRO_THEME_RULES` in `src/constants.py`. No code changes need
         "companies": {"company_a", "company_b"},   # lowercased
         "keywords": [r"regex_pattern"],             # searched in title, evidence_bullets, key_insights, keywords
         "topics": {"Canonical Topic Name"},         # exact match against CANON_TOPICS
-        "regions": {"US", "China"},                 # match against regions_mentioned + regions_relevant_to_kiekert
+        "regions": {"United States", "China"},        # match against regions_mentioned + regions_relevant_to_kiekert
     },
     # Optional:
     "anti_keywords": [r"pattern"],      # suppress if matched and <3 groups hit
     "premium_company_gate": True,       # require company in PREMIUM_OEMS
-    "region_requirements": {"US"},      # require at least one of these regions present
+    "region_requirements": {"United States"},  # require at least one of these regions present
     "rollup": "Cluster Label",          # shared label for overlapping themes
 }
 ```

@@ -3,10 +3,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import altair as alt
+from collections import Counter
+from src import ui
 from src.storage import load_records
 from src.dedupe import dedupe_records
 from src.quality import QUALITY_RUNS_LOG, _read_jsonl
-from src.ui_helpers import enforce_navigation_lock, safe_list, workflow_ribbon
+from src.ui_helpers import enforce_navigation_lock, safe_list
 
 
 # ── Pure helpers (unit-testable) ──────────────────────────────────────────
@@ -72,19 +74,43 @@ def week_start(ts: pd.Series) -> pd.Series:
     return ts.dt.to_period("W-SUN").apply(lambda p: p.start_time)
 
 
+def to_record_table(df_rows: pd.DataFrame) -> pd.DataFrame:
+    cols = [
+        "record_id",
+        "title",
+        "source_type",
+        "publish_date",
+        "created_at",
+        "priority",
+        "confidence",
+        "review_status",
+    ]
+    keep = [c for c in cols if c in df_rows.columns]
+    if not keep:
+        return pd.DataFrame()
+    return df_rows[keep].copy()
+
+
 # ── Page setup ────────────────────────────────────────────────────────────
 
-st.set_page_config(page_title="Insights", layout="wide")
+st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("insights")
-st.title("Insights")
-workflow_ribbon(4)
+ui.init_page(active_step="Insights")
+ui.render_page_header(
+    "04 Insights",
+    subtitle="Trend monitoring for approved intelligence records",
+    active_step="Insights",
+)
 st.caption("Exploratory analytics — not required for weekly executive output.")
-st.caption("Optional analytics and trend monitoring for approved intelligence records.")
+with ui.card("Insight Scope", "Exploratory analytics that support the weekly brief."):
+    st.caption("Optional analytics and trend monitoring for approved intelligence records.")
 
 with st.sidebar:
     st.subheader("Data Mode")
     show_canonical_only = st.checkbox("Show canonical stories only", value=False)
     st.caption("Canonical: deduplicated (one story per source group).")
+
+ui.render_sidebar_utilities(model_label="analytics")
 
 records = load_records()
 if not records:
@@ -159,6 +185,45 @@ if fdf.empty:
     st.stop()
 
 # ── KPI ───────────────────────────────────────────────────────────────────
+st.subheader("Executive Snapshot")
+ref_today = pd.Timestamp.today().normalize()
+recent_cutoff = ref_today - pd.Timedelta(days=7)
+prior_cutoff = ref_today - pd.Timedelta(days=14)
+recent = fdf[fdf["event_day"] >= recent_cutoff].copy()
+prior = fdf[(fdf["event_day"] >= prior_cutoff) & (fdf["event_day"] < recent_cutoff)].copy()
+
+recent_themes = Counter(str(x) for vals in recent.get("macro_themes_detected", []) for x in safe_list(vals))
+prior_themes = Counter(str(x) for vals in prior.get("macro_themes_detected", []) for x in safe_list(vals))
+recent_theme_total = sum(recent_themes.values())
+prior_theme_total = sum(prior_themes.values())
+theme_delta = recent_theme_total - prior_theme_total
+
+recent_regions = Counter(str(x) for vals in recent.get("regions_relevant_to_kiekert", []) for x in safe_list(vals))
+top_region = recent_regions.most_common(1)[0][0] if recent_regions else "-"
+top_region_count = recent_regions.most_common(1)[0][1] if recent_regions else 0
+
+stress_signals = 0
+for vals in recent.get("macro_themes_detected", []):
+    for name in safe_list(vals):
+        ln = str(name).lower()
+        if "stress" in ln or "compression" in ln or "premium" in ln or "strategy" in ln:
+            stress_signals += 1
+            break
+
+low_conf_rate = (
+    float((recent.get("confidence", pd.Series(dtype=str)) == "Low").sum()) / max(len(recent), 1)
+    if not recent.empty
+    else 0.0
+)
+latest_qc = (_read_jsonl(QUALITY_RUNS_LOG) or [{}])[-1]
+latest_qc_high = int((latest_qc.get("record_counts") or {}).get("High", 0)) + int((latest_qc.get("brief_counts") or {}).get("High", 0))
+
+sx1, sx2, sx3, sx4 = st.columns(4)
+sx1.metric("Macro theme momentum (WoW)", recent_theme_total, delta=theme_delta)
+sx2.metric("Footprint signal density", f"{top_region} ({top_region_count})")
+sx3.metric("OEM stress/strategy signals (7d)", stress_signals)
+sx4.metric("Confidence/quality health", f"Low conf {low_conf_rate:.0%} | QC high {latest_qc_high}")
+
 st.subheader("KPI")
 k1, k2, k3, k4, k5, k6 = st.columns(6)
 k1.metric("Records", len(fdf))
@@ -191,7 +256,7 @@ if not weekly.empty:
         )
         .properties(height=280)
     )
-    st.altair_chart(chart, use_container_width=True)
+    st.altair_chart(chart, width='stretch')
 else:
     st.caption("No dated records for weekly histogram.")
 
@@ -278,12 +343,12 @@ if not dated_rows.empty and "topics" in dated_rows:
             .properties(height=max(180, len(momentum) * 28))
         )
         rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule().encode(x="x:Q")
-        st.altair_chart(chart + rule, use_container_width=True)
+        st.altair_chart(chart + rule, width='stretch')
 
         # Detail table below
         st.dataframe(
             momentum[["topic", "prior", "recent", "delta", "pct_change", "class"]].sort_values("delta", ascending=False),
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
         )
     else:
@@ -396,7 +461,7 @@ if qc_runs and len(qc_runs) >= 1:
                 ), legend=alt.Legend(title="Thresholds")),
             )
 
-            st.altair_chart(lines + rules, use_container_width=True)
+            st.altair_chart(lines + rules, width='stretch')
     else:
         st.caption("Need at least 2 QC runs to show trend chart.")
 else:
@@ -469,9 +534,45 @@ if qc_runs and len(qc_runs) >= 1:
         })
 
     kpi_table = pd.DataFrame(rows)
-    st.dataframe(kpi_table, use_container_width=True, hide_index=True)
+    st.dataframe(kpi_table, width='stretch', hide_index=True)
 else:
     st.info("Run `python scripts/run_quality.py` to populate quality KPI data.")
+
+st.subheader("Drilldown Views")
+t_theme, t_region, t_company = st.tabs(["By Theme", "By Region", "By Company"])
+with t_theme:
+    theme_options = sorted({str(x) for vals in fdf.get("macro_themes_detected", []) for x in safe_list(vals) if str(x).strip()})
+    if not theme_options:
+        theme_options = sorted({str(x) for vals in fdf.get("topics", []) for x in safe_list(vals) if str(x).strip()})
+    if theme_options:
+        theme_pick = st.selectbox("Theme", options=theme_options, key="ins_theme_pick")
+        theme_mask = fdf.get("macro_themes_detected", pd.Series(dtype=object)).apply(lambda vals: theme_pick in safe_list(vals))
+        if theme_mask.sum() == 0:
+            theme_mask = fdf.get("topics", pd.Series(dtype=object)).apply(lambda vals: theme_pick in safe_list(vals))
+        theme_df = fdf[theme_mask].copy()
+        st.dataframe(to_record_table(theme_df), width='stretch', hide_index=True)
+    else:
+        st.caption("No theme data available.")
+
+with t_region:
+    region_options = sorted({str(x) for vals in fdf.get("regions_relevant_to_kiekert", []) for x in safe_list(vals) if str(x).strip()})
+    if region_options:
+        region_pick = st.selectbox("Region", options=region_options, key="ins_region_pick")
+        region_df = fdf[fdf.get("regions_relevant_to_kiekert", pd.Series(dtype=object)).apply(lambda vals: region_pick in safe_list(vals))].copy()
+        st.dataframe(to_record_table(region_df), width='stretch', hide_index=True)
+    else:
+        st.caption("No region data available.")
+
+with t_company:
+    company_rows = explode_list_column(fdf[["record_id", "companies_mentioned"]].copy(), "companies_mentioned")
+    company_options = sorted(company_rows["companies_mentioned"].astype(str).unique().tolist()) if not company_rows.empty else []
+    if company_options:
+        company_pick = st.selectbox("Company", options=company_options, key="ins_company_pick")
+        wanted_ids = set(company_rows.loc[company_rows["companies_mentioned"] == company_pick, "record_id"].astype(str).tolist())
+        company_df = fdf[fdf.get("record_id", pd.Series(dtype=str)).astype(str).isin(wanted_ids)].copy()
+        st.dataframe(to_record_table(company_df), width='stretch', hide_index=True)
+    else:
+        st.caption("No company data available.")
 
 csv = fdf.to_csv(index=False).encode("utf-8")
 st.download_button(

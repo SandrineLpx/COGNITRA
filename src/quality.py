@@ -627,22 +627,20 @@ def _check_geo_completeness(
     footprint_regions = _to_str_list(rec.get("regions_relevant_to_kiekert"))
     display_regions = _to_str_list(rec.get("regions_mentioned"))
 
-    # Check for display bucket leakage into footprint field
-    # Country-level footprint entries (India, China, Japan, Thailand, Mexico, Russia)
-    # are valid in footprint but NOT in display. Conversely, display-only values
-    # (Asia, Latin America) should not appear in footprint unless they're in FOOTPRINT_REGIONS.
-    footprint_only = _FOOTPRINT_SET - _DISPLAY_SET  # e.g., India, China, Japan, etc.
-    display_leaks = [r for r in display_regions if r in footprint_only]
-    if display_leaks:
+    # In the new region design FOOTPRINT_REGIONS == DISPLAY_REGIONS (same set),
+    # so every valid footprint value is also a valid display value.
+    # Check that all values in regions_mentioned are valid FOOTPRINT_REGIONS entries.
+    invalid_display = [r for r in display_regions if r not in _FOOTPRINT_SET]
+    if invalid_display:
         geo_ok = False
         findings.append(_record_finding(
             run_id, rec,
-            finding_type="display_bucket_leakage",
+            finding_type="invalid_display_region",
             field="regions_mentioned",
             severity="High",
             grounded="Yes",
-            impact="Country-level regions in display field distort broad geographic rollups.",
-            notes=f"Footprint-only values in regions_mentioned: {display_leaks}. Should use display buckets (e.g., Asia, Latin America).",
+            impact="Unknown region value in regions_mentioned — not in FOOTPRINT_REGIONS.",
+            notes=f"Invalid values in regions_mentioned: {invalid_display}. Must be one of the canonical FOOTPRINT_REGIONS entries.",
         ))
 
     # Check for missing footprint regions when countries are present

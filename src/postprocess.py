@@ -176,6 +176,95 @@ _US_TEXT_RE = re.compile(
 )
 
 
+def validate_csv_consistency(csv_path: str = "data/new_country_mapping.csv") -> list[str]:
+    """
+    Compare COUNTRY_TO_FOOTPRINT and FOOTPRINT_REGIONS against new_country_mapping.csv.
+
+    Returns a list of human-readable warning strings describing any divergence.
+    Returns an empty list when everything is in sync (or the CSV is missing).
+
+    Called from Home.py at startup so the analyst sees a visible warning before
+    editing either the CSV or the Python constants.
+    """
+    import csv
+    import os
+
+    if not os.path.exists(csv_path):
+        return []
+
+    warnings: list[str] = []
+
+    # --- Build expected COUNTRY_TO_FOOTPRINT from CSV country rows ---
+    # Rule: if relevant_to_kiekert != "" → use that; else if market != "" → use market; else region.
+    csv_country_map: dict[str, str] = {}
+    csv_footprint_values: set[str] = set()
+
+    # utf-8-sig strips BOM if present; the first CSV column is named "country"
+    # but its values are the row-type tokens ("country", "alias", "footprint_region").
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        # Normalise fieldnames to strip accidental whitespace/BOM residue
+        if reader.fieldnames:
+            reader.fieldnames = [n.strip() for n in reader.fieldnames]
+        # The first column is named "country" and holds the row-type token.
+        # The "relevant to Kiekert" column may have a variant spelling in the CSV;
+        # detect it by prefix match so the checker isn't fragile to typos.
+        _ROW_TYPE_COL = "country"
+        _relevant_col = next(
+            (f for f in (reader.fieldnames or []) if f.lower().startswith("relevant")),
+            "relevant to Kiekert",
+        )
+        for row in reader:
+            row_type = (row.get(_ROW_TYPE_COL) or "").strip()
+            entry    = (row.get("entry") or "").strip()
+            region   = (row.get("region") or "").strip()
+            market   = (row.get("market") or "").strip()
+            relevant = (row.get(_relevant_col) or "").strip()
+            display  = (row.get("display") or "").strip()
+
+            if row_type == "country" and entry:
+                footprint = relevant or market or region
+                if footprint:
+                    csv_country_map[entry] = footprint
+
+            elif row_type == "footprint_region" and entry:
+                csv_footprint_values.add(entry)
+                if display:
+                    csv_footprint_values.add(display)
+
+            elif row_type == "alias" and display:
+                csv_footprint_values.add(display)
+
+    # Check 1: countries in CSV but missing from COUNTRY_TO_FOOTPRINT
+    for country, expected in csv_country_map.items():
+        actual = COUNTRY_TO_FOOTPRINT.get(country)
+        if actual is None:
+            warnings.append(f"CSV country '{country}' is not in COUNTRY_TO_FOOTPRINT")
+        elif actual != expected:
+            warnings.append(
+                f"CSV country '{country}': CSV expects '{expected}', "
+                f"Python has '{actual}'"
+            )
+
+    # Check 2: countries in Python that map to "Rest of World" but aren't in the CSV are expected
+    # (they were added as deliberate catch-alls). Only flag genuine unknowns.
+    for country, footprint in COUNTRY_TO_FOOTPRINT.items():
+        if country not in csv_country_map and footprint != "Rest of World":
+            warnings.append(
+                f"COUNTRY_TO_FOOTPRINT has '{country}' → '{footprint}' "
+                f"but it is not in the CSV"
+            )
+
+    # Check 3: footprint values in CSV not in FOOTPRINT_REGIONS
+    from src.constants import FOOTPRINT_REGIONS
+    fp_set = set(FOOTPRINT_REGIONS)
+    for val in sorted(csv_footprint_values):
+        if val and val not in fp_set:
+            warnings.append(f"CSV display/footprint value '{val}' is not in FOOTPRINT_REGIONS")
+
+    return warnings
+
+
 def _has_explicit_us_signal(text: str, country_mentions: List[str]) -> bool:
     countries = {str(c).strip().lower() for c in (country_mentions or [])}
     if "united states" in countries or "canada" in countries:
