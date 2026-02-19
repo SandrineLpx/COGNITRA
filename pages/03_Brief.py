@@ -7,6 +7,8 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import re
+
 import pandas as pd
 import streamlit as st
 
@@ -23,6 +25,49 @@ from src.ui_helpers import (
     load_records_cached,
     normalize_review_status,
 )
+
+def _render_brief(text: str) -> None:
+    """Render LLM brief markdown with two display fixes:
+
+    1. Dollar-sign escaping — bare '$' in text (e.g. "US$19.5 billion") are
+       treated by Streamlit as LaTeX math delimiters, producing garbled italic
+       output.  We escape every '$' that is NOT already preceded by a backslash
+       and is NOT part of a code span.
+
+    2. Supplier Implications indent — the prompt asks the model to write
+       "    Supplier Implications: …" as an indented continuation inside a
+       bullet.  Streamlit collapses leading spaces, so we convert that pattern
+       to a blockquote line so it renders visually distinct.
+    """
+    if not text:
+        return
+
+    # ── Fix 1: escape bare dollar signs ──────────────────────────────────────
+    # Replace $ not already escaped with \$, but leave code spans alone.
+    # Strategy: split on `` ` `` code spans, escape only non-code segments.
+    parts = re.split(r"(`[^`]*`)", text)
+    escaped_parts = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            # Inside a code span — leave untouched
+            escaped_parts.append(part)
+        else:
+            # Outside code — escape unescaped dollar signs
+            escaped_parts.append(re.sub(r"(?<!\\)\$", r"\\$", part))
+    text = "".join(escaped_parts)
+
+    # ── Fix 2: render "Supplier Implications:" as indented blockquote ────────
+    # Matches lines that are (optional whitespace) + "Supplier Implications:"
+    # and converts them to "> **Supplier Implications:** …"
+    text = re.sub(
+        r"^[ \t]+(Supplier Implications:)\s*(.*)$",
+        r"> **\1** \2",
+        text,
+        flags=re.MULTILINE,
+    )
+
+    st.markdown(text)
+
 
 st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("weekly")
@@ -368,7 +413,7 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
         f"records={chosen.get('record_count')}"
     )
     if chosen_path.exists():
-        st.markdown(chosen_path.read_text(encoding="utf-8"))
+        _render_brief(chosen_path.read_text(encoding="utf-8"))
     else:
         st.warning("Saved brief markdown file was not found on disk.")
 
@@ -744,7 +789,7 @@ with preview_col:
 with ai_col:
     st.subheader("AI Brief")
     if saved_text:
-        st.markdown(saved_text)
+        _render_brief(saved_text)
         st.caption(
             f"Model: {saved_usage.get('model', 'unknown')} | "
             f"prompt={saved_usage.get('prompt_tokens', '?')} "
