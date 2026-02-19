@@ -26,48 +26,86 @@ from src.ui_helpers import (
     normalize_review_status,
 )
 
-def _render_brief(text: str) -> None:
-    """Render LLM brief markdown with two display fixes:
-
-    1. Dollar-sign escaping — bare '$' in text (e.g. "US$19.5 billion") are
-       treated by Streamlit as LaTeX math delimiters, producing garbled italic
-       output.  We escape every '$' that is NOT already preceded by a backslash
-       and is NOT part of a code span.
-
-    2. Supplier Implications indent — the prompt asks the model to write
-       "    Supplier Implications: …" as an indented continuation inside a
-       bullet.  Streamlit collapses leading spaces, so we convert that pattern
-       to a blockquote line so it renders visually distinct.
-    """
+def _normalize_brief_markdown(text: str) -> str:
+    """Apply markdown safety/display normalization for generated brief text."""
     if not text:
-        return
+        return ""
 
-    # ── Fix 1: escape bare dollar signs ──────────────────────────────────────
-    # Replace $ not already escaped with \$, but leave code spans alone.
-    # Strategy: split on `` ` `` code spans, escape only non-code segments.
+    # Escape bare dollar signs outside inline code spans.
     parts = re.split(r"(`[^`]*`)", text)
-    escaped_parts = []
+    escaped_parts: List[str] = []
     for i, part in enumerate(parts):
         if i % 2 == 1:
-            # Inside a code span — leave untouched
             escaped_parts.append(part)
         else:
-            # Outside code — escape unescaped dollar signs
             escaped_parts.append(re.sub(r"(?<!\\)\$", r"\\$", part))
     text = "".join(escaped_parts)
 
-    # ── Fix 2: render "Supplier Implications:" as indented blockquote ────────
-    # Matches lines that are (optional whitespace) + "Supplier Implications:"
-    # and converts them to "> **Supplier Implications:** …"
+    # Render indented Supplier Implications lines as blockquote lines.
     text = re.sub(
         r"^[ \t]+(Supplier Implications:)\s*(.*)$",
         r"> **\1** \2",
         text,
         flags=re.MULTILINE,
     )
+    return text
 
-    st.markdown(text)
 
+def _render_brief(text: str) -> None:
+    normalized = _normalize_brief_markdown(text)
+    if normalized:
+        st.markdown(normalized)
+
+
+_BRIEF_SECTION_HEADERS = [
+    "AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF",
+    "EXECUTIVE SUMMARY",
+    "HIGH PRIORITY DEVELOPMENTS",
+    "FOOTPRINT REGION SIGNALS",
+    "KEY DEVELOPMENTS BY TOPIC",
+    "EMERGING TRENDS",
+    "CONFLICTS & UNCERTAINTY",
+    "RECOMMENDED ACTIONS",
+    "APPENDIX",
+]
+
+
+def _split_brief_sections(text: str) -> List[Tuple[str, str]]:
+    lines = (text or "").splitlines()
+    if not lines:
+        return []
+
+    header_set = {h.upper() for h in _BRIEF_SECTION_HEADERS}
+    marks: List[Tuple[int, str]] = []
+    for idx, raw in enumerate(lines):
+        line = str(raw).strip()
+        if line and line.upper() in header_set:
+            marks.append((idx, line.upper()))
+
+    if not marks:
+        return []
+
+    sections: List[Tuple[str, str]] = []
+    for i, (start_idx, header) in enumerate(marks):
+        end_idx = marks[i + 1][0] if i + 1 < len(marks) else len(lines)
+        body = "\n".join(lines[start_idx + 1:end_idx]).strip()
+        sections.append((header, body))
+    return sections
+
+
+def _render_brief_collapsible(text: str) -> None:
+    normalized = _normalize_brief_markdown(text)
+    sections = _split_brief_sections(normalized)
+    if not sections:
+        _render_brief(normalized)
+        return
+
+    for idx, (header, body) in enumerate(sections):
+        with st.expander(header, expanded=(idx == 0)):
+            if body:
+                st.markdown(body)
+            else:
+                st.caption("No content in this section.")
 
 st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("weekly")
@@ -737,7 +775,6 @@ edited_df = st.data_editor(
 selected_ids = edited_df.loc[edited_df["Include"], "record_id"].astype(str).tolist() if not edited_df.empty else []
 selected_set = set(selected_ids)
 selected_records = [r for r in candidates if str(r.get("record_id")) in selected_set]
-st.metric("Records Selected for Brief", len(selected_records))
 
 eligible_ids = set(default_ids)
 missing_approved = eligible_ids - selected_set
@@ -781,36 +818,33 @@ saved_week_range = st.session_state.get("weekly_ai_brief_week_range", week_range
 saved_ids = st.session_state.get("weekly_ai_brief_selected_ids", selected_ids) if saved_text else selected_ids
 brief_md = render_weekly_brief_md(selected_records, week_range)
 
-preview_col, ai_col = st.columns([1, 1])
-with preview_col:
-    st.subheader("Deterministic Preview")
+with st.expander("Deterministic Preview", expanded=False):
     st.code(brief_md, language="markdown")
 
-with ai_col:
-    st.subheader("AI Brief")
-    if saved_text:
-        _render_brief(saved_text)
-        st.caption(
-            f"Model: {saved_usage.get('model', 'unknown')} | "
-            f"prompt={saved_usage.get('prompt_tokens', '?')} "
-            f"output={saved_usage.get('output_tokens', '?')} "
-            f"total={saved_usage.get('total_tokens', '?')} | "
-            f"attempts={saved_usage.get('attempts', 1)} | "
-            f"validation_err={saved_usage.get('validation_errors_final', 0)}"
+st.subheader("AI Brief")
+if saved_text:
+    _render_brief_collapsible(saved_text)
+    st.caption(
+        f"Model: {saved_usage.get('model', 'unknown')} | "
+        f"prompt={saved_usage.get('prompt_tokens', '?')} "
+        f"output={saved_usage.get('output_tokens', '?')} "
+        f"total={saved_usage.get('total_tokens', '?')} | "
+        f"attempts={saved_usage.get('attempts', 1)} | "
+        f"validation_err={saved_usage.get('validation_errors_final', 0)}"
+    )
+    a1, a2 = st.columns(2)
+    with a1:
+        if st.button("Save brief"):
+            path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
+            st.success(f"Saved: {path}")
+    with a2:
+        st.download_button(
+            "Download brief",
+            data=saved_text.encode("utf-8"),
+            file_name=f"weekly_brief_{saved_week_range.replace(' ', '_')}.md",
+            mime="text/markdown",
         )
-        a1, a2 = st.columns(2)
-        with a1:
-            if st.button("Save brief"):
-                path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
-                st.success(f"Saved: {path}")
-        with a2:
-            st.download_button(
-                "Download brief",
-                data=saved_text.encode("utf-8"),
-                file_name=f"weekly_brief_{saved_week_range.replace(' ', '_')}.md",
-                mime="text/markdown",
-            )
-        with st.expander("Copy / Export (raw text)", expanded=False):
-            st.text_area("Copy-friendly version", value=saved_text, height=280)
-    else:
-        st.info("Generate the AI brief to compare it side-by-side with the deterministic preview.")
+    with st.expander("Copy / Export (raw text)", expanded=False):
+        st.text_area("Copy-friendly version", value=saved_text, height=280)
+else:
+    st.info("Generate the AI brief to compare it with the deterministic preview.")

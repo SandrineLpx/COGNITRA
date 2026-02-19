@@ -194,10 +194,11 @@ def _inject_css() -> None:
 
 [data-testid="stMarkdownContainer"] h3,
 .stSubheader {
-  letter-spacing: 0.08em;
-  font-variant: small-caps;
+  font-family: inherit;
+  letter-spacing: normal;
+  font-variant: normal;
   font-weight: 600;
-  color: #1E293B;
+  color: var(--cg-text-primary);
 }
 
 .cg-badge {
