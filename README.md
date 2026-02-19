@@ -3,8 +3,8 @@
 ## Run locally
 1) Create a virtual environment
 2) Install dependencies:
-   - `pip install -r requirements.txt`
-   - or `pip install .[dev]`
+   - **Production**: `pip install -r requirements.txt` (or `pip install .`)
+   - **Development** (includes pytest): `pip install .[dev]`
 3) Run:
    ```bash
    streamlit run Home.py
@@ -40,7 +40,7 @@ Region values are defined in `data/new_country_mapping.csv` and implemented in P
 | Country → footprint | `src/postprocess.py` | `COUNTRY_TO_FOOTPRINT` |
 | LLM string aliases | `src/postprocess.py` | `REGION_ALIASES` |
 
-**Individual Kiekert countries** (appear by name in both fields): Czech Republic, France, Germany, Italy, Morocco, Mexico, Portugal, Russia, Spain, Sweden, United Kingdom, United States, Thailand, India, China, Taiwan, Japan, South Korea.
+**Individual Apex Mobility countries** (appear by name in both fields): Czech Republic, France, Germany, Italy, Morocco, Mexico, Portugal, Russia, Spain, Sweden, United Kingdom, United States, Thailand, India, China, Taiwan, Japan, South Korea.
 
 **Sub-regional buckets**: West Europe, Central Europe, East Europe, Africa, Middle East, NAFTA, ASEAN, Indian Subcontinent, Andean, Mercosul, Central America, Oceania, Rest of World.
 

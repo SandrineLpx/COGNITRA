@@ -19,7 +19,7 @@ def _base_record(**overrides):
         "keywords": ["toyota", "argentina", "release", "production", "platform"],
         "country_mentions": ["Argentina"],
         "regions_mentioned": [],
-        "regions_relevant_to_kiekert": [],
+        "regions_relevant_to_apex_mobility": [],
         "evidence_bullets": [
             "Toyota release Feb 4, 2026 announced local program updates.",
             "Argentina operations update was included in the release.",

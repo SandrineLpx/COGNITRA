@@ -46,7 +46,7 @@ CANON_TOPICS = [
 ]
 
 FOOTPRINT_REGIONS = [
-    # Individual Kiekert countries (display = their own name)
+    # Individual Apex Mobility countries (display = their own name)
     "Czech Republic", "France", "Germany", "Italy", "Morocco",
     "Mexico", "Portugal", "Russia", "Spain", "Sweden",
     "United Kingdom", "United States", "Thailand", "India",
@@ -63,7 +63,7 @@ FOOTPRINT_REGIONS = [
 
 # Display regions = same set as FOOTPRINT_REGIONS.
 # In the new design every footprint value is its own display value
-# (individual Kiekert countries display by name; sub-regions display by market bucket).
+# (individual Apex Mobility countries display by name; sub-regions display by market bucket).
 DISPLAY_REGIONS = FOOTPRINT_REGIONS
 
 # No collapse mapping needed: every footprint value is already a display value.
@@ -81,7 +81,7 @@ _LEGACY_REVIEW_MAP = {"Not Reviewed": "Pending", "Reviewed": "Pending"}
 REQUIRED_KEYS = [
     "title","source_type","publish_date","publish_date_confidence","original_url",
     "actor_type","government_entities","companies_mentioned","mentions_our_company",
-    "topics","keywords","country_mentions","regions_mentioned","regions_relevant_to_kiekert",
+    "topics","keywords","country_mentions","regions_mentioned","regions_relevant_to_apex_mobility",
     "priority","confidence","evidence_bullets",
     "key_insights","review_status","notes"
 ]
@@ -133,7 +133,7 @@ MACRO_THEME_RULES = [
             "regions": {"China", "South Asia"},
         },
         "anti_keywords": [r"ev\s*sales\s*stall", r"ev\s*slow"],
-        # Require China as an explicitly operational market (in regions_relevant_to_kiekert,
+        # Require China as an explicitly operational market (in regions_relevant_to_apex_mobility,
         # derived from country_mentions). Prevents theme firing when Chinese EV brands are
         # mentioned only as competitive backdrop in a European market registrations article.
         "region_requirements": {"China"},
@@ -205,7 +205,7 @@ STRUCTURAL_ROLLUP_RULES = [
     },
 ]
 
-# Macro themes that can escalate priority when Kiekert footprint relevance exists.
+# Macro themes that can escalate priority when Apex Mobility footprint relevance exists.
 MACRO_THEME_PRIORITY_ESCALATION_THEMES = {
     "Luxury OEM Stress",
     "Margin Compression at Premium OEMs",
@@ -235,7 +235,7 @@ FIELD_POLICY = {
         "review_status", "notes",
     ],
     "python": [
-        "regions_mentioned", "regions_relevant_to_kiekert", "event_date",
+        "regions_mentioned", "regions_relevant_to_apex_mobility", "event_date",
         "priority_llm", "priority_final", "priority_reason",
     ],
     "hybrid": [

@@ -5,4 +5,3 @@ altair>=5.4
 pymupdf>=1.24
 pdfplumber>=0.11
 google-genai>=1.0
-pytest>=8.0

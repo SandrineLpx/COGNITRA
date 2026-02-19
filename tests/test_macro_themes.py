@@ -22,7 +22,7 @@ def _base_record(**overrides):
         "keywords": ["auto"],
         "country_mentions": [],
         "regions_mentioned": [],
-        "regions_relevant_to_kiekert": [],
+        "regions_relevant_to_apex_mobility": [],
         "evidence_bullets": ["Fact one", "Fact two"],
         "key_insights": ["Insight one", "Insight two"],
         "review_status": "Pending",
@@ -202,24 +202,24 @@ class TestRegionBucketingOptionB:
     def test_germany_maps_to_own_name(self):
         rec = _base_record(country_mentions=["Germany"])
         out = postprocess_record(rec)
-        assert "Germany" in out.get("regions_relevant_to_kiekert", [])
+        assert "Germany" in out.get("regions_relevant_to_apex_mobility", [])
 
     def test_poland_maps_to_central_europe(self):
         rec = _base_record(country_mentions=["Poland"])
         out = postprocess_record(rec)
-        assert "Central Europe" in out.get("regions_relevant_to_kiekert", [])
+        assert "Central Europe" in out.get("regions_relevant_to_apex_mobility", [])
 
     def test_russia_maps_to_russia_bucket(self):
         rec = _base_record(country_mentions=["Russia"])
         out = postprocess_record(rec)
-        assert "Russia" in out.get("regions_relevant_to_kiekert", [])
+        assert "Russia" in out.get("regions_relevant_to_apex_mobility", [])
 
     def test_generic_europe_defaults_to_europe_catch_all_with_ambiguity_flag(self):
         rec = _base_record(
             title="Europe suppliers face margin pressure",
             country_mentions=[],
             regions_mentioned=[],
-            regions_relevant_to_kiekert=[],
+            regions_relevant_to_apex_mobility=[],
         )
         out = postprocess_record(rec)
         assert "Europe" in out.get("regions_mentioned", [])
@@ -229,13 +229,13 @@ class TestRegionBucketingOptionB:
         rec = _base_record(
             country_mentions=[],
             regions_mentioned=["Europe (including Russia)"],
-            regions_relevant_to_kiekert=["Europe (including Russia)"],
+            regions_relevant_to_apex_mobility=["Europe (including Russia)"],
         )
         out = postprocess_record(rec)
         assert "Europe" in out.get("regions_mentioned", [])
         assert "Russia" not in out.get("regions_mentioned", [])
-        assert "Europe" in out.get("regions_relevant_to_kiekert", [])
-        assert "Russia" not in out.get("regions_relevant_to_kiekert", [])
+        assert "Europe" in out.get("regions_relevant_to_apex_mobility", [])
+        assert "Russia" not in out.get("regions_relevant_to_apex_mobility", [])
         migrations = out.get("_region_migrations") or []
         assert {"from": "Europe (including Russia)", "to": "Europe"} in migrations
 
@@ -244,7 +244,7 @@ class TestRegionBucketingOptionB:
             title="Toyota Argentina production update",
             country_mentions=["Argentina"],
             regions_mentioned=["United States"],  # Simulate bad extraction.
-            regions_relevant_to_kiekert=[],
+            regions_relevant_to_apex_mobility=[],
             evidence_bullets=[
                 "Toyota release Feb 4, 2026 announced local program updates.",
                 "Argentina operations update was included in the release.",
@@ -259,7 +259,7 @@ class TestRegionBucketingOptionB:
 
         assert "Mercosul" in out.get("regions_mentioned", [])
         assert "United States" not in out.get("regions_mentioned", [])
-        assert "Mercosul" in out.get("regions_relevant_to_kiekert", [])
+        assert "Mercosul" in out.get("regions_relevant_to_apex_mobility", [])
 
 
 # ============================================================================
@@ -438,7 +438,7 @@ class TestMacroThemePriorityEscalation:
             keywords=["tariff", "trade war", "import duty", "customs", "auto"],
             country_mentions=["United States"],
             regions_mentioned=[],
-            regions_relevant_to_kiekert=[],
+            regions_relevant_to_apex_mobility=[],
         )
         out = postprocess_record(rec)
 
@@ -455,15 +455,53 @@ class TestMacroThemePriorityEscalation:
             keywords=["margin", "profit warn", "cost pressure", "premium", "auto"],
             country_mentions=[],
             regions_mentioned=[],
-            regions_relevant_to_kiekert=[],
+            regions_relevant_to_apex_mobility=[],
         )
         out = postprocess_record(rec)
 
         assert "Luxury OEM Stress" in out["macro_themes_detected"]
-        assert out.get("regions_relevant_to_kiekert") == []
+        assert out.get("regions_relevant_to_apex_mobility") == []
         assert out.get("priority") == "Medium"
         assert out.get("priority_final") == "Medium"
         assert out.get("priority_reason") != "footprint_and_macro_theme:Luxury OEM Stress"
+
+    def test_missing_footprint_with_weak_signals_downgrades_priority(self):
+        rec = _base_record(
+            title="General industry outlook",
+            priority="Medium",
+            companies_mentioned=[],
+            topics=["Market & Competition"],
+            keywords=["automotive", "market", "outlook"],
+            country_mentions=[],
+            regions_mentioned=[],
+            regions_relevant_to_apex_mobility=[],
+        )
+        out = postprocess_record(rec)
+
+        assert out.get("regions_relevant_to_apex_mobility") == []
+        assert out.get("priority") == "Low"
+        assert out.get("priority_final") == "Low"
+        assert out.get("priority_reason") == "missing_footprint_region"
+        assert "empty_region_signal" in (out.get("_region_validation_flags") or [])
+
+    def test_general_region_signal_without_footprint_does_not_auto_downgrade(self):
+        rec = _base_record(
+            title="General industry outlook",
+            priority="Medium",
+            companies_mentioned=[],
+            topics=["Market & Competition"],
+            keywords=["automotive", "market", "outlook"],
+            country_mentions=[],
+            regions_mentioned=["Europe"],
+            regions_relevant_to_apex_mobility=[],
+        )
+        out = postprocess_record(rec)
+
+        assert "Europe" in (out.get("regions_mentioned") or [])
+        assert out.get("regions_relevant_to_apex_mobility") == []
+        assert out.get("priority") == "Medium"
+        assert out.get("priority_final") == "Medium"
+        assert out.get("priority_reason") != "missing_footprint_region"
 
     def test_existing_priority_rule_reason_preserved_when_already_high(self):
         rec = _base_record(
@@ -473,7 +511,7 @@ class TestMacroThemePriorityEscalation:
             keywords=["margin", "cost pressure", "profit", "auto", "premium"],
             country_mentions=["Germany"],
             regions_mentioned=[],
-            regions_relevant_to_kiekert=[],
+            regions_relevant_to_apex_mobility=[],
         )
         out = postprocess_record(rec)
 
@@ -489,11 +527,11 @@ class TestMacroThemePriorityEscalation:
             keywords=["sourcing", "platform", "production", "automotive", "oem"],
             country_mentions=["Japan"],
             regions_mentioned=[],
-            regions_relevant_to_kiekert=[],
+            regions_relevant_to_apex_mobility=[],
         )
         out = postprocess_record(rec)
 
-        assert "Japan" in out.get("regions_relevant_to_kiekert", [])
+        assert "Japan" in out.get("regions_relevant_to_apex_mobility", [])
         assert "Toyota" in out.get("companies_mentioned", [])
         assert out.get("priority") == "High"
         assert out.get("priority_reason") == "footprint_and_key_oem"
@@ -526,7 +564,7 @@ class TestMercedesBloombergRegression:
             title="Mercedes debuts CLA with AI voice assistant",
             source_type="Bloomberg",
             mentions_our_company=True,  # Simulate bad LLM output
-            notes="It does not mention Kiekert.",
+            notes="It does not mention Apex Mobility.",
             keywords=["mercedes", "cla", "voice controls"],
             evidence_bullets=["Mercedes introduced new voice controls for CLA."],
             key_insights=["AI assistant partnership was highlighted."],
@@ -689,6 +727,21 @@ class TestMercedesBloombergRegression:
         assert int((out2.get("_rule_impact") or {}).get("computed_confidence", 0)) <= 1
         conf_mutations = [m for m in (out2.get("_mutations") or []) if m.get("field") == "confidence"]
         assert len(conf_mutations) <= 1
+
+    def test_confidence_signals_do_not_include_footprint_region_bonus(self):
+        rec = _base_record(
+            title="Industry outlook update",
+            source_type="Reuters",
+            publish_date="2026-02-01",
+            country_mentions=[],
+            regions_relevant_to_apex_mobility=[],
+            evidence_bullets=["Fact one", "Fact two", "Fact three"],
+            key_insights=["Insight one", "Insight two"],
+        )
+        out = postprocess_record(rec)
+
+        signals = (out.get("_confidence_detail") or {}).get("signals", {})
+        assert "apex_mobility_regions" not in signals
 
 
 if __name__ == "__main__":

@@ -509,7 +509,7 @@ Last updated: February 2026
 
 ## Footprint regions and roll-up rules
 
-Use these roll-ups when tagging region relevance for Kiekert.
+Use these roll-ups when tagging region relevance for Apex Mobility.
 
 - Footprint regions: India, China, Europe (including Russia), Africa, US, Mexico, Thailand.
 - Europe roll-up includes: EU + broad mentions (Europe, EU, EMEA) and country mentions including UK, Turkey, Russia, and other European countries.

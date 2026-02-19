@@ -10,7 +10,7 @@ Use this checklist before marking records Approved and before publishing the Wee
 - [ ] No wrong entities: key company / OEM / product / platform names correct
 - [ ] No wrong geo signals:
   - [ ] country_mentions contains only explicit operational countries (per policy)
-  - [ ] regions_relevant_to_kiekert derived deterministically (no “display buckets” leakage)
+  - [ ] regions_relevant_to_apex_mobility derived deterministically (no “display buckets” leakage)
 - [ ] No wrong publisher/source_type
 
 ### A2. Medium issues (allowed but tracked)
@@ -49,7 +49,7 @@ Use this checklist before marking records Approved and before publishing the Wee
 
 ### B3. Synthesis quality
 - [ ] At least 2 cross-record themes (not per-record summaries)
-- [ ] Clear “so what for Kiekert” per theme:
+- [ ] Clear “so what for Apex Mobility” per theme:
   cost pressure / platform timing / footprint risk / sourcing risk / tech content shifts
 - [ ] Actions have:
   owner + concrete next step + time horizon + trigger to watch

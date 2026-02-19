@@ -61,7 +61,7 @@ def sample_record(
         "keywords": ["electric", "vehicle", "battery", "charging", "supply", "chain"],
         "country_mentions": ["USA"],
         "regions_mentioned": ["United States"],
-        "regions_relevant_to_kiekert": ["United States"],
+        "regions_relevant_to_apex_mobility": ["United States"],
         "evidence_bullets": ["Evidence 1", "Evidence 2"],
         "key_insights": ["Insight 1", "Insight 2"],
         "review_status": "Approved",
@@ -337,12 +337,22 @@ class TestSingleRecordSynthesisPrompt:
 
         assert "EXECUTIVE ALERT" in prompt
         assert "Target length: 350-450 words." in prompt
-        assert "Exactly 2 bullets: what happened + so-what for Kiekert." in prompt
-        assert "Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Kiekert." in prompt
-        assert "Exactly 2 bullets. Each must include: Owner + Action + Time horizon." in prompt
+        assert "Exactly 2 bullets: what happened + so-what for Apex Mobility." in prompt
+        assert "Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Apex Mobility." in prompt
+        assert "Exactly 2 bullets. Each must include: Owner + Action + Time horizon + Trigger + Deliverable." in prompt
         assert "EMERGING TRENDS" not in prompt
         assert "No significant signals this period." not in prompt
-        assert "KEY DEVELOPMENTS BY TOPIC" not in prompt
+        assert "\nKEY DEVELOPMENTS BY TOPIC\n" not in prompt
+
+    def test_multi_record_prompt_enforces_topic_label_and_action_specificity_format(self):
+        rec1 = sample_record(title="Item 1", priority="High", confidence="High")
+        rec2 = sample_record(title="Item 2", priority="High", confidence="High")
+        rec2["record_id"] = "rec2"
+        prompt = _build_synthesis_prompt([rec1, rec2], "Feb 5-12, 2026")
+
+        assert "Topic label line must be plain text (NOT a bullet)." in prompt
+        assert "Trigger/watch condition (if/when threshold)" in prompt
+        assert "Deliverable artifact (forecast update, risk memo, playbook, dashboard)" in prompt
 
 
 # ============================================================================

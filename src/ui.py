@@ -152,26 +152,30 @@ def _inject_css() -> None:
   color: var(--cg-text-secondary);
 }
 
+.stVerticalBlockBorderWrapper,
 [data-testid="stVerticalBlockBorderWrapper"] {
-  border: 1px solid var(--cg-border) !important;
-  border-radius: 14px !important;
+  border: 1px solid #E2E8F0 !important;
+  border-radius: 8px !important;
   background: var(--cg-card-bg) !important;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.04) !important;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.05) !important;
 }
 
+.stMetric,
 [data-testid="stMetric"] {
-  border: 1px solid var(--cg-border);
-  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
   padding: 0.45rem 0.65rem;
   background: #FFFFFF;
 }
 
 [data-testid="stMetricLabel"] {
   color: var(--cg-text-secondary);
+  font-weight: 600;
 }
 
 [data-testid="stMetricValue"] {
-  color: var(--cg-text-primary);
+  color: #1E293B;
+  font-weight: 600;
 }
 
 .stButton > button[kind="primary"] {
@@ -186,6 +190,14 @@ def _inject_css() -> None:
 
 [data-testid="stTabs"] [role="tablist"] button {
   border-radius: 10px;
+}
+
+[data-testid="stMarkdownContainer"] h3,
+.stSubheader {
+  letter-spacing: 0.08em;
+  font-variant: small-caps;
+  font-weight: 600;
+  color: #1E293B;
 }
 
 .cg-badge {

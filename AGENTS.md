@@ -2,13 +2,13 @@
 
 ## What this is
 
-Streamlit multipage app (Home.py + 5 pages) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces weekly executive briefs for Kiekert (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
+Streamlit multipage app (Home.py + 5 pages) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces weekly executive briefs for Apex Mobility (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
 
 Minimal-AI approach: one model call per document for strict JSON extraction, deterministic postprocessing and validation, deterministic brief rendering from stored JSON (no second model call). Human review before executive reporting.
 
 Storage: file-based JSONL (`data/records.jsonl`). No database.
 
-### Kiekert domain scope
+### Apex Mobility domain scope
 
 This platform focuses on **closure systems and car entry markets**:
 - Latches, cinching, handles, power closures
@@ -56,12 +56,12 @@ The prompt in `model_router.py` → `extraction_prompt()` uses 13 numbered rules
 
 Region values are driven by `data/new_country_mapping.csv`. The key design principle: **every footprint value is its own display value** — `FOOTPRINT_TO_DISPLAY` is an empty dict (identity mapping).
 
-- **`FOOTPRINT_REGIONS`** / **`DISPLAY_REGIONS`**: same list (~34 values). Includes individual Kiekert-relevant countries by name (`France`, `Germany`, `Japan`, `South Korea`, `United States`, `Czech Republic`, `Morocco`, etc.) and sub-regional buckets (`West Europe`, `Central Europe`, `East Europe`, `NAFTA`, `ASEAN`, `Andean`, `Mercosul`, `Central America`, `Indian Subcontinent`, `Africa`, `Middle East`, `Oceania`, `Rest of World`) plus generic catch-alls (`Europe`, `South America`, `South Asia`).
+- **`FOOTPRINT_REGIONS`** / **`DISPLAY_REGIONS`**: same list (~34 values). Includes individual Apex Mobility-relevant countries by name (`France`, `Germany`, `Japan`, `South Korea`, `United States`, `Czech Republic`, `Morocco`, etc.) and sub-regional buckets (`West Europe`, `Central Europe`, `East Europe`, `NAFTA`, `ASEAN`, `Andean`, `Mercosul`, `Central America`, `Indian Subcontinent`, `Africa`, `Middle East`, `Oceania`, `Rest of World`) plus generic catch-alls (`Europe`, `South America`, `South Asia`).
 - **`FOOTPRINT_TO_DISPLAY`**: `{}` (empty dict). Code uses `FOOTPRINT_TO_DISPLAY.get(r, r)` — identity for all values.
-- **`COUNTRY_TO_FOOTPRINT`** in `postprocess.py`: maps ~90 countries to footprint regions. Rule from CSV: if `relevant to Kiekert` ≠ "" → use that value; else use market bucket. Countries not in the CSV → `Rest of World`.
+- **`COUNTRY_TO_FOOTPRINT`** in `postprocess.py`: maps ~90 countries to footprint regions. Rule from CSV: if `relevant to Apex Mobility` ≠ "" → use that value; else use market bucket. Countries not in the CSV → `Rest of World`.
 - **`REGION_ALIASES`** in `postprocess.py`: normalizes LLM-returned strings to canonical names. `"us"` alias intentionally absent (pronoun false-positive problem). Old long-form names are kept as aliases for backward compatibility: `"Western Europe"` → `"West Europe"`, `"Eastern Europe"` → `"East Europe"`, `"Latin America"` → `"South America"`, `"Asia"` → `"South Asia"`.
 
-Both `regions_mentioned` and `regions_relevant_to_kiekert` use the same value set. `regions_relevant_to_kiekert` is derived strictly from `country_mentions` via `COUNTRY_TO_FOOTPRINT`. `regions_mentioned` also incorporates text hints from `_regions_from_text_hints()`.
+Both `regions_mentioned` and `regions_relevant_to_apex_mobility` use the same value set. `regions_relevant_to_apex_mobility` is derived strictly from `country_mentions` via `COUNTRY_TO_FOOTPRINT`. `regions_mentioned` also incorporates text hints from `_regions_from_text_hints()`.
 
 Backward compatibility:
 - Legacy `Europe (including Russia)` is migrated to `Europe` (generic catch-all) unless Russia is explicitly present in `country_mentions`.
@@ -117,7 +117,7 @@ Append a dict to `MACRO_THEME_RULES` in `src/constants.py`. No code changes need
         "companies": {"company_a", "company_b"},   # lowercased
         "keywords": [r"regex_pattern"],             # searched in title, evidence_bullets, key_insights, keywords
         "topics": {"Canonical Topic Name"},         # exact match against CANON_TOPICS
-        "regions": {"United States", "China"},        # match against regions_mentioned + regions_relevant_to_kiekert
+        "regions": {"United States", "China"},        # match against regions_mentioned + regions_relevant_to_apex_mobility
     },
     # Optional:
     "anti_keywords": [r"pattern"],      # suppress if matched and <3 groups hit
@@ -193,11 +193,11 @@ Automated QC runs post-hoc on records and briefs via `python scripts/run_quality
 
 0. **Future improvement (deferred):** consider relaxing SDV theme firing (for example, allow tech-company + SDV keyword combinations), but keep current strict `min_groups=2` for now.
 
-1. **Widen PREMIUM_OEMS for non-European premium**: Add "genesis", "lexus", and optionally "acura", "infiniti" to `PREMIUM_OEMS` in `constants.py`. Current set is Europe-supercar heavy — may miss Kiekert-relevant premium programs from Korean/Japanese OEMs.
+1. **Widen PREMIUM_OEMS for non-European premium**: Add "genesis", "lexus", and optionally "acura", "infiniti" to `PREMIUM_OEMS` in `constants.py`. Current set is Europe-supercar heavy — may miss Apex Mobility-relevant premium programs from Korean/Japanese OEMs.
 
 2. **Company normalization edge cases**: Extend deterministic legal-entity canonicalization beyond current covered variants (for example, additional OEM legal suffix patterns) if misses appear in real records.
 
-3. **Rollup elevation in weekly brief**: The "Premium OEM Financial/Strategy Stress" rollup is the Kiekert headline signal. Consider surfacing `_macro_theme_rollups` in the weekly synthesis prompt or brief rendering so it gets elevated automatically.
+3. **Rollup elevation in weekly brief**: The "Premium OEM Financial/Strategy Stress" rollup is the Apex Mobility headline signal. Consider surfacing `_macro_theme_rollups` in the weekly synthesis prompt or brief rendering so it gets elevated automatically.
 
 ## External dependencies
 

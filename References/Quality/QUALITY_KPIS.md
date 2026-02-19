@@ -35,7 +35,7 @@ Medium severity includes:
 
 ### KPI-R5: Geo determinism pass rate (target: ≥ 98%)
 - % of records where:
-  - regions_relevant_to_kiekert == f(country_mentions) (country-first rule)
+  - regions_relevant_to_apex_mobility == f(country_mentions) (country-first rule)
   - no display buckets leak into footprint fields
 
 ## 2. Executive Brief KPIs (weekly)
@@ -44,7 +44,7 @@ Medium severity includes:
 - # of claims where GroundedToRecord = No
 
 ### KPI-B2: Overreach count (target: ≤ 2)
-Overreach = correct direction but stronger certainty than source supports, or Kiekert implication asserted as fact without explicit support.
+Overreach = correct direction but stronger certainty than source supports, or Apex Mobility implication asserted as fact without explicit support.
 
 ### KPI-B3: Uncertainty compliance (target: 100%)
 - If any record contains uncertainty language, brief must include ≥ 1 uncertainty item.

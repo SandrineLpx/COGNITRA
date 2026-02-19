@@ -92,12 +92,12 @@ def validate_record(rec: Dict[str, Any]) -> Tuple[bool, List[str]]:
         if badrm:
             errs.append(f"regions_mentioned contains invalid labels: {badrm}")
 
-    rr = rec["regions_relevant_to_kiekert"]
+    rr = rec["regions_relevant_to_apex_mobility"]
     if not isinstance(rr, list):
-        errs.append("regions_relevant_to_kiekert must be a list")
+        errs.append("regions_relevant_to_apex_mobility must be a list")
     else:
         badr = [r for r in rr if r not in FOOTPRINT_REGIONS]
         if badr:
-            errs.append(f"regions_relevant_to_kiekert contains invalid labels: {badr}")
+            errs.append(f"regions_relevant_to_apex_mobility contains invalid labels: {badr}")
 
     return len(errs) == 0, errs

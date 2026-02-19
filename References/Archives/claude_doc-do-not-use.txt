@@ -41,7 +41,7 @@ Core Feature News Intelligence
 Monitor 3-4 sources (Bloomberg articles, Automotive News, Reuters, Google Patents)
 Track 21 companies (13 OEMs BMW, BYD, Ford, GM, etc. + 8 Tier-1 suppliers Brose, Huf, Magna, etc.)
 10 topic categories (EV Transition, Door Systems, Supply Chain, etc.)
-AI summarization Key Developments (facts) + Strategic Implications (analysis for Kiekert)
+AI summarization Key Developments (facts) + Strategic Implications (analysis for Apex Mobility)
 Deliver via SharePoint library with searchable metadata
 
 Bonus Feature (Week 3-4) Financial Intelligence
@@ -61,7 +61,7 @@ V2 Single Key Points bullets → Better, but mixed facts with analysis
 V3 Two columns → FINAL
 
 Key Developments (3-4 bullets) What happened, who, when, numbers
-Strategic Implications (2-3 bullets) What this means for Kiekert
+Strategic Implications (2-3 bullets) What this means for Apex Mobility
 
 
 
@@ -73,7 +73,7 @@ Executives read both (takes 30 seconds)
 Scannable Review 10 articles in 5 minutes
 
 Example
-Key DevelopmentsStrategic Implications• BMW investing €1B in Mexican EV facility• Partnership with Magna for door systems• 200K annual capacity by 2027• Door system opportunities in Mexico• Competitive threat Magna expanding• Potential Kiekert-BMW discussions
+Key DevelopmentsStrategic Implications• BMW investing €1B in Mexican EV facility• Partnership with Magna for door systems• 200K annual capacity by 2027• Door system opportunities in Mexico• Competitive threat Magna expanding• Potential Apex Mobility-BMW discussions
 
 2. Configuration-Driven Design
 Student Insight
@@ -141,7 +141,7 @@ Can merge later if successful
 
 
 5. Metadata Schema (10 Columns)
-ColumnTypeRequiredMulti-SelectWhySourceChoiceYesNoTrack provenanceCompanyChoiceYesYesArticles mention multiple companiesTopicChoiceYesYesArticles span multiple topicsRegionChoiceYesYesVW strategy for Europe + ChinaDate PublishedDateYesNATime-based filteringPriorityChoiceNoNoHighMediumLow for alertsOriginal URLHyperlinkNoNALink to sourceKey DevelopmentsRich TextNoNAFacts, timeline, playersStrategic ImplicationsRich TextNoNAAnalysis for KiekertReview StatusChoiceNoNoQuality control
+ColumnTypeRequiredMulti-SelectWhySourceChoiceYesNoTrack provenanceCompanyChoiceYesYesArticles mention multiple companiesTopicChoiceYesYesArticles span multiple topicsRegionChoiceYesYesVW strategy for Europe + ChinaDate PublishedDateYesNATime-based filteringPriorityChoiceNoNoHighMediumLow for alertsOriginal URLHyperlinkNoNALink to sourceKey DevelopmentsRich TextNoNAFacts, timeline, playersStrategic ImplicationsRich TextNoNAAnalysis for Apex Mobility Review StatusChoiceNoNoQuality control
 Key Decision Region changed to Required + Multi-select
 Rationale Articles often cover multiple regions (China and Europe EV policies)
 
@@ -807,7 +807,7 @@ Where AI Fits The Complete Flow
 │  AI Capabilities Used                                          │
 │  ✓ Abstractive Summarization (rewrite, not extract)             │
 │  ✓ Multi-Document Compression (2000 words → 150 words)          │
-│  ✓ Perspective-Taking (analyze from Kiekert's viewpoint)        │
+│  ✓ Perspective-Taking (analyze from Apex Mobility's viewpoint)        │
 │  ✓ Dual Output Generation (facts + implications separately)     │
 │                                                                  │
 │  Two-Stage Process                                             │
@@ -819,7 +819,7 @@ Where AI Fits The Complete Flow
 │  • Quantitative details (investment amounts, capacity numbers)  │
 │                                                                  │
 │  Stage 2 Strategic Implications (Analytical Summary)           │
-│  • Impact on Kiekert's market (opportunitiesthreats)           │
+│  • Impact on Apex Mobility's market (opportunitiesthreats)           │
 │  • Competitive positioning implications                         │
 │  • Supply chain or partnership considerations                   │
 │                                                                  │
@@ -949,7 +949,7 @@ Trend Connection Links to prior BMW cost reduction announcements
 How AI Does This
 
 Pre-trained on automotive industry text (press releases, trade publications, earnings calls)
-Fine-tuned with Kiekert-specific context (competitors, customers, products)
+Fine-tuned with Apex Mobility-specific context (competitors, customers, products)
 Retrieval Augmented Generation (RAG) pulls relevant historical context
 
 
@@ -1013,7 +1013,7 @@ AI Solution Perspective-Taking Analysis
 Technology GPT-4 with Custom System Prompt (Domain-Specific Reasoning)
 System Prompt Design
 pythonsystem_prompt = 
-You are a senior competitive intelligence analyst for Kiekert, 
+You are a senior competitive intelligence analyst for Apex Mobility, 
 a tier-1 automotive supplier specializing in door locking systems 
 and access control.
 
@@ -1024,12 +1024,12 @@ Your expertise includes
 - Industry trends (vehicle electrification, smart access, lightweight materials)
 
 When analyzing articles, you evaluate
-1. Direct impact on Kiekert's productsmarkets
+1. Direct impact on Apex Mobility's productsmarkets
 2. Competitive threats or opportunities
 3. OEM strategy shifts affecting supplier relationships
 4. Technology trends requiring innovation response
 
-Provide strategic implications from Kiekert's perspective.
+Provide strategic implications from Apex Mobility's perspective.
 
 Example
 Article Rivian announces partnership with Samsung SDI for cylindrical battery cells
@@ -1042,7 +1042,7 @@ Cylindrical cells (vs. pouch) → different thermal management → different doo
 
 Competitive Context
 
-Samsung SDI expanding in NA → supply chain localization trend → Kiekert should evaluate Mexico manufacturing
+Samsung SDI expanding in NA → supply chain localization trend → Apex Mobility should evaluate Mexico manufacturing
 Rivian diversifying suppliers → open to new tier-1 relationships → partnership opportunity window
 
 Market Positioning
@@ -1073,7 +1073,7 @@ Synthesize This is part of larger trend...
 
 Perspective-Taking
 
-From Kiekert's view, what matters here
+From Apex Mobility's view, what matters here
 Focus on door systems, partnerships, opportunities
 
 
@@ -1218,7 +1218,7 @@ pythondef generate_weekly_synthesis(summaries_df)
     )
     
     prompt = f
-    You are preparing the weekly executive intelligence brief for Kiekert's 
+    You are preparing the weekly executive intelligence brief for Apex Mobility's 
     leadership team.
     
     Below are {len(recent)} intelligence summaries from the past week.
@@ -1229,7 +1229,7 @@ pythondef generate_weekly_synthesis(summaries_df)
     2. KEY COMPETITIVE MOVES (Brose, Huf, Magna, Witte activity)
     3. OEM STRATEGY SHIFTS (Partnership changes, investment announcements)
     4. TECHNOLOGY TRENDS (Emerging innovations to watch)
-    5. RECOMMENDED ACTIONS (What should Kiekert do)
+    5. RECOMMENDED ACTIONS (What should Apex Mobility do)
     
     For each theme, cite specific examples from the summaries.
     Keep brief 2-3 pages maximum.
@@ -1258,7 +1258,7 @@ TOP 3 THEMES
    - BMW €1B investment (door systems with Magna)
    - Ford expanding EV production in Hermosillo
    - 3 tier-1 suppliers announced Mexico expansion
-   → Kiekert should evaluate Mexico manufacturing strategy
+   → Apex Mobility should evaluate Mexico manufacturing strategy
 
 2. Solid-State Battery Timeline Compression
    - Toyota pilot production starts Q2 2026 (ahead of schedule)
@@ -1278,7 +1278,7 @@ Cross-Document Pattern Recognition Identifies that 3 separate articles all menti
 Temporal Reasoning Toyota ahead of schedule (compares to previous timeline)
 Synthesis Combines 25 individual summaries into 5 themes
 Hierarchy Distinguishes top themes from minor developments
-Actionability What should Kiekert do (strategic recommendations)
+Actionability What should Apex Mobility do (strategic recommendations)
 
 Human Alternative
 
@@ -1345,11 +1345,11 @@ pythonasync def process_batch(articles)
     return await asyncio.gather(tasks)  # All run in parallel
 5. Domain Adaptation (System Prompts)
 
-Problem Generic AI doesn't understand Kiekert's business
+Problem Generic AI doesn't understand Apex Mobility's business
 Solution Custom system prompt with domain context
 
 pythonsystem = 
-You are an analyst for Kiekert (door locking systems).
+You are an analyst for Apex Mobility (door locking systems).
 Competitors Brose, Huf, Magna, Witte
 Customers BMW, VW, Mercedes, Ford, etc.
 Products Mechatronic latches, central locking, smart access

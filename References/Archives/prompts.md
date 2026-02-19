@@ -48,7 +48,7 @@ Goal: Convert the input into one strict JSON record using the provided schema. R
 Rules:
 1) Use only the provided text. Do not add external knowledge.
 2) Extract country_mentions for any countries explicitly mentioned.
-3) Compute regions_mentioned and regions_relevant_to_kiekert using these roll-ups:
+3) Compute regions_mentioned and regions_relevant_to_apex_mobility using these roll-ups:
    - Footprint regions: India, China, Europe (including Russia), Africa, US, Mexico, Thailand.
    - Europe roll-up includes broad terms (Europe, EU, European, EMEA) and countries including UK, Turkey, Russia, France, Germany, Spain, Italy, Czech Republic/Czechia.
    - Africa roll-up includes Morocco and South Africa; also tag Africa on broad mentions.

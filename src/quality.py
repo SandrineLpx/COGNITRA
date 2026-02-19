@@ -14,6 +14,7 @@ from xml.sax.saxutils import escape as xml_escape
 import pandas as pd
 
 from src.constants import (
+    CANON_TOPICS,
     DISPLAY_REGIONS,
     FOOTPRINT_REGIONS,
     FOOTPRINT_TO_DISPLAY,
@@ -105,6 +106,7 @@ _STOPWORDS = {
     "their",
     "they",
 }
+_CANON_TOPICS_LOWER = {str(t).strip().lower() for t in CANON_TOPICS if str(t).strip()}
 
 def _build_company_alias_groups() -> Dict[str, set]:
     """Auto-derive company alias groups from postprocess canonicalization maps."""
@@ -301,6 +303,21 @@ def _keywords(text: str) -> set[str]:
 def _is_bullet_line(line: str) -> bool:
     s = str(line).lstrip()
     return s.startswith("-") or s.startswith("*") or s.startswith("•")
+
+
+def _strip_topic_label_candidate(line: str) -> str:
+    s = re.sub(r"^\s*[-*•]\s*", "", str(line or "")).strip()
+    s = s.replace("*", "").replace("_", "").replace("`", "").strip()
+    if s.endswith(":"):
+        s = s[:-1].strip()
+    return s
+
+
+def _is_structural_topic_label_bullet(line: str, section: str) -> bool:
+    if section != "KEY DEVELOPMENTS BY TOPIC" or not _is_bullet_line(line):
+        return False
+    candidate = _strip_topic_label_candidate(line).lower()
+    return bool(candidate) and candidate in _CANON_TOPICS_LOWER
 
 
 def _rec_refs(text: str) -> List[str]:
@@ -552,6 +569,30 @@ EVIDENCE_NEAR_MISS_THRESHOLD = 0.45
 _DISPLAY_SET = set(DISPLAY_REGIONS)
 _FOOTPRINT_SET = set(FOOTPRINT_REGIONS)
 
+# Parent-bucket coverage: if a country is "missing" but its broader bucket
+# is present, the region is functionally covered (e.g. "West Europe" covers
+# "Germany").  Used to suppress false-positive missing_footprint_region.
+_COUNTRY_PARENT_BUCKETS: Dict[str, set[str]] = {
+    "Germany": {"West Europe", "Europe"},
+    "France": {"West Europe", "Europe"},
+    "Italy": {"West Europe", "Europe"},
+    "Spain": {"West Europe", "Europe"},
+    "Portugal": {"West Europe", "Europe"},
+    "Sweden": {"West Europe", "Europe"},
+    "United Kingdom": {"West Europe", "Europe"},
+    "Czech Republic": {"Central Europe", "Europe"},
+    "Russia": {"East Europe", "Europe"},
+    "Mexico": {"NAFTA"},
+    "United States": {"NAFTA"},
+    "Thailand": {"ASEAN", "South Asia"},
+    "India": {"Indian Subcontinent", "South Asia"},
+    "China": {"South Asia"},
+    "Taiwan": {"South Asia"},
+    "Japan": {"South Asia"},
+    "South Korea": {"South Asia"},
+    "Morocco": {"Africa"},
+}
+
 
 def _check_macro_themes(
     run_id: str,
@@ -562,7 +603,7 @@ def _check_macro_themes(
     detail = rec.get("_macro_theme_detail") or {}
     detected = rec.get("macro_themes_detected") or []
     companies_l = {c.lower() for c in (rec.get("companies_mentioned") or []) if isinstance(c, str)}
-    regions_set = set(rec.get("regions_mentioned") or []) | set(rec.get("regions_relevant_to_kiekert") or [])
+    regions_set = set(rec.get("regions_mentioned") or []) | set(rec.get("regions_relevant_to_apex_mobility") or [])
 
     for rule in MACRO_THEME_RULES:
         name = rule["name"]
@@ -624,7 +665,7 @@ def _check_geo_completeness(
     geo_ok = True
 
     countries = _to_str_list(rec.get("country_mentions"))
-    footprint_regions = _to_str_list(rec.get("regions_relevant_to_kiekert"))
+    footprint_regions = _to_str_list(rec.get("regions_relevant_to_apex_mobility"))
     display_regions = _to_str_list(rec.get("regions_mentioned"))
 
     # In the new region design FOOTPRINT_REGIONS == DISPLAY_REGIONS (same set),
@@ -643,19 +684,34 @@ def _check_geo_completeness(
             notes=f"Invalid values in regions_mentioned: {invalid_display}. Must be one of the canonical FOOTPRINT_REGIONS entries.",
         ))
 
-    # Check for missing footprint regions when countries are present
+    # Check for missing footprint regions when countries are present.
+    # Exclude regions that postprocess deliberately removed (tracked in
+    # _region_validation_flags, e.g. "us_region_removed_no_us_evidence").
     expected_from_countries = list(dict.fromkeys(
         COUNTRY_TO_FOOTPRINT[c] for c in countries if c in COUNTRY_TO_FOOTPRINT
     ))
     if expected_from_countries:
         footprint_set = set(footprint_regions)
-        missing = [r for r in expected_from_countries if r not in footprint_set]
+        validation_flags = rec.get("_region_validation_flags") or []
+        deliberately_removed: set[str] = set()
+        for flag in validation_flags:
+            flag_s = str(flag)
+            if "us_region_removed" in flag_s:
+                deliberately_removed.add("United States")
+            if "china_region_removed" in flag_s:
+                deliberately_removed.add("China")
+        missing = [
+            r for r in expected_from_countries
+            if r not in footprint_set
+            and r not in deliberately_removed
+            and not (footprint_set & _COUNTRY_PARENT_BUCKETS.get(r, set()))
+        ]
         if missing:
             geo_ok = False
             findings.append(_record_finding(
                 run_id, rec,
                 finding_type="missing_footprint_region",
-                field="regions_relevant_to_kiekert",
+                field="regions_relevant_to_apex_mobility",
                 severity="Medium",
                 grounded="Yes",
                 impact="Country present but derived footprint region missing.",
@@ -840,7 +896,7 @@ def run_record_qc(
         geo_ok = True
         all_evidence_grounded = True
 
-        for field in ("companies_mentioned", "country_mentions", "regions_relevant_to_kiekert"):
+        for field in ("companies_mentioned", "country_mentions", "regions_relevant_to_apex_mobility"):
             vals = _to_str_list(rec.get(field))
             dups = _dup_values(vals)
             if dups:
@@ -858,24 +914,28 @@ def run_record_qc(
                 )
 
         countries = _to_str_list(rec.get("country_mentions"))
-        regions = _to_str_list(rec.get("regions_relevant_to_kiekert"))
+        regions = _to_str_list(rec.get("regions_relevant_to_apex_mobility"))
         expected_regions = list(dict.fromkeys(COUNTRY_TO_FOOTPRINT[c] for c in countries if c in COUNTRY_TO_FOOTPRINT))
-        if expected_regions:
-            unexpected = [r for r in regions if r not in set(expected_regions)]
-            if unexpected:
-                geo_ok = False
-                findings.append(
-                    _record_finding(
-                        run_id,
-                        rec,
-                        finding_type="geo_leakage",
-                        field="regions_relevant_to_kiekert",
-                        severity="High",
-                        grounded="Yes",
-                        impact="Footprint signals may be distorted in brief rollups.",
-                        notes=f"Expected from countries={expected_regions}, found extra={unexpected}",
-                    )
+
+        # Only flag regions that are NOT valid footprint values at all.
+        # Postprocess intentionally adds text-hinted parent-bucket regions
+        # (e.g. "West Europe" when only "Germany" is in country_mentions),
+        # so extra-but-valid footprint regions are not leakage.
+        invalid_regions = [r for r in regions if r not in _FOOTPRINT_SET]
+        if invalid_regions:
+            geo_ok = False
+            findings.append(
+                _record_finding(
+                    run_id,
+                    rec,
+                    finding_type="geo_leakage",
+                    field="regions_relevant_to_apex_mobility",
+                    severity="High",
+                    grounded="Yes",
+                    impact="Footprint signals may be distorted in brief rollups.",
+                    notes=f"Invalid footprint values (not in FOOTPRINT_REGIONS): {invalid_regions}",
                 )
+            )
 
         companies = _to_str_list(rec.get("companies_mentioned"))
         company_norm = [_norm_text(c) for c in companies]
@@ -1046,10 +1106,14 @@ def run_record_qc(
     for finding in findings:
         finding["version"] = run_version
 
+    all_rids = [str(r.get("record_id") or "") for r in records if r.get("record_id")]
+    per_record = _per_record_scores(findings, all_rids)
+
     metrics = {
         "evidence_pass": evidence_pass,
         "canonical_pass": canonical_pass,
         "geo_pass": geo_pass,
+        "per_record_scores": per_record,
     }
     return findings, metrics
 
@@ -1098,6 +1162,8 @@ def run_brief_qc(
                         )
                     )
             elif section in _CLAIM_HEADINGS and _is_bullet_line(text):
+                if _is_structural_topic_label_bullet(text, section):
+                    continue
                 findings.append(
                     _brief_finding(
                         run_id,
@@ -1180,6 +1246,42 @@ def _severity_counts(rows: Sequence[Dict[str, Any]]) -> Dict[str, int]:
 def _weighted_record_score(counts: Dict[str, int]) -> int:
     score = 100 - 25 * counts.get("High", 0) - 10 * counts.get("Medium", 0) - 2 * counts.get("Low", 0)
     return max(0, int(score))
+
+
+def _per_record_scores(
+    findings: Sequence[Dict[str, Any]],
+    all_record_ids: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Compute per-record QC score and finding breakdown.
+
+    Returns {record_id: {"score": int, "high": int, "medium": int, "low": int, "findings": [...]}}
+    Records with no findings get score=100.
+    """
+    by_rid: Dict[str, List[Dict[str, Any]]] = {}
+    for rid in all_record_ids:
+        by_rid.setdefault(rid, [])
+    for f in findings:
+        rid = str(f.get("record_id") or "")
+        if rid:
+            by_rid.setdefault(rid, []).append(f)
+    out: Dict[str, Dict[str, Any]] = {}
+    for rid, rec_findings in by_rid.items():
+        counts = _severity_counts(rec_findings)
+        out[rid] = {
+            "score": _weighted_record_score(counts),
+            "high": counts["High"],
+            "medium": counts["Medium"],
+            "low": counts["Low"],
+            "findings": rec_findings,
+        }
+    return out
+
+
+def _avg_record_score(per_record: Dict[str, Dict[str, Any]]) -> float:
+    """Average of per-record QC scores."""
+    if not per_record:
+        return 100.0
+    return round(sum(r["score"] for r in per_record.values()) / len(per_record), 1)
 
 
 def _weighted_brief_score(brief_findings: Sequence[Dict[str, Any]], cross_record_theme_count: int) -> int:
@@ -1740,7 +1842,8 @@ def run_record_only_qc(
     kpi_r4 = (sum(1 for v in canonical_pass.values() if v) / n_records) if n_records else 0.0
     kpi_r5 = (sum(1 for v in geo_pass.values() if v) / n_records) if n_records else 0.0
 
-    weighted_record = _weighted_record_score(rec_counts)
+    per_record = record_metrics.get("per_record_scores") or {}
+    weighted_record = round(_avg_record_score(per_record))
 
     run_summary = {
         "run_id": run_id,
@@ -1793,6 +1896,7 @@ def run_record_only_qc(
         "brief_counts": {"High": 0, "Medium": 0, "Low": 0},
         "weighted_record_score": weighted_record,
         "weighted_brief_score": None,
+        "per_record_scores": per_record,
         "top_issue_types": top_issue_types,
         "report_path": str(report_path),
         "run_summary": run_summary,
@@ -1858,7 +1962,8 @@ def run_quality_pipeline(
     kpi_b4 = int(brief_metrics.get("cross_record_theme_count") or 0)
     kpi_b5 = int(brief_metrics.get("action_specificity_score") or 1)
 
-    weighted_record = _weighted_record_score(rec_counts)
+    per_record = record_metrics.get("per_record_scores") or {}
+    weighted_record = round(_avg_record_score(per_record))
     weighted_brief = _weighted_brief_score(brief_findings, cross_record_theme_count=kpi_b4)
 
     run_summary = {
@@ -1916,6 +2021,7 @@ def run_quality_pipeline(
         "brief_counts": brief_counts,
         "weighted_record_score": weighted_record,
         "weighted_brief_score": weighted_brief,
+        "per_record_scores": per_record,
         "top_issue_types": top_issue_types,
         "report_path": str(report_path),
         "run_summary": run_summary,

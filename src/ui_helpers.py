@@ -48,8 +48,45 @@ def read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return out
 
 
-def load_brief_history() -> Dict[str, List[Dict[str, str]]]:
-    """Record->brief membership map built from saved brief index + sidecars."""
+def _path_signature(path: Path) -> Tuple[bool, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (False, 0, 0)
+    return (True, int(stat.st_size), int(stat.st_mtime_ns))
+
+
+def _brief_sidecar_signatures() -> Tuple[Tuple[str, int, int], ...]:
+    if not BRIEFS_DIR.exists():
+        return tuple()
+    out: List[Tuple[str, int, int]] = []
+    for sidecar in sorted(BRIEFS_DIR.glob("brief_*.meta.json")):
+        try:
+            stat = sidecar.stat()
+        except OSError:
+            continue
+        out.append((sidecar.name, int(stat.st_size), int(stat.st_mtime_ns)))
+    return tuple(out)
+
+
+@st.cache_data(show_spinner=False, ttl=90)
+def _cached_load_records(_records_sig: Tuple[bool, int, int]) -> List[Dict[str, Any]]:
+    from src.storage import load_records
+
+    return load_records()
+
+
+def load_records_cached() -> List[Dict[str, Any]]:
+    from src.storage import RECORDS_PATH
+
+    return _cached_load_records(_path_signature(RECORDS_PATH))
+
+
+def clear_records_cache() -> None:
+    _cached_load_records.clear()
+
+
+def _load_brief_history_uncached() -> Dict[str, List[Dict[str, str]]]:
     by_record_id: Dict[str, List[Dict[str, str]]] = {}
     seen_rows: set[Tuple[str, str]] = set()
 
@@ -90,6 +127,26 @@ def load_brief_history() -> Dict[str, List[Dict[str, str]]]:
             _ingest_row(row, default_file=sidecar.name.replace(".meta.json", ".md"))
 
     return by_record_id
+
+
+@st.cache_data(show_spinner=False, ttl=90)
+def _cached_load_brief_history(
+    _index_sig: Tuple[bool, int, int],
+    _sidecar_sigs: Tuple[Tuple[str, int, int], ...],
+) -> Dict[str, List[Dict[str, str]]]:
+    return _load_brief_history_uncached()
+
+
+def load_brief_history() -> Dict[str, List[Dict[str, str]]]:
+    """Record->brief membership map built from saved brief index + sidecars."""
+    return _cached_load_brief_history(
+        _path_signature(BRIEF_INDEX),
+        _brief_sidecar_signatures(),
+    )
+
+
+def clear_brief_history_cache() -> None:
+    _cached_load_brief_history.clear()
 
 
 def latest_brief_entry_for_record(brief_history: Dict[str, List[Dict[str, str]]], record_id: Any) -> Dict[str, str]:

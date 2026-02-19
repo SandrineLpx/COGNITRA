@@ -15,7 +15,7 @@
 
 ### What I Built
 
-COGNITRA is a minimal-token AI market intelligence triage system for the automotive closure systems and car entry domain. I built a Streamlit multipage web application that ingests PDF documents (single or bulk), extracts structured intelligence records using Gemini LLM with strict JSON schema validation, and synthesizes weekly executive briefs for a Tier-1 automotive supplier (Kiekert AG, a manufacturer of door latches, strikers, handles, and smart entry systems).
+COGNITRA is a minimal-token AI market intelligence triage system for the automotive closure systems and car entry domain. I built a Streamlit multipage web application that ingests PDF documents (single or bulk), extracts structured intelligence records using Gemini LLM with strict JSON schema validation, and synthesizes weekly executive briefs for a Tier-1 automotive supplier (Apex Mobility AG, a manufacturer of door latches, strikers, handles, and smart entry systems).
 
 The core design philosophy is "minimal AI": the LLM handles only extraction and cross-record synthesis; all classification, prioritization, confidence scoring, deduplication, and quality checks are deterministic Python rules. This makes the system auditable, cost-predictable, and reliable for production use.
 
@@ -45,7 +45,7 @@ The core design philosophy is "minimal AI": the LLM handles only extraction and 
 
 This project builds an AI-powered market intelligence triage system for the automotive closure systems and car entry domain. The system is designed for environments where teams already pay for high-quality information—such as Bloomberg, Automotive News, S&P Global, and MarkLines—as well as public sources like press releases and regulatory announcements. The problem is not access to content; it is the lack of a scalable way to convert these sources into consistent, decision-ready intelligence.
 
-Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies a two-tier footprint region architecture (display-level buckets like Asia, Western/Eastern Europe; Kiekert operational footprint with country-level granularity like India, China, Japan, Thailand), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets and key insights. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
+Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies a two-tier footprint region architecture (display-level buckets like Asia, Western/Eastern Europe; Apex Mobility operational footprint with country-level granularity like India, China, Japan, Thailand), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets and key insights. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
 
 ## 1. Problem Statement and Significance
 
@@ -189,7 +189,7 @@ Everything else is deterministic:
   * **AI-generated Weekly Executive Brief:** LLM synthesis (Gemini Flash) across up to 20 selected records, following structured executive report template (executive summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions); token usage displayed
   * Analyst-driven item selection with one-click suggestions
 * **Priority classification:**
-  * LLM prompt rules define High/Medium/Low criteria with Kiekert-specific signals
+  * LLM prompt rules define High/Medium/Low criteria with Apex Mobility-specific signals
   * Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
   * **Computed confidence scoring:** deterministic `_compute_confidence()` replaces LLM self-assessed confidence with score from observable signals (field completeness, evidence count, postprocess corrections, date provenance); audit trail in `_confidence_detail`
   * Auto-approve heuristic at ingest: computed confidence not Low, publish_date present, source_type not Other, 2+ evidence bullets → auto-Approved; otherwise Pending for manual review
@@ -243,7 +243,7 @@ This project uses a controlled taxonomy and watchlist to reduce ambiguity and dr
 
 * Canonical topic taxonomy (9 topics)
 * Company watchlist (including “Our company” section)
-* Two-tier footprint region architecture: display-level buckets (Asia, Western/Eastern Europe, Africa, US, Latin America) and Kiekert footprint regions (India, China, Japan, Thailand, Mexico, Russia + display regions); ~60 country-to-region mappings
+* Two-tier footprint region architecture: display-level buckets (Asia, Western/Eastern Europe, Africa, US, Latin America) and Apex Mobility footprint regions (India, China, Japan, Thailand, Mexico, Russia + display regions); ~60 country-to-region mappings
 
 ## 6. Prompting and Output Specification
 
@@ -265,7 +265,7 @@ This approach was valuable for initial design: it forced clarity about what the 
 
 As the codebase grew through iterative development with AI assistance, the Markdown reference files progressively drifted from the actual implementation:
 
-* **Region architecture evolved** — the original spec defined a flat list of 7 regions (e.g., `Europe (including Russia)`). The code evolved to a two-tier architecture (`DISPLAY_REGIONS` for broad buckets vs `FOOTPRINT_REGIONS` for Kiekert operational granularity), added Japan as a standalone footprint region, added ~60 country-to-region mappings, and split Europe into Western/Eastern. None of this was reflected back in the spec files.
+* **Region architecture evolved** — the original spec defined a flat list of 7 regions (e.g., `Europe (including Russia)`). The code evolved to a two-tier architecture (`DISPLAY_REGIONS` for broad buckets vs `FOOTPRINT_REGIONS` for Apex Mobility operational granularity), added Japan as a standalone footprint region, added ~60 country-to-region mappings, and split Europe into Western/Eastern. None of this was reflected back in the spec files.
 * **Schema fields were removed** — fields like `strategic_implications`, `recommended_actions`, `region_signal_type`, and `supply_flow_hint` were intentionally removed from the LLM schema (moved to deterministic postprocessing or eliminated). The spec files still listed them.
 * **Actor types and review statuses changed** — the code simplified `actor_type` from 8 values to 5 and replaced review statuses (`Not Reviewed`/`Reviewed`/`Approved`) with `Pending`/`Approved`/`Disapproved`. The specs were outdated.
 * **The LLM never saw the specs** — critically, the topic tagging guidance and competitor context in the reference files were never wired into the extraction prompt. The LLM received only the JSON schema enum values (topic names) with no disambiguation guidance. It had to guess when to use "OEM Strategy & Powertrain Shifts" vs "OEM Programs & Vehicle Platforms".
@@ -280,7 +280,7 @@ A dedicated refactoring session identified the gap and consolidated everything:
 
 2. **Competitor context injected into the extraction prompt** — the LLM now sees Tier 1 and Tier 2 closure system competitors by name, enabling correct `actor_type='supplier'` classification and `mentions_our_company` detection.
 
-3. **Kiekert identity added to the prompt** — the extraction prompt now opens with "You are extracting structured intelligence for Kiekert, an automotive closure systems supplier (door latches, strikers, handles, smart entry, cinch systems)." This gives the LLM domain context for all classification decisions.
+3. **Apex Mobility identity added to the prompt** — the extraction prompt now opens with "You are extracting structured intelligence for Apex Mobility, an automotive closure systems supplier (door latches, strikers, handles, smart entry, cinch systems)." This gives the LLM domain context for all classification decisions.
 
 4. **Reference files reduced to one** — `topic-taxonomy.md` was deleted (content now lives in code). `context-watchlist.md` was cleaned of outdated region/priority sections and renamed to `company-watchlist.md` (purely competitive intelligence, no code duplication). `SKILL.md` was archived.
 
@@ -337,7 +337,7 @@ Phase 3 (current):
 The consolidation was not just a cleanup exercise. It had a direct impact on extraction quality:
 
 * **Before:** The LLM received 9 topic names with no disambiguation. It frequently confused "OEM Strategy" with "OEM Programs" and applied "Closure Technology & Innovation" to general vehicle electronics articles.
-* **After:** The LLM receives one-line use/don't-use rules for each topic and knows Kiekert's competitors by name. Topic classification accuracy improved because the model has explicit boundary definitions rather than having to infer them from label names alone.
+* **After:** The LLM receives one-line use/don't-use rules for each topic and knows Apex Mobility's competitors by name. Topic classification accuracy improved because the model has explicit boundary definitions rather than having to infer them from label names alone.
 
 The lesson: **specification documents are valuable for initial design but become a maintenance liability if they are not the same artifact that the system reads at runtime.** Embedding domain guidance directly into the code (as comments for humans, as prompt text for the LLM) eliminates the drift problem entirely.
 
@@ -360,7 +360,7 @@ The LLM returns a single JSON object per article, enforced by Gemini's structure
   "keywords":                  ["STRING  — 3-15 items"],
   "country_mentions":          ["STRING"],
   "regions_mentioned":         ["STRING  — free-text, up to 15"],
-  "regions_relevant_to_kiekert": ["STRING  — enum: India | China | Western Europe | Eastern Europe | Russia | Africa | US | Mexico | Latin America | Thailand | Japan | Asia"],
+  "regions_relevant_to_apex_mobility": ["STRING  — enum: India | China | Western Europe | Eastern Europe | Russia | Africa | US | Mexico | Latin America | Thailand | Japan | Asia"],
   "evidence_bullets":          ["STRING  — 2-4 factual bullets"],
   "key_insights":              ["STRING  — 2-4 analytical insights"],
   "review_status":             "STRING  — enum: Approved | Disapproved | Pending",
@@ -574,12 +574,12 @@ This section documents the three most impactful design decisions and the reasoni
 
 **Embedded guidance blocks (between rules 4 and 5):**
 - **TOPIC CLASSIFICATION**: Explicit boundary rules for all 9 canonical topics (e.g., "OEM Strategy = broad pivots, NOT single program updates"; "'Closure Technology & Innovation': ONLY when latch/door/handle/digital key/smart entry/cinch appears explicitly").
-- **CLOSURE SYSTEMS COMPETITORS**: Tier 1 (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku) and Tier 2 (Ushin, Witte, Mitsuba, Fudi, PHA, Cebi, Tri-Circle) recognized as `actor_type='supplier'`; Kiekert triggers `mentions_our_company=true`.
+- **CLOSURE SYSTEMS COMPETITORS**: Tier 1 (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku) and Tier 2 (Ushin, Witte, Mitsuba, Fudi, PHA, Cebi, Tri-Circle) recognized as `actor_type='supplier'`; Apex Mobility triggers `mentions_our_company=true`.
 
 **Full verbatim extraction prompt:**
 
 ```
-You are extracting structured intelligence for Kiekert, an automotive closure systems supplier
+You are extracting structured intelligence for Apex Mobility, an automotive closure systems supplier
 (door latches, strikers, handles, smart entry, cinch systems).
 Return JSON only matching the schema. Follow these rules strictly:
 
@@ -620,7 +620,7 @@ TOPIC CLASSIFICATION — pick 1-4 topics using these rules:
 CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):
 Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku
 Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle
-Our company: Kiekert (set mentions_our_company=true if mentioned)
+Our company: Apex Mobility (set mentions_our_company=true if mentioned)
 
 5) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.
 6) If numeric facts are present in the article, at least one evidence_bullet must include a
@@ -676,7 +676,7 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 **Approach chosen:** A two-layer priority classification system:
 
-1. **Deterministic postprocess override (`_boost_priority()` in `src/postprocess.py`):** Runs after model extraction and upgrades priority to High when hard signals are present, regardless of what the model returned. This is the authoritative priority signal. Note: an earlier version of the system included an LLM prompt rule for priority (formerly rule 8 in `extraction_prompt()`); this was removed when it was determined that deterministic postprocess rules produce more consistent results than LLM self-classification for Kiekert-specific business context.
+1. **Deterministic postprocess override (`_boost_priority()` in `src/postprocess.py`):** Runs after model extraction and upgrades priority to High when hard signals are present, regardless of what the model returned. This is the authoritative priority signal. Note: an earlier version of the system included an LLM prompt rule for priority (formerly rule 8 in `extraction_prompt()`); this was removed when it was determined that deterministic postprocess rules produce more consistent results than LLM self-classification for Apex Mobility-specific business context.
 
    The deterministic boost fires when any of these signals are present:
    - Signal 1: `mentions_our_company` is true
@@ -684,7 +684,7 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
    - Signal 3: footprint region + closure keyword (latch, door system, handle, digital key, smart entry, cinch, striker) found in title/evidence/insights
    - Signal 4: footprint region + key OEM customer (Volkswagen, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes-Benz, Nissan, Honda, Renault, Tata, Mahindra, BYD, Geely, Chery, Great Wall)
 
-**Why this works:** The deterministic postprocess acts as the authoritative priority signal — it catches cases where the model underestimates priority because it does not know Kiekert's specific business context (e.g., which OEMs are customers, which regions are manufacturing footprint). Deterministic rules are more consistent and auditable than LLM self-classification for domain-specific priority decisions. Business-critical signals are never missed, even when the model defaults to Medium.
+**Why this works:** The deterministic postprocess acts as the authoritative priority signal — it catches cases where the model underestimates priority because it does not know Apex Mobility's specific business context (e.g., which OEMs are customers, which regions are manufacturing footprint). Deterministic rules are more consistent and auditable than LLM self-classification for domain-specific priority decisions. Business-critical signals are never missed, even when the model defaults to Medium.
 
 **Note:** Existing records ingested before v4.3 retain their original priority and need re-ingest to benefit from the new classification.
 
@@ -702,7 +702,7 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
    | `source_type` not "Other" | +2 | Known publisher = trustworthy source |
    | `evidence_bullets` count | +1 to +2 | 2 bullets = +1, 3+ bullets = +2 |
    | `key_insights` count | +1 | At least 2 present |
-   | `regions_relevant_to_kiekert` non-empty | +1 | Relevance clarity signal |
+   | `regions_relevant_to_apex_mobility` non-empty | +1 | Relevance clarity signal |
    | Postprocess rule corrections (per 3 rules fired) | −1 each | More corrections = lower extraction quality |
    | `publish_date` backfilled by regex | −1 | LLM missed an extractable date |
 
@@ -755,7 +755,7 @@ In addition, the repair prompt (`fix_json_prompt()`) was enhanced to include the
 
 1. **Topic tagging guidance** → moved into `src/constants.py` as structured comments above `CANON_TOPICS`, and into `extraction_prompt()` in `src/model_router.py` as LLM instructions.
 2. **Competitor context** → injected into the extraction prompt so the LLM recognizes closure system suppliers by name and tier.
-3. **Kiekert identity** → added as the opening line of the extraction prompt, giving the LLM domain context for all classification decisions.
+3. **Apex Mobility identity** → added as the opening line of the extraction prompt, giving the LLM domain context for all classification decisions.
 4. **Company watchlist** → kept as the sole remaining Markdown reference file (`References/company-watchlist.md`), stripped of all content that duplicated code (outdated regions, priority rules).
 
 **Before the change — extraction prompt (abbreviated):**
@@ -769,7 +769,7 @@ Use only the provided text.
 
 **After the change — extraction prompt (abbreviated):**
 ```
-You are extracting structured intelligence for Kiekert, an automotive closure systems
+You are extracting structured intelligence for Apex Mobility, an automotive closure systems
 supplier (door latches, strikers, handles, smart entry, cinch systems).
 Return JSON only matching the schema. Follow these rules strictly:
 ...
@@ -782,12 +782,12 @@ TOPIC CLASSIFICATION — pick 1-4 topics using these rules:
 CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):
 Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku
 Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle
-Our company: Kiekert (set mentions_our_company=true if mentioned)
+Our company: Apex Mobility (set mentions_our_company=true if mentioned)
 ```
 
 **Did it improve performance?** Yes, in two measurable ways:
 - **Topic classification:** The explicit boundary rules (e.g., "OEM Strategy = broad pivots, NOT single program updates" vs "OEM Programs = specific announcements, NOT broad strategy") give the LLM clear decision criteria instead of forcing it to infer boundaries from label names alone.
-- **Competitor recognition:** The LLM now correctly tags closure system competitors as `actor_type='supplier'` and recognizes Kiekert mentions for `mentions_our_company=true`, which feeds the deterministic `_boost_priority()` postprocess.
+- **Competitor recognition:** The LLM now correctly tags closure system competitors as `actor_type='supplier'` and recognizes Apex Mobility mentions for `mentions_our_company=true`, which feeds the deterministic `_boost_priority()` postprocess.
 
 **Bottleneck encountered:** The biggest frustration was discovering how far the spec files had drifted. For example, `SKILL_final.md` still listed `strategic_implications` and `recommended_actions` as required schema fields — fields that had been intentionally removed months earlier to achieve leaner, deterministic ingest. `context-watchlist.md` still used the legacy `Europe (including Russia)` region — a bucket that had been split into `Western Europe` and `Eastern Europe` in the code. Each outdated reference was a potential source of confusion for anyone (human or AI) reading the project documentation.
 
@@ -837,7 +837,7 @@ The former rules 7 and 8 (list deduplication and software/AI features) were renu
   "source_type": "S&P",
   "country_mentions": ["Germany", "France", "Spain", "Italy"],
   "government_entities": ["EU", "European Commission"],
-  "regions_relevant_to_kiekert": ["Western Europe"]
+  "regions_relevant_to_apex_mobility": ["Western Europe"]
 }
 ```
 *The EU and European Commission were never explicitly named in the document. The model inferred them from the France/Spain/Germany context.*
@@ -849,7 +849,7 @@ The former rules 7 and 8 (list deduplication and software/AI features) were renu
   "source_type": "S&P",
   "country_mentions": ["Germany", "France", "Spain", "Italy"],
   "government_entities": [],
-  "regions_relevant_to_kiekert": ["Western Europe"]
+  "regions_relevant_to_apex_mobility": ["Western Europe"]
 }
 ```
 *With rule 7 in place, the model returns an empty list because no government body is explicitly named in the text.*
@@ -962,7 +962,7 @@ if "China" in merged and "China" not in implied:
 
 *`src/constants.py` — macro theme tightened:*
 ```python
-"region_requirements": {"China"},  # China must be in regions_relevant_to_kiekert
+"region_requirements": {"China"},  # China must be in regions_relevant_to_apex_mobility
 ```
 
 **Verified result:** `regions_mentioned: ["Western Europe"]`, `macro_themes_detected: []`, `priority: Medium`, audit flag `china_region_removed_no_china_country_mention` confirms the guard fired.
@@ -1021,7 +1021,7 @@ To address this, the system includes an automated quality monitoring module (`sr
 | Near-duplicate titles | Fuzzy title match (≥85% similarity) across records with different dedupe keys | Medium |
 | Geo leakage | Footprint regions present that cannot be derived from country_mentions | High |
 | Display bucket leakage | Country-level values (India, China, etc.) appearing in `regions_mentioned` instead of display buckets (Asia) | High |
-| Missing footprint region | Country present in `country_mentions` but its derived footprint region missing from `regions_relevant_to_kiekert` | Medium |
+| Missing footprint region | Country present in `country_mentions` but its derived footprint region missing from `regions_relevant_to_apex_mobility` | Medium |
 | Duplicate values | Repeated entries in companies, countries, or regions (after normalization) | Medium |
 | Canonicalization inconsistency | Multiple alias forms of the same company (e.g., VW + Volkswagen) surviving dedup | Medium |
 | Macro theme rule violation | Theme fired without meeting min_groups, premium company gate, or region requirement | High |
@@ -1158,7 +1158,7 @@ The following metrics were defined upfront as success criteria. Each metric is s
 |---|---|---|
 | **Schema pass rate** | % of documents where the LLM returns a valid JSON record on the first extraction attempt (no repair needed) | Count of first-pass successes / total documents |
 | **Evidence grounding rate** | % of evidence bullets that can be verified against the source PDF text (≥60% keyword overlap) | `src/quality.py` evidence grounding check |
-| **Geo determinism rate** | % of records where `regions_relevant_to_kiekert` is fully derivable from `country_mentions` with no leakage | `src/quality.py` geo check (KPI R5) |
+| **Geo determinism rate** | % of records where `regions_relevant_to_apex_mobility` is fully derivable from `country_mentions` with no leakage | `src/quality.py` geo check (KPI R5) |
 | **Topic consistency** | % of records using only canonical topic names with correct boundary application | Manual review of topic assignments vs. boundary rules |
 | **Publisher classification accuracy** | % of records where `source_type` matches the actual publisher (not a cited source) | Manual comparison of record vs. PDF header |
 | **Analyst override rate** | % of records where a human reviewer changed any field during Review & Approve | Track from review log |
@@ -1191,7 +1191,7 @@ Three representative document types cover the main extraction challenge categori
 |---|---|---|---|
 | `source_type` | `S&P` or `Industry Publication` | [fill] | [0–5] |
 | `regions_mentioned` | `Western Europe` (display bucket) | [fill] | [0–5] |
-| `regions_relevant_to_kiekert` | `Western Europe` (from country data) | [fill] | [0–5] |
+| `regions_relevant_to_apex_mobility` | `Western Europe` (from country data) | [fill] | [0–5] |
 | `country_mentions` | Countries with reported registration data only | [fill] | [0–5] |
 | `government_entities` | Empty `[]` (no named regulator in text) | [fill] | [0–5] |
 | Evidence grounding | All bullets traceable to source text | [fill] | [0–5] |
@@ -1201,7 +1201,7 @@ Three representative document types cover the main extraction challenge categori
 ---
 
 **Test Case B — OEM/Competitor Strategy Article (Priority-driven)**
-*Document type:* Bloomberg or S&P Global article about an OEM strategic announcement (BEV mix change, sourcing shift, or program update) relevant to Kiekert's key customers.
+*Document type:* Bloomberg or S&P Global article about an OEM strategic announcement (BEV mix change, sourcing shift, or program update) relevant to Apex Mobility's key customers.
 *Challenge:* Publisher-vs-cited-source disambiguation (Bloomberg article may cite Reuters); priority classification (should trigger High via `_boost_priority()` if key OEM + footprint region); macro theme detection.
 
 | Field | Expected | Extracted | Score |
@@ -1267,7 +1267,7 @@ Key failure modes observed during testing:
 
 2. **Publisher confusion (pre-fix):** The model classified `source_type = "Reuters"` for S&P Global articles that cited Reuters in the body. Root cause: no publisher-vs-cited-source distinction in the prompt. Fix: rules 1–2 in the extraction prompt. Residual risk: articles with multiple publisher headers may still confuse the rule.
 
-3. **Geo signal distortion (pre-fix):** Articles mentioning "US tariff conflicts" as geopolitical backdrop were incorrectly including "United States" in `country_mentions`, propagating to `regions_relevant_to_kiekert`. Fix: rule 10 (operational markets only). Residual risk: borderline articles where "US" appears both as tariff context and as a sales market.
+3. **Geo signal distortion (pre-fix):** Articles mentioning "US tariff conflicts" as geopolitical backdrop were incorrectly including "United States" in `country_mentions`, propagating to `regions_relevant_to_apex_mobility`. Fix: rule 10 (operational markets only). Residual risk: borderline articles where "US" appears both as tariff context and as a sales market.
 
 4. **Low-confidence auto-approval gap:** Records from `source_type='Other'` or with missing `publish_date` correctly route to Pending. However, analysts sometimes approve without fully reviewing evidence, which is a process risk outside the system's control.
 
@@ -1311,7 +1311,7 @@ Key failure modes observed during testing:
 * **Publisher-vs-cited-source confusion** was a persistent extraction error that required explicit prompt rules to fix. The model would see "Reuters" in an S&P article body and set source_type="Reuters" despite S&P being the publisher. This was not fixable by postprocessing alone — it required changing the extraction prompt.
 * **Balancing cleanup aggressiveness:** too-aggressive text cleaning risks removing legitimate content (e.g., short lines that are actually article subheadings). The safety fallback (preserve original if cleaned text drops below 2K chars) and the diagnostic display in the UI help the analyst catch over-cleaning.
 * **Chunk boundary effects:** when a document is split into chunks, entities or dates that span a chunk boundary can be missed. The 800-char overlap mitigates this but does not eliminate it entirely.
-* **Priority defaulting to Medium:** without explicit priority criteria in the prompt, the model defaulted every record to "Medium" — a safe but useless classification. Fixing this required both prompt-side rules (defining what High/Medium/Low mean for Kiekert) and code-side deterministic overrides. The lesson is that business-specific classifications need explicit criteria; the model cannot infer domain-specific priority without guidance.
+* **Priority defaulting to Medium:** without explicit priority criteria in the prompt, the model defaulted every record to "Medium" — a safe but useless classification. Fixing this required both prompt-side rules (defining what High/Medium/Low mean for Apex Mobility) and code-side deterministic overrides. The lesson is that business-specific classifications need explicit criteria; the model cannot infer domain-specific priority without guidance.
 * **API rate limits on free tier:** the Gemini free tier's 20 RPD per model constraint required rethinking the entire chunked extraction approach. The original per-chunk two-pass strategy (Flash-Lite → Flash for each chunk) could consume 6-8 calls for a single multi-chunk document. Meta-based routing and two-phase repair were necessary to stay within budget.
 * **LLM confidence self-assessment bias:** the model consistently rated its own confidence as "High" even for poorly extracted records (missing dates, unknown source types, sparse evidence). This was invisible until we compared model-reported confidence against actual field completeness. The fix required replacing self-assessment entirely with a computed score — a reminder that LLMs cannot reliably judge the quality of their own outputs without external grounding signals.
 * **Spec drift during iterative AI-assisted development:** The project started with carefully authored Markdown specification files (SKILL.md, topic-taxonomy.md, company-watchlist.md) that defined the system's taxonomy, regions, and competitive context. As the codebase evolved through dozens of iterations — adding new region tiers, removing schema fields, changing actor types — these spec files were never updated. Within weeks, every reference document contained outdated information while the code had moved on. Worse, the topic tagging guidance and competitor context that lived in these files were never wired into the LLM's extraction prompt, meaning the model was flying blind on domain-specific classification decisions. The fix was to consolidate all domain guidance into the code itself (constants.py comments + extraction prompt instructions) and reduce the reference files to a single competitive intelligence document. The lesson: in iterative AI-assisted development, treat the code as the single source of truth from the start, not the spec documents.
@@ -1360,11 +1360,11 @@ The system works reliably for clean or semi-clean PDF content from known publish
 
 ### 12.1 Publisher and source bias
 
-The system's publisher ranking hierarchy (S&P=100 > Bloomberg=90 > Reuters=80 > Automotive News=75 > … > Other=50) encodes institutional authority assumptions that reflect Western, English-language automotive media. This creates systematic bias: a well-sourced regional press release from an Asian trade publication may be ranked below a brief S&P note, even if the regional source contains more specific operational intelligence. Engineering teams should audit the publisher ranking against Kiekert's actual source value experience and add regional publisher categories.
+The system's publisher ranking hierarchy (S&P=100 > Bloomberg=90 > Reuters=80 > Automotive News=75 > … > Other=50) encodes institutional authority assumptions that reflect Western, English-language automotive media. This creates systematic bias: a well-sourced regional press release from an Asian trade publication may be ranked below a brief S&P note, even if the regional source contains more specific operational intelligence. Engineering teams should audit the publisher ranking against Apex Mobility's actual source value experience and add regional publisher categories.
 
 ### 12.2 Topic taxonomy bias
 
-The 9 canonical topics were designed from Kiekert's perspective as a closure systems supplier. Coverage skews toward OEM strategy, supply chain, technology partnerships, and financial performance — all viewed through the lens of a Tier-1 supplier's strategic concerns. Topics with no canonical bucket (e.g., labor relations, environmental compliance, community impact) are likely to be miscategorized or tagged as low-priority. Analysts should be aware that the taxonomy shapes what the system considers relevant.
+The 9 canonical topics were designed from Apex Mobility's perspective as a closure systems supplier. Coverage skews toward OEM strategy, supply chain, technology partnerships, and financial performance — all viewed through the lens of a Tier-1 supplier's strategic concerns. Topics with no canonical bucket (e.g., labor relations, environmental compliance, community impact) are likely to be miscategorized or tagged as low-priority. Analysts should be aware that the taxonomy shapes what the system considers relevant.
 
 ### 12.3 Privacy and data handling
 
@@ -1462,7 +1462,7 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
    - Rule 9: Software/AI features evidence (SDV, infotainment, autonomy → at least one evidence bullet + keywords)
    - Rule 10: Country mentions operational filter (ONLY countries where market data is reported; excludes tariff/geopolitical context)
    - Embedded: TOPIC CLASSIFICATION block with boundary rules for all 9 canonical topics
-   - Embedded: CLOSURE SYSTEMS COMPETITORS block (Tier 1/Tier 2 suppliers + Kiekert identity)
+   - Embedded: CLOSURE SYSTEMS COMPETITORS block (Tier 1/Tier 2 suppliers + Apex Mobility identity)
    - Repair prompt includes specific validation errors for targeted fixes
    - Priority and confidence are NOT in the extraction prompt — both are computed deterministically by postprocess
 
@@ -1472,7 +1472,7 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 
 5. **Computed Confidence** (`src/postprocess.py`)
    - Replaces LLM self-assessed confidence with a deterministic score computed from observable extraction signals
-   - Scoring: +2 publish_date present, +2 known source_type, +1–2 evidence bullets, +1 key_insights, +1 kiekert regions, −1 per 3 rule corrections, −1 if date backfilled by regex
+   - Scoring: +2 publish_date present, +2 known source_type, +1–2 evidence bullets, +1 key_insights, +1 Apex Mobility regions, −1 per 3 rule corrections, −1 if date backfilled by regex
    - Thresholds: ≥7 → High, ≥4 → Medium, <4 → Low
    - Full audit trail in `_confidence_detail` (LLM original, computed value, numeric score, per-signal breakdown)
    - Feeds auto-approval, weekly brief ranking, and dedup tie-breaking

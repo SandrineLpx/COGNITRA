@@ -1,6 +1,6 @@
 # Company Watchlist — Closure Systems Focus
 
-> **Kiekert domain scope and region architecture are defined in `AGENTS.md`.**
+> **Apex Mobility domain scope and region architecture are defined in `AGENTS.md`.**
 > **Region enums and country mappings live in `src/constants.py` and `src/postprocess.py`.**
 > This file tracks companies, competitive landscape, and technology ecosystem only.
 
@@ -8,7 +8,7 @@ Key companies tracked for automotive closure systems market intelligence. Primar
 
 ---
 ## Our Company
-- **Kiekert AG (Kiekert)** - German, latches and closure systems
+- **Apex Mobility AG (Apex Mobility)** - German, latches and closure systems
 
 ## Direct Competitors (Closure Systems Tier-1 Suppliers)
 

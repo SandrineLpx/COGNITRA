@@ -11,9 +11,9 @@
 | **Home** | Landing page, workflow description | `ui_helpers` |
 | **01 Ingest** | Upload PDF or paste text → extract → clean → LLM → postprocess → dedupe → save | `pdf_extract`, `text_clean_chunk`, `model_router`, `postprocess`, `schema_validate`, `dedupe`, `storage` |
 | **02 Review** | Filter queue, inspect records, edit JSON, approve/disapprove, re-ingest from stored PDF | `storage`, `model_router`, `postprocess`, `schema_validate`, `render_brief` |
-| **03 Weekly Executive Brief** | Select approved records, generate AI brief, export as MD / email, diff vs previous brief | `briefing`, `storage` |
+| **03 Brief** | Select approved records, generate AI brief, export as MD / email, diff vs previous brief | `briefing`, `storage` |
 | **04 Insights** | Analytics: volume histogram, region×topic heatmap, topic momentum, company mentions, quality score trend, drilldown table | `storage`, `dedupe`, `quality` |
-| **08 Admin** | CSV/JSONL export, deduplication stats, demo reset | `storage`, `dedupe` |
+| **Admin** | CSV/JSONL export, deduplication stats, demo reset | `storage`, `dedupe` |
 
 ### Ingest pipeline at a glance
 
@@ -184,7 +184,7 @@ Merge all successful chunk records:
 **Provider fallback chain (auto mode):** `gemini → claude → chatgpt`
 Claude and ChatGPT raise `NotImplementedError` — Gemini is the only active provider.
 
-**Extraction prompt encodes:** Kiekert domain context (door latches, strikers, handles, smart entry, cinch systems), 9 topic classification rules with disambiguation guidance, source_type / actor_type assignment rules, closure systems competitor list (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku…), evidence bullet rules (2–4 bullets ≤ 25 words; must include a verbatim numeric fact if present in the article).
+**Extraction prompt encodes:** Apex Mobility domain context (door latches, strikers, handles, smart entry, cinch systems), 9 topic classification rules with disambiguation guidance, source_type / actor_type assignment rules, closure systems competitor list (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku…), evidence bullet rules (2–4 bullets ≤ 25 words; must include a verbatim numeric fact if present in the article).
 
 ---
 
@@ -198,7 +198,7 @@ Deterministic normalization applied after every LLM call. `priority`, `confidenc
 | Company canonicalization | Normalizes OEM names via `_OEM_CANONICAL_BY_LOWER` map |
 | Country normalization | `COUNTRY_ALIASES`: USA/U.S./us → United States |
 | Region normalization | `REGION_ALIASES`: LATAM → South America, EU → Europe, "Asia" → South Asia, "Western Europe" → West Europe |
-| `regions_relevant_to_kiekert` | Derived from `country_mentions` via `COUNTRY_TO_FOOTPRINT` map; never LLM-set |
+| `regions_relevant_to_apex_mobility` | Derived from `country_mentions` via `COUNTRY_TO_FOOTPRINT` map; never LLM-set |
 | `priority` | Computed from source type + topic + company signals + macro theme escalation |
 | `confidence` | Computed from evidence quality, date presence, topic clarity |
 | `macro_themes_detected` | Pattern-matched from topics + keywords against `MACRO_THEME_RULES` |
@@ -223,7 +223,7 @@ Hard gate — record passes only if all constraints are satisfied. Failure trigg
 | `evidence_bullets` | List of exactly 2–4 items |
 | `key_insights` | List of exactly 2–4 items |
 | `regions_mentioned` | All in `DISPLAY_REGIONS`, no duplicates, ≤ 15 |
-| `regions_relevant_to_kiekert` | All in `FOOTPRINT_REGIONS` |
+| `regions_relevant_to_apex_mobility` | All in `FOOTPRINT_REGIONS` |
 
 ---
 
@@ -242,7 +242,7 @@ Hard gate — record passes only if all constraints are satisfied. Failure trigg
                          Automotive News=75, Industry Publication=72, Other=50
        confidence_score: High=3, Medium=2, Low=1
        completeness    : +1 each for publish_date present, original_url present,
-                         regions_relevant_to_kiekert non-empty, evidence_bullets ≥ 3
+                         regions_relevant_to_apex_mobility non-empty, evidence_bullets ≥ 3
 
        IF new record scores higher  → existing.is_duplicate = True
        IF existing scores higher    → new.is_duplicate = True
@@ -266,7 +266,7 @@ ELSE → review_status = "Pending"
 
 ---
 
-### Page 02 — Review & Approve (`pages/02_Review_Approve.py`)
+### Page 02 — Review (`pages/02_Review.py`)
 
 **UI:** Filterable queue (priority / status / source / text search). Queue summary: brief-eligible count (Approved + `is_duplicate=False`), pending, excluded. Record detail panel with evidence, insights, source link, editable raw JSON. Quick Approve / Quick Disapprove / Save buttons. "Iteration / Quality Fix" expander to delete record, delete stored PDF only, or re-run full extraction from the stored PDF with a fresh LLM call.
 
@@ -276,7 +276,7 @@ ELSE → review_status = "Pending"
 
 ---
 
-### Page 03 — Weekly Executive Brief (`pages/03_Weekly_Executive_Brief.py`)
+### Page 03 — Brief (`pages/03_Brief.py`)
 
 **UI:** Time-window selector (days back; date basis: `publish_date` or `created_at`). Candidate table annotated with already-shared history. Multiselect for record inclusion (pre-selected: Approved + `is_duplicate=False`). Generates AI brief via LLM. Three output formats: rendered Markdown, plain-text copy, executive email draft. Save / download `.md` / open in email client. Diff view against previous saved brief.
 
@@ -302,7 +302,7 @@ Brief history: records already in a saved brief flagged "already_shared",
 |---|---|---|
 | 1 | **KPI row** | Records / Approved / Pending / Disapproved / Duplicates (`is_duplicate=True`) / High Priority |
 | 2 | **Weekly histogram** | Record volume by week, stacked by source type (Altair) |
-| 3 | **Region × Topic heatmap** | Cross-tab of `regions_relevant_to_kiekert` × `topics` (matplotlib) |
+| 3 | **Region × Topic heatmap** | Cross-tab of `regions_relevant_to_apex_mobility` × `topics` (matplotlib) |
 | 4 | **Topic Momentum** | Weighted frequency change prior half vs recent half of date range; classified Emerging / Expanding / Fading / Stable (Altair horizontal bar + detail table) |
 | 5 | **Top Company Mentions** | Top 10 canonicalized companies, unique per record (matplotlib) |
 | 6 | **Quality Score Trend** | KPI metrics row (Overall Score, Evidence Grounding, Canonicalization, Geo Determinism with run-over-run deltas) + Altair line chart of Overall / Record / Brief scores over time, threshold lines at 80 (good) and 60 (warning) |
@@ -312,7 +312,7 @@ Brief history: records already in a saved brief flagged "already_shared",
 
 ---
 
-### Page 08 — Admin (`pages/08_Admin.py`)
+### Admin (`pages/Admin.py`)
 
 **UI:** Canonical vs all records toggle with deduplication metrics. CSV export (flat, approved-only option). Bulk JSONL export to `data/canonical.jsonl` + `data/duplicates.jsonl`. "Danger Zone" — wipe all records (demo reset, requires confirmation checkbox).
 

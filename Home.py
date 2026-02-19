@@ -1,8 +1,10 @@
+from pathlib import Path
+from pathlib import Path
 import streamlit as st
 
 from src import ui
 from src.postprocess import validate_csv_consistency
-from src.ui_helpers import enforce_navigation_lock
+from src.ui_helpers import enforce_navigation_lock, load_records_cached
 
 st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("home")
@@ -13,7 +15,22 @@ ui.render_page_header(
     subtitle="Automotive market intelligence workspace",
     active_step=None,
 )
-ui.render_sidebar_utilities(model_label="auto")
+
+
+def _path_signature(path: Path) -> tuple[bool, int, int]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return (False, 0, 0)
+    return (True, int(stat.st_size), int(stat.st_mtime_ns))
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def _cached_csv_warnings(_csv_sig: tuple[bool, int, int]) -> list[str]:
+    return validate_csv_consistency()
+
+
+records = load_records_cached()
 
 with ui.card("Workflow", "Use the left sidebar to navigate pages."):
     st.markdown(
@@ -26,7 +43,7 @@ with ui.card("Workflow", "Use the left sidebar to navigate pages."):
 """
     )
 
-_csv_warnings = validate_csv_consistency()
+_csv_warnings = _cached_csv_warnings(_path_signature(Path("data/new_country_mapping.csv")))
 if _csv_warnings:
     with ui.card("Region Mapping Drift", "Detected between CSV mapping and Python constants."):
         with st.expander(f"{len(_csv_warnings)} issue(s)", expanded=False):

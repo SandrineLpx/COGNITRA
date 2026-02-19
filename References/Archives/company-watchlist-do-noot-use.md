@@ -11,7 +11,7 @@ Keep aliases minimal (0–2). Add an alias only if it commonly appears in source
 
 ## Our company
 
-- Kiekert AG (Kiekert)
+- Apex Mobility AG (Apex Mobility)
 
 ---
 
@@ -75,7 +75,7 @@ Add only if you frequently ingest official releases and want consistent naming.
 
 ---
 
-## Footprint regions (Kiekert relevance)
+## Footprint regions (Apex Mobility relevance)
 
 Use these regions to elevate relevance even when an item is not explicitly about closure systems.
 

@@ -32,7 +32,7 @@ Government/Regulators (if applicable)
 Geography
 Countries Mentioned: [list]
 Regions Mentioned (display buckets): [West Europe | Central Europe | East Europe | Africa | Middle East | NAFTA | ASEAN | Indian Subcontinent | Andean | Mercosul | Central America | Oceania | Rest of World | Europe | South America | South Asia | Czech Republic | France | Germany | Italy | Morocco | Mexico | Portugal | Russia | Spain | Sweden | United Kingdom | United States | Thailand | India | China | Taiwan | Japan | South Korea]
-Regions Relevant to Kiekert (footprint): same valid values as display buckets above
+Regions Relevant to Apex Mobility (footprint): same valid values as display buckets above
 
 Topics Covered (canonical)
 - [1-4 topics from the canonical list]

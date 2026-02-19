@@ -26,7 +26,7 @@ Topic names, tagging guidance (comments), and LLM prompt rules all live in code.
 Most coupled to code. Check all three layers.
 
 - [ ] **Display regions** (`DISPLAY_REGIONS` in `constants.py`): broad buckets still correct? New continent-level region needed?
-- [ ] **Footprint regions** (`FOOTPRINT_REGIONS` in `constants.py`): Kiekert operational footprint changed? New plant country?
+- [ ] **Footprint regions** (`FOOTPRINT_REGIONS` in `constants.py`): Apex Mobility operational footprint changed? New plant country?
 - [ ] **Collapse map** (`FOOTPRINT_TO_DISPLAY` in `constants.py`): every footprint entry maps to a display bucket?
 - [ ] **Country mappings** (`COUNTRY_TO_FOOTPRINT` in `postprocess.py`): new countries appearing in ingested articles that aren't mapped?
 - [ ] **City hints** (`_CITY_REGION_HINTS` in `postprocess.py`): new major auto-industry cities to add?

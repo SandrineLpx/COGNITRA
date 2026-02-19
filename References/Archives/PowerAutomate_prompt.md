@@ -25,7 +25,7 @@ Extract the following information:
 Allowed topic types (preferred):
 - Automotive trends: EV, BEV, PHEV, SDV, ADAS, autonomous, connectivity, mobility, hydrogen.
 - OEM names: Toyota, GM, BYD, Hyundai, Stellantis, etc.
-- Supplier names: Kiekert, Brose, Aisin, Magna, Hi-Lex, Huf etc.
+- Supplier names: Apex Mobility, Brose, Aisin, Magna, Hi-Lex, Huf etc.
 - Technologies: battery, LFP, NCM, DRAM, semiconductors, infotainment, ECU, OTA
 - Supply chain: logistics, parts shortage, tariffs, reshoring, BOM impacts.
 - Economics/market: pricing, demand, incentives, regulations (IRA, CBAM, CATL tariffs).

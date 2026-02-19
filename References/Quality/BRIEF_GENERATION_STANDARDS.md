@@ -16,7 +16,7 @@ This standard defines what “executive-grade” means for Cognitra output.
 - Every major claim must cite ≥ 1 REC ID that contains supporting evidence.
 - Never upgrade certainty:
   - “weighing / sources said / expected / could” must stay probabilistic.
-- If a claim is an implication for Kiekert, label it as:
+- If a claim is an implication for Apex Mobility, label it as:
   - “Implication” (inference) and keep it tied to the evidence.
 
 ## 3) Required Sections + Quality Bar
@@ -25,7 +25,7 @@ This standard defines what “executive-grade” means for Cognitra output.
 - 3 bullets max
 - Each bullet must:
   - synthesize across ≥ 2 RECs OR explicitly state it is single-REC
-  - include “so what for Kiekert”
+  - include “so what for Apex Mobility”
   - cite RECs
 
 ### B. High Priority Developments
@@ -33,7 +33,7 @@ This standard defines what “executive-grade” means for Cognitra output.
 - Format per item:
   - What happened (facts) + evidence tie
   - Why it matters (short)
-  - Kiekert implication (inference)
+  - Apex Mobility implication (inference)
   - Watch-for trigger (next signal)
 
 ### C. Footprint Signals

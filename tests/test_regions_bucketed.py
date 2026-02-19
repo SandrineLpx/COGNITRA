@@ -3,10 +3,10 @@ Regression tests for regions_bucketed_deduped logic.
 
 New design (new_country_mapping.csv):
 - FOOTPRINT_TO_DISPLAY = {} (identity mapping; every footprint value is its own display value).
-- Individual Kiekert countries (France, Germany, Japan, South Korea, etc.) appear by name in
-  both regions_mentioned and regions_relevant_to_kiekert.
+- Individual Apex Mobility countries (France, Germany, Japan, South Korea, etc.) appear by name in
+  both regions_mentioned and regions_relevant_to_apex_mobility.
 - Non-individual countries collapse to their market bucket (Canada→NAFTA, Vietnam→ASEAN, etc.).
-- regions_relevant_to_kiekert is derived strictly from country_mentions.
+- regions_relevant_to_apex_mobility is derived strictly from country_mentions.
 - regions_mentioned adds hints from record text on top of the derived values.
 
 Run with: pytest tests/test_regions_bucketed.py -v
@@ -32,7 +32,7 @@ def _base_record(**overrides):
         "keywords": ["auto"],
         "country_mentions": [],
         "regions_mentioned": [],
-        "regions_relevant_to_kiekert": [],
+        "regions_relevant_to_apex_mobility": [],
         "evidence_bullets": ["Fact one", "Fact two"],
         "key_insights": ["Insight one", "Insight two"],
         "review_status": "Pending",
@@ -47,7 +47,7 @@ class TestRegionsBucketedDeduped:
 
     def test_bloomberg_toyota_ceo_regions_are_valid_footprint_values(self):
         """Bloomberg Toyota CEO article: regions_mentioned should have valid footprint
-        values — individual Kiekert countries (Japan, United States, China) appear by name.
+        values — individual Apex Mobility countries (Japan, United States, China) appear by name.
         """
         rec = _base_record(
             title="Toyota CEO Discusses Tariff Impact in Tokyo Press Conference",
@@ -61,30 +61,30 @@ class TestRegionsBucketedDeduped:
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
-        # Individual Kiekert countries appear by name in regions_mentioned
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
+        # Individual Apex Mobility countries appear by name in regions_mentioned
         assert "Japan" in regions, f"Japan missing; got {regions}"
         assert "United States" in regions, f"United States missing; got {regions}"
         assert "China" in regions, f"China missing; got {regions}"
         # All values are valid footprint entries
         for r in regions:
             assert r in FOOTPRINT_REGIONS, f"{r} is not a valid FOOTPRINT_REGIONS value"
-        # Country-level detail also preserved in kiekert field
-        assert "Japan" in kiekert, f"Japan missing from regions_relevant_to_kiekert; got {kiekert}"
-        assert "China" in kiekert, f"China missing from regions_relevant_to_kiekert; got {kiekert}"
+        # Country-level detail also preserved in apex_mobility field
+        assert "Japan" in apex_mobility, f"Japan missing from regions_relevant_to_apex_mobility; got {apex_mobility}"
+        assert "China" in apex_mobility, f"China missing from regions_relevant_to_apex_mobility; got {apex_mobility}"
 
     def test_japan_country_maps_to_own_name(self):
         """Japan in country_mentions produces 'Japan' in both regions_mentioned
-        and regions_relevant_to_kiekert (Japan is an individual Kiekert entry)."""
+        and regions_relevant_to_apex_mobility (Japan is an individual Apex Mobility entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Japan"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
         assert "Japan" in regions, f"Japan missing from regions_mentioned; got {regions}"
-        assert "Japan" in kiekert, f"Japan missing from regions_relevant_to_kiekert; got {kiekert}"
+        assert "Japan" in apex_mobility, f"Japan missing from regions_relevant_to_apex_mobility; got {apex_mobility}"
 
     def test_china_country_maps_to_own_name(self):
         """China in country_mentions produces 'China' in both fields."""
@@ -94,57 +94,57 @@ class TestRegionsBucketedDeduped:
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
         assert "China" in regions, f"China missing from regions_mentioned; got {regions}"
-        assert "China" in kiekert, f"China missing from regions_relevant_to_kiekert; got {kiekert}"
+        assert "China" in apex_mobility, f"China missing from regions_relevant_to_apex_mobility; got {apex_mobility}"
 
     def test_india_country_maps_to_own_name(self):
-        """India in country_mentions produces 'India' (individual Kiekert entry)."""
+        """India in country_mentions produces 'India' (individual Apex Mobility entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["India"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
         assert "India" in regions, f"India missing from regions_mentioned; got {regions}"
-        assert "India" in kiekert
+        assert "India" in apex_mobility
 
     def test_mexico_country_maps_to_own_name(self):
-        """Mexico in country_mentions produces 'Mexico' (individual Kiekert entry)."""
+        """Mexico in country_mentions produces 'Mexico' (individual Apex Mobility entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Mexico"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
         assert "Mexico" in regions, f"Mexico missing from regions_mentioned; got {regions}"
-        assert "Mexico" in kiekert
+        assert "Mexico" in apex_mobility
 
     def test_russia_country_maps_to_own_name(self):
-        """Russia in country_mentions produces 'Russia' (individual Kiekert entry)."""
+        """Russia in country_mentions produces 'Russia' (individual Apex Mobility entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Russia"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
         assert "Russia" in regions, f"Russia missing from regions_mentioned; got {regions}"
-        assert "Russia" in kiekert
+        assert "Russia" in apex_mobility
 
     def test_south_korea_country_maps_to_own_name(self):
-        """South Korea in country_mentions produces 'South Korea' (individual Kiekert entry)."""
+        """South Korea in country_mentions produces 'South Korea' (individual Apex Mobility entry)."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["South Korea"],
         )
         rec = postprocess_record(rec)
         regions = rec["regions_mentioned"]
-        kiekert = rec["regions_relevant_to_kiekert"]
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
         assert "South Korea" in regions, f"South Korea missing from regions_mentioned; got {regions}"
-        assert "South Korea" in kiekert
+        assert "South Korea" in apex_mobility
 
     def test_tokyo_text_hint_adds_japan(self):
         """Tokyo in text should hint Japan (not generic Asia)."""
@@ -178,7 +178,7 @@ class TestRegionsBucketedDeduped:
         regions = rec["regions_mentioned"]
         assert "West Europe" in regions, f"West Europe missing after alias normalization; got {regions}"
         assert "Western Europe" not in regions, f"Old name should be gone; got {regions}"
-        # Individual Kiekert countries appear directly
+        # Individual Apex Mobility countries appear directly
         assert "Germany" in regions, f"Germany missing; got {regions}"
         assert "France" in regions, f"France missing; got {regions}"
 
@@ -192,7 +192,7 @@ class TestRegionsBucketedDeduped:
         regions = rec["regions_mentioned"]
         assert "United States" in regions, f"United States missing; got {regions}"
 
-    def test_multiple_individual_kiekert_countries_appear_separately(self):
+    def test_multiple_individual_apex_mobility_countries_appear_separately(self):
         """Japan, China, India, Thailand each appear by name — no collapse to generic 'Asia'."""
         rec = _base_record(
             regions_mentioned=[],
@@ -205,12 +205,12 @@ class TestRegionsBucketedDeduped:
         assert "India" in regions, f"India missing; got {regions}"
         assert "Thailand" in regions, f"Thailand missing; got {regions}"
         assert "South Asia" not in regions, f"Generic South Asia should not appear; got {regions}"
-        # kiekert retains granularity
-        kiekert = rec["regions_relevant_to_kiekert"]
-        assert "Japan" in kiekert
-        assert "China" in kiekert
-        assert "India" in kiekert
-        assert "Thailand" in kiekert
+        # Apex Mobility retains granularity
+        apex_mobility = rec["regions_relevant_to_apex_mobility"]
+        assert "Japan" in apex_mobility
+        assert "China" in apex_mobility
+        assert "India" in apex_mobility
+        assert "Thailand" in apex_mobility
 
     def test_primary_region_preserved_before_derived(self):
         """Primary region_mentioned item should appear before derived items."""
@@ -226,7 +226,7 @@ class TestRegionsBucketedDeduped:
         assert south_asia_idx < regions.index("Japan"), f"South Asia should come before Japan; got {regions}"
 
     def test_canada_maps_to_nafta_bucket(self):
-        """Canada is not a Kiekert-individual country — maps to NAFTA bucket."""
+        """Canada is not a Apex Mobility-individual country — maps to NAFTA bucket."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Canada"],
@@ -236,7 +236,7 @@ class TestRegionsBucketedDeduped:
         assert "NAFTA" in regions, f"Canada did not map to NAFTA; got {regions}"
 
     def test_sweden_maps_to_west_europe_bucket(self):
-        """Sweden (not an individual Kiekert entry) maps to West Europe bucket."""
+        """Sweden (not an individual Apex Mobility entry) maps to West Europe bucket."""
         rec = _base_record(
             regions_mentioned=[],
             country_mentions=["Sweden"],

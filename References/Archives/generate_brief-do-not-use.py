@@ -77,7 +77,7 @@ def extract_country_mentions(text: str) -> list:
 def rollup_regions(text: str, country_mentions: list) -> dict:
     """
     Returns:
-      regions_mentioned, regions_relevant_to_kiekert
+      regions_mentioned, regions_relevant_to_apex_mobility
     """
     taxonomy = load_taxonomy()
     footprint = set(taxonomy.get("footprint_regions", []))
@@ -118,14 +118,14 @@ def rollup_regions(text: str, country_mentions: list) -> dict:
     regions_relevant = sorted(set(regions_mentioned).intersection(footprint))
     return {
         "regions_mentioned": sorted(regions_mentioned),
-        "regions_relevant_to_kiekert": regions_relevant
+        "regions_relevant_to_apex_mobility": regions_relevant
     }
 
 
 
 def enrich_with_region_tags(summary: dict) -> dict:
     """
-    Adds country_mentions / regions_mentioned / regions_relevant_to_kiekert to the summary dict.
+    Adds country_mentions / regions_mentioned / regions_relevant_to_apex_mobility to the summary dict.
     """
     text_fields = []
     for k in ("title", "summary", "key_developments", "strategic_implications", "raw_text", "content"):
@@ -139,7 +139,7 @@ def enrich_with_region_tags(summary: dict) -> dict:
     summary["country_mentions"] = countries
     region_info = rollup_regions(joined, countries)
     summary.setdefault("regions_mentioned", region_info["regions_mentioned"])
-    summary.setdefault("regions_relevant_to_kiekert", region_info["regions_relevant_to_kiekert"])
+    summary.setdefault("regions_relevant_to_apex_mobility", region_info["regions_relevant_to_apex_mobility"])
     return summary
 
 

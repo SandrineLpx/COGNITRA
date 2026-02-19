@@ -125,7 +125,7 @@ def completeness_score(rec: Dict) -> int:
     Score record completeness:
     +1 if publish_date present
     +1 if original_url present
-    +1 if regions_relevant_to_kiekert non-empty
+    +1 if regions_relevant_to_apex_mobility non-empty
     +1 if evidence_bullets count >= 3
     """
     score = 0
@@ -133,7 +133,7 @@ def completeness_score(rec: Dict) -> int:
         score += 1
     if rec.get("original_url"):
         score += 1
-    if rec.get("regions_relevant_to_kiekert"):
+    if rec.get("regions_relevant_to_apex_mobility"):
         score += 1
     ev = rec.get("evidence_bullets") or []
     if isinstance(ev, list) and len(ev) >= 3:

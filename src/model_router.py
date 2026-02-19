@@ -49,7 +49,7 @@ def record_response_schema() -> Dict[str, Any]:
         "keywords": {"type": "ARRAY", "items": {"type": "STRING"}, "minItems": 3, "maxItems": 15},
         "country_mentions": {"type": "ARRAY", "items": {"type": "STRING"}},
         "regions_mentioned": {"type": "ARRAY", "items": {"type": "STRING"}, "maxItems": 15},
-        "regions_relevant_to_kiekert": {
+        "regions_relevant_to_apex_mobility": {
             "type": "ARRAY",
             "items": {"type": "STRING", "enum": FOOTPRINT_REGIONS},
         },
@@ -252,7 +252,7 @@ def choose_extraction_strategy(meta: Dict[str, Any]) -> Dict[str, Any]:
 
 def extraction_prompt(context_pack: str) -> str:
     return (
-        "You are extracting structured intelligence for Kiekert, an automotive closure systems supplier "
+        "You are extracting structured intelligence for Apex Mobility, an automotive closure systems supplier "
         "(door latches, strikers, handles, smart entry, cinch systems). "
         "Return JSON only matching the schema. Follow these rules strictly:\n\n"
         # --- source & actor rules ---
@@ -273,7 +273,7 @@ def extraction_prompt(context_pack: str) -> str:
         "CLOSURE SYSTEMS COMPETITORS — set actor_type='supplier' for these companies:\n"
         "Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku\n"
         "Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle\n"
-        "Our company: Kiekert (set mentions_our_company=true if mentioned)\n\n"
+        "Our company: Apex Mobility (set mentions_our_company=true if mentioned)\n\n"
         "4) publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like '4 Feb 2026', "
         "'11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.\n\n"
         # --- topic classification guidance ---
@@ -320,7 +320,7 @@ def extraction_prompt(context_pack: str) -> str:
         "Use only these valid values — sub-regional buckets: West Europe, Central Europe, East Europe, "
         "Africa, Middle East, NAFTA, ASEAN, Indian Subcontinent, Andean, Mercosul, Central America, "
         "Oceania, Rest of World; generic catch-alls: Europe, South America, South Asia; "
-        "individual Kiekert-relevant countries: Czech Republic, France, Germany, Italy, Morocco, Mexico, "
+        "individual Apex Mobility-relevant countries: Czech Republic, France, Germany, Italy, Morocco, Mexico, "
         "Portugal, Russia, Spain, Sweden, United Kingdom, United States, Thailand, India, "
         "China, Taiwan, Japan, South Korea.\n"
         "11) keywords: capture the key topics, technologies, policies, and actors of the article. "

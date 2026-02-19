@@ -72,13 +72,13 @@ REGULATOR_ENTITY_ALIASES = {
 }
 
 # Country -> footprint region mapping (derived from new_country_mapping.csv)
-# Rule: if "relevant to Kiekert" != "" → use that value; else use market bucket.
+# Rule: if "relevant to Apex Mobility" != "" → use that value; else use market bucket.
 COUNTRY_TO_FOOTPRINT = {
     # --- North America ---
     "United States": "United States",
     "Mexico": "Mexico",
     "Canada": "NAFTA",
-    # --- West Europe (individual Kiekert countries) ---
+    # --- West Europe (individual Apex Mobility countries) ---
     "France": "France",
     "Germany": "Germany",
     "Italy": "Italy",
@@ -96,7 +96,7 @@ COUNTRY_TO_FOOTPRINT = {
     "Norway": "West Europe",
     "Switzerland": "West Europe",
     # --- Central Europe ---
-    "Czech Republic": "Czech Republic",  # individual Kiekert entry
+    "Czech Republic": "Czech Republic",  # individual Apex Mobility entry
     "Bulgaria": "Central Europe",
     "Croatia": "Central Europe",
     "Hungary": "Central Europe",
@@ -111,7 +111,7 @@ COUNTRY_TO_FOOTPRINT = {
     "Turkey": "East Europe",
     "Ukraine": "East Europe",
     "Uzbekistan": "East Europe",
-    # --- Russia (individual Kiekert entry) ---
+    # --- Russia (individual Apex Mobility entry) ---
     "Russia": "Russia",
     # --- Greater China ---
     "China": "China",
@@ -125,7 +125,7 @@ COUNTRY_TO_FOOTPRINT = {
     "Kenya": "Africa",
     "Nigeria": "Africa",
     "South Africa": "Africa",
-    "Morocco": "Morocco",  # individual Kiekert entry
+    "Morocco": "Morocco",  # individual Apex Mobility entry
     # --- Middle East ---
     "Iran": "Middle East",
     "Saudi Arabia": "Middle East",
@@ -195,7 +195,7 @@ def validate_csv_consistency(csv_path: str = "data/new_country_mapping.csv") -> 
     warnings: list[str] = []
 
     # --- Build expected COUNTRY_TO_FOOTPRINT from CSV country rows ---
-    # Rule: if relevant_to_kiekert != "" → use that; else if market != "" → use market; else region.
+    # Rule: if relevant_to_apex_mobility != "" → use that; else if market != "" → use market; else region.
     csv_country_map: dict[str, str] = {}
     csv_footprint_values: set[str] = set()
 
@@ -207,12 +207,12 @@ def validate_csv_consistency(csv_path: str = "data/new_country_mapping.csv") -> 
         if reader.fieldnames:
             reader.fieldnames = [n.strip() for n in reader.fieldnames]
         # The first column is named "country" and holds the row-type token.
-        # The "relevant to Kiekert" column may have a variant spelling in the CSV;
+        # The "relevant to Apex Mobility" column may have a variant spelling in the CSV;
         # detect it by prefix match so the checker isn't fragile to typos.
         _ROW_TYPE_COL = "country"
         _relevant_col = next(
             (f for f in (reader.fieldnames or []) if f.lower().startswith("relevant")),
-            "relevant to Kiekert",
+            "relevant to Apex Mobility",
         )
         for row in reader:
             row_type = (row.get(_ROW_TYPE_COL) or "").strip()
@@ -385,7 +385,7 @@ _SOURCE_TYPE_ALIASES = {
     "marklines": "MarkLines",
 }
 
-_OUR_COMPANY_ALIASES = {"kiekert", "kiekert ag", "kiekert group"}
+_OUR_COMPANY_ALIASES = {"Apex Mobility", "Apex Mobility ag", "Apex Mobility group"}
 
 _KEY_OEMS = {
     "vw", "volkswagen", "bmw", "hyundai", "kia", "ford", "gm",
@@ -782,7 +782,7 @@ def _has_generic_europe_mention(text_l: str) -> bool:
     return True
 
 
-def derive_regions_relevant_to_kiekert(country_mentions: List[str]) -> List[str]:
+def derive_regions_relevant_to_apex_mobility(country_mentions: List[str]) -> List[str]:
     regions = []
     for c in country_mentions:
         reg = COUNTRY_TO_FOOTPRINT.get(c)
@@ -800,7 +800,7 @@ def postprocess_record(
 ) -> Dict[str, Any]:
     """
     - canonicalizes/dedupes country_mentions + regions_mentioned
-    - derives regions_relevant_to_kiekert strictly from country_mentions
+    - derives regions_relevant_to_apex_mobility strictly from country_mentions
     - logs provenance/mutations for rule-based edits
     """
     _ensure_meta(rec)
@@ -855,8 +855,13 @@ def postprocess_record(
     if publisher_rule:
         publish_rule_source, publish_parser = publisher_rule
         before_publish = rec.get("publish_date")
+        publish_conf = str(rec.get("publish_date_confidence") or "")
         header_date = publish_parser(combined_text)
-        if header_date and before_publish != header_date:
+        # Only apply header rule if: (1) no LLM date was extracted, OR (2) LLM confidence was Low
+        should_apply_header_rule = header_date and before_publish != header_date and (
+            not _is_iso_date(before_publish) or publish_conf in ("Low", "")
+        )
+        if should_apply_header_rule:
             _apply_field_policy(
                 rec,
                 "publish_date",
@@ -959,7 +964,7 @@ def postprocess_record(
             _append_audit_entry(rec, "_region_migrations", mig)
     region_items = [r for r in region_items if r in FOOTPRINT_REGIONS]
 
-    legacy_relevant = rec.get("regions_relevant_to_kiekert") or []
+    legacy_relevant = rec.get("regions_relevant_to_apex_mobility") or []
     legacy_relevant_items: List[str] = []
     if isinstance(legacy_relevant, list):
         legacy_relevant_items, rel_migrations = _normalize_regions_with_migrations([str(x) for x in legacy_relevant])
@@ -967,7 +972,7 @@ def postprocess_record(
             _append_audit_entry(rec, "_region_migrations", mig)
     legacy_relevant_items = [r for r in legacy_relevant_items if r in FOOTPRINT_REGIONS]
 
-    implied = _dedupe_keep_order(derive_regions_relevant_to_kiekert(rec["country_mentions"]) + legacy_relevant_items)
+    implied = _dedupe_keep_order(derive_regions_relevant_to_apex_mobility(rec["country_mentions"]) + legacy_relevant_items)
     hints_text = _record_text_for_region_hints(rec)
     hinted = _regions_from_text_hints(hints_text)
     if not rec["country_mentions"] and _has_generic_europe_mention(hints_text):
@@ -1009,11 +1014,13 @@ def postprocess_record(
     )
     _apply_field_policy(
         rec,
-        "regions_relevant_to_kiekert",
+        "regions_relevant_to_apex_mobility",
         implied,
         source="postprocess",
         reason="derived_from_country_mentions",
     )
+    if not implied and not display:
+        _append_audit_entry(rec, "_region_validation_flags", "empty_region_signal")
 
     ge = rec.get("government_entities") or []
     if isinstance(ge, list):
@@ -1108,9 +1115,6 @@ def _compute_confidence(rec: Dict[str, Any]) -> Dict[str, Any]:
     insights = rec.get("key_insights") or []
     signals["key_insights"] = 1 if len(insights) >= 2 else 0
 
-    # +1 if regions_relevant_to_kiekert is non-empty
-    signals["kiekert_regions"] = 1 if rec.get("regions_relevant_to_kiekert") else 0
-
     # -1 per 3 postprocess rule corrections
     rule_impact = rec.get("_rule_impact") or {}
     total_rules = sum(int(v) for k, v in rule_impact.items() if str(k) != "computed_confidence")
@@ -1152,10 +1156,12 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
         set_field(rec, "priority", "High", source="postprocess", reason="mentions_our_company")
         return rec
 
-    regions = rec.get("regions_relevant_to_kiekert") or []
+    regions = rec.get("regions_relevant_to_apex_mobility") or []
+    display_regions = rec.get("regions_mentioned") or []
     topics = rec.get("topics") or []
     topics_lower = {t.lower() for t in topics if isinstance(t, str)}
     has_footprint = bool(regions)
+    has_any_region_signal = bool(regions or display_regions)
     has_closure_topic = "closure technology & innovation" in topics_lower
 
     if has_footprint and has_closure_topic:
@@ -1183,6 +1189,12 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
         set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_key_oem")
         return rec
 
+    # Empty footprint coverage is a priority concern (not a confidence signal):
+    # weak, non-footprint records should default to Low priority.
+    if (not has_any_region_signal) and (not has_closure_topic) and (not has_closure_keyword) and (not has_key_oem):
+        set_field(rec, "priority", "Low", source="postprocess", reason="missing_footprint_region")
+        return rec
+
     return rec
 
 
@@ -1190,7 +1202,7 @@ def _escalate_priority_from_macro_themes(rec: Dict[str, Any]) -> Dict[str, Any]:
     if rec.get("priority") == "High":
         return rec
 
-    regions = rec.get("regions_relevant_to_kiekert") or []
+    regions = rec.get("regions_relevant_to_apex_mobility") or []
     if not isinstance(regions, list) or len(regions) == 0:
         return rec
 
@@ -1274,7 +1286,7 @@ def _detect_macro_themes(rec: Dict[str, Any]) -> Dict[str, Any]:
     field_map = _build_field_map(rec)
     companies_l = {c.lower() for c in (rec.get("companies_mentioned") or []) if isinstance(c, str)}
     topics_set = set(rec.get("topics") or [])
-    regions_set = set(rec.get("regions_mentioned") or []) | set(rec.get("regions_relevant_to_kiekert") or [])
+    regions_set = set(rec.get("regions_mentioned") or []) | set(rec.get("regions_relevant_to_apex_mobility") or [])
 
     matched: List[str] = []
     detail_by_theme: Dict[str, Any] = {}

@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from datetime import datetime
 from src import ui
-from src.storage import load_records, new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
+from src.storage import new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
 from src.pdf_extract import extract_text_robust, extract_pdf_publish_date_hint
 from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
@@ -14,21 +14,12 @@ from src.schema_validate import validate_record
 from src.text_clean_chunk import clean_and_chunk
 from src.dedupe import find_exact_title_duplicate, find_similar_title_records, score_source_quality
 from src.ui_helpers import (
+    clear_records_cache,
     enforce_navigation_lock,
+    load_records_cached,
     render_navigation_lock_notice,
     set_navigation_lock,
 )
-
-_PIPELINE_STEPS = [
-    ("upload", "Upload"),
-    ("extract", "Text extraction/cleaning"),
-    ("context", "Context pack built"),
-    ("llm", "LLM extraction"),
-    ("postprocess", "Postprocess"),
-    ("validate", "Validation"),
-    ("dedupe", "Dedupe"),
-    ("saved", "Saved"),
-]
 
 _RULE_LABELS = {
     "url_normalization": "URL normalized",
@@ -62,123 +53,6 @@ def _render_rule_impact_summary(rule_counts: dict, max_rows: int = 5) -> None:
         st.caption(f"- {label}: {int(count)}")
 
 
-def _pipeline_step_index(step_key: str) -> int:
-    for idx, (key, _label) in enumerate(_PIPELINE_STEPS):
-        if key == step_key:
-            return idx
-    return -1
-
-
-def _render_pipeline_stepper(current_step: str, failed_step: str = "", note: str = "") -> None:
-    current_idx = _pipeline_step_index(current_step)
-    failed_idx = _pipeline_step_index(failed_step) if failed_step else -1
-    labels = []
-    for idx, (_key, label) in enumerate(_PIPELINE_STEPS):
-        if failed_idx >= 0 and idx == failed_idx:
-            labels.append(f"[FAILED] {label}")
-        elif current_idx >= 0 and idx <= current_idx:
-            labels.append(f"[DONE] {label}")
-        else:
-            labels.append(f"[TODO] {label}")
-    st.caption(" -> ".join(labels))
-    if note:
-        st.caption(note)
-
-
-def _router_diagnostics(router_log):
-    if not isinstance(router_log, dict):
-        return {
-            "providers_tried": [],
-            "repair_attempted": False,
-            "fallback_used": False,
-            "fallback_provider": "",
-            "errors": [],
-        }
-    providers = []
-    errors = []
-    repair_attempted = False
-
-    for prov in router_log.get("providers_tried", []):
-        pname = str(prov.get("provider") or "").strip()
-        if pname:
-            providers.append(pname)
-        if prov.get("repair_used"):
-            repair_attempted = True
-        for err in prov.get("errors") or []:
-            es = str(err).strip()
-            if es:
-                errors.append(es)
-
-    for chunk_row in router_log.get("chunk_logs", []):
-        inner = chunk_row.get("router_log") if isinstance(chunk_row, dict) else {}
-        if not isinstance(inner, dict):
-            continue
-        for prov in inner.get("providers_tried", []):
-            pname = str(prov.get("provider") or "").strip()
-            if pname and pname not in providers:
-                providers.append(pname)
-            if prov.get("repair_used"):
-                repair_attempted = True
-            for err in prov.get("errors") or []:
-                es = str(err).strip()
-                if es:
-                    errors.append(es)
-
-    fallback_used = bool(router_log.get("fallback_used"))
-    fallback_provider = providers[-1] if (fallback_used and providers) else ""
-    return {
-        "providers_tried": providers,
-        "repair_attempted": repair_attempted,
-        "fallback_used": fallback_used,
-        "fallback_provider": fallback_provider,
-        "errors": errors[:8],
-    }
-
-
-def _render_saved_record_summary(rec, router_log, context_preview):
-    st.subheader("Pipeline Status")
-    _render_pipeline_stepper("saved", note="Record completed through validation, dedupe, and save.")
-
-    st.subheader("Saved Record Snapshot")
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Title", str(rec.get("title") or "Untitled"))
-    m2.metric("Source", str(rec.get("source_type") or "-"))
-    m3.metric("Publish Date", str(rec.get("publish_date") or "-"))
-    m4.metric("Record ID", str(rec.get("record_id") or "-"))
-
-    m5, m6 = st.columns(2)
-    m5.metric("Priority / Confidence", f"{rec.get('priority', '-')} / {rec.get('confidence', '-')}")
-    m6.metric("Review Status", str(rec.get("review_status") or "-"))
-    st.caption(
-        "Regions mentioned: "
-        + (", ".join(str(x) for x in (rec.get("regions_mentioned") or [])) or "-")
-    )
-    st.caption(
-        "Footprint regions: "
-        + (", ".join(str(x) for x in (rec.get("regions_relevant_to_kiekert") or [])) or "-")
-    )
-
-    diag = _router_diagnostics(router_log)
-    validation_ok, validation_errs = validate_record(rec)
-    with st.expander("Advanced", expanded=False):
-        st.caption(
-            f"Providers tried: {', '.join(diag['providers_tried']) or '(none)'} | "
-            f"Repair attempted: {'Yes' if diag['repair_attempted'] else 'No'} | "
-            f"Fallback used: {'Yes' if diag['fallback_used'] else 'No'}"
-            + (f" ({diag['fallback_provider']})" if diag["fallback_provider"] else "")
-        )
-        if not validation_ok:
-            st.warning("Validation errors")
-            for err in validation_errs[:10]:
-                st.caption(f"- {err}")
-        st.subheader("Context Preview")
-        st.text_area("Bounded context / cleaned text", value=(context_preview or "")[:6000], height=220)
-        st.subheader("Raw JSON Output")
-        st.json(rec)
-        st.subheader("Validation & Routing Logs")
-        st.json(router_log or {})
-
-
 def _title_guess_from_filename(filename: str) -> str:
     name = str(filename or "").strip()
     if not name:
@@ -198,12 +72,15 @@ def _title_guess_from_filename(filename: str) -> str:
 
 
 _SYSTEM_STATUS_STEPS = [
-    ("clean", "Cleaning document"),
-    ("chunk", "Chunking context (if applicable)"),
-    ("extract", "Extracting structured data"),
-    ("validate", "Validating schema"),
-    ("dedupe", "Deduplicating"),
-    ("save", "Saving record"),
+    ("extract_text", "Extracting Text"),
+    ("clean", "Cleaning Data"),
+    ("chunk", "Preparing Context"),
+    ("extract", "Extracting Structured Data"),
+    ("normalize", "Normalizing OEM Entities"),
+    ("confidence", "Computing Confidence"),
+    ("validate", "Validating Schema"),
+    ("dedupe", "Checking Duplicates"),
+    ("save", "Saving Record"),
 ]
 
 
@@ -269,41 +146,36 @@ def _render_system_status(slot=None) -> None:
             step_key = str(status.get("step") or "")
             summary = status.get("summary") or {}
 
-            if state == "running":
-                ui.status_badge("Running", kind="info")
-            elif state == "success":
-                ui.status_badge("Completed", kind="success")
-            elif state == "error":
-                ui.status_badge("Error", kind="danger")
-            else:
-                ui.status_badge("Ready", kind="success")
-
             if state == "ready":
                 st.caption("System ready. Awaiting input.")
                 return
 
             if state == "running":
-                st.caption(message or "Pipeline is running...")
+                st.status("Ingest Pipeline", state="running", expanded=True)
+                st.caption(message or "Pipeline is running.")
                 active_idx = -1
                 for idx, (key, _label) in enumerate(_SYSTEM_STATUS_STEPS):
                     if key == step_key:
                         active_idx = idx
                         break
                 for idx, (_key, label) in enumerate(_SYSTEM_STATUS_STEPS):
+                    row_num = idx + 1
                     if idx < active_idx:
-                        st.caption(f"[DONE] {label}")
+                        st.caption(f"{row_num:02d}. Complete - {label}")
                     elif idx == active_idx:
-                        st.caption(f"[RUNNING] {label}")
+                        st.caption(f"{row_num:02d}. In Progress - {label}")
                     else:
-                        st.caption(f"[TODO] {label}")
+                        st.caption(f"{row_num:02d}. Pending - {label}")
                 return
 
             if state == "error":
+                st.status("Ingest Pipeline", state="error", expanded=False)
                 st.error(status.get("error") or "Run failed.")
                 st.caption("Check the input/source and retry. Open Advanced debug for technical details.")
                 return
 
-            st.success("Record created ✓")
+            st.status("Ingest Pipeline", state="complete", expanded=False)
+            st.success("Processing Complete")
             if message:
                 st.caption(message)
             if summary:
@@ -339,6 +211,7 @@ with st.sidebar:
     with st.expander("Model selector", expanded=False):
         provider = st.selectbox("Model", ["auto", "gemini", "claude", "chatgpt"], index=0, key="ing_model")
         st.caption("Strict routing: fallback only on schema failure.")
+
 ui.render_sidebar_utilities(
     model_label=provider,
     overrides=st.session_state.get("rule_impact_run", {}),
@@ -376,13 +249,7 @@ with left_col:
             has_upload = len(uploaded_files) > 0
             is_bulk = len(uploaded_files) > 1
 
-            if has_upload and is_bulk:
-                file_rows = [
-                    {"Filename": f.name, "Size (KB)": round(len(f.getvalue()) / 1024, 1)}
-                    for f in uploaded_files
-                ]
-                st.dataframe(pd.DataFrame(file_rows), width='stretch', hide_index=True)
-            elif has_upload:
+            if has_upload and (not is_bulk):
                 with st.expander("Optional metadata", expanded=False):
                     title = st.text_input("Title override (optional)", value="", key="ing_single_title_override")
                     original_url_input = st.text_input("Original URL (optional)", value="", key="ing_single_original_url")
@@ -394,13 +261,6 @@ with left_col:
             pasted = st.text_area("Text", height=220, key="ing_paste_text")
             show_selected_chunks_paste = st.checkbox("Show selected chunks", value=False, key="ing_show_chunks_paste")
             has_paste = bool(paste_title.strip()) and bool(pasted.strip())
-
-        with st.expander("Advanced options", expanded=False):
-            allow_duplicate_save = st.checkbox(
-                "Allow save even if likely duplicate",
-                value=False,
-                key="ing_allow_duplicate_save",
-            )
 
         paste_has_any = bool(paste_title.strip() or paste_url_input.strip() or pasted.strip())
         if has_upload:
@@ -530,7 +390,7 @@ def _merge_chunk_records(chunk_records):
         "keywords": _dedupe_keep_order(x for r in chunk_records for x in (r.get("keywords") or []))[:12],
         "country_mentions": _dedupe_keep_order(x for r in chunk_records for x in (r.get("country_mentions") or [])),
         "regions_mentioned": _dedupe_keep_order(x for r in chunk_records for x in (r.get("regions_mentioned") or [])),
-        "regions_relevant_to_kiekert": _dedupe_keep_order(x for r in chunk_records for x in (r.get("regions_relevant_to_kiekert") or [])),
+        "regions_relevant_to_apex_mobility": _dedupe_keep_order(x for r in chunk_records for x in (r.get("regions_relevant_to_apex_mobility") or [])),
         "priority": "Medium",
         "confidence": "Medium",
         "key_insights": _dedupe_keep_order(x for r in chunk_records for x in (r.get("key_insights") or []))[:4],
@@ -799,12 +659,12 @@ def _finalize_record(rec, router_log, record_id, pdf_path, records):
             rec["is_duplicate"] = True
             rec["duplicate_story_of"] = best.get("record_id")
             rec["story_primary"] = False
-            return rec, "Saved (duplicate — excluded from briefs)"
+            return rec, "Saved (duplicate story excluded from briefs)"
 
     return rec, "Saved"
 
 
-# ── Single-file mode ──────────────────────────────────────────────────────
+# Single-file mode
 if run_clicked:
     st.session_state.pop("ingest_last_brief_md", None)
     st.session_state.pop("ingest_last_debug", None)
@@ -815,11 +675,11 @@ if run_clicked:
             _set_system_status("error", error="Upload at least one PDF to continue.")
             _render_system_status(status_slot)
         elif is_bulk:
-            _set_system_status("running", step="extract", message="Extracting structured data for bulk upload...")
+            _set_system_status("running", step="extract_text", message="Extracting Text for bulk upload.")
             _render_system_status(status_slot)
 
             set_navigation_lock(True, owner_page="ingest", reason="Bulk ingest pipeline")
-            records = load_records()
+            records = load_records_cached()
             results = []
             progress = st.progress(0, text="Starting bulk extraction...")
 
@@ -885,6 +745,7 @@ if run_clicked:
                     try:
                         records.append(rec)
                         overwrite_records(records)
+                        clear_records_cache()
                     except Exception as exc:
                         if records and records[-1] is rec:
                             records.pop()
@@ -936,7 +797,7 @@ if run_clicked:
             rec = None
             router_log = {}
 
-            _set_system_status("running", step="clean", message="Cleaning document")
+            _set_system_status("running", step="extract_text", message="Extracting Text")
             _render_system_status(status_slot)
             extracted_text, method = extract_text_robust(pdf_bytes)
             if not extracted_text.strip():
@@ -947,7 +808,9 @@ if run_clicked:
             cleaned_chunks = []
             selected_dbg = {}
             if not error_msg:
-                _set_system_status("running", step="chunk", message="Chunking context (if applicable)")
+                _set_system_status("running", step="clean", message="Cleaning Data")
+                _render_system_status(status_slot)
+                _set_system_status("running", step="chunk", message="Preparing Context")
                 _render_system_status(status_slot)
                 cleaned = clean_and_chunk(extracted_text)
                 cleaned_text = cleaned["clean_text"]
@@ -966,10 +829,10 @@ if run_clicked:
                         user_provided_url=original_url_input.strip(),
                     )
 
-            records = load_records()
+            records = load_records_cached()
             proposed_title = (title or uploaded.name).strip()
             if not error_msg:
-                _set_system_status("running", step="dedupe", message="Checking duplicates")
+                _set_system_status("running", step="dedupe", message="Checking Duplicates")
                 _render_system_status(status_slot)
 
                 precheck_titles = [proposed_title]
@@ -1015,6 +878,10 @@ if run_clicked:
                     error_msg = status_msg
 
             if not error_msg:
+                _set_system_status("running", step="normalize", message="Normalizing OEM Entities")
+                _render_system_status(status_slot)
+                _set_system_status("running", step="confidence", message="Computing Confidence")
+                _render_system_status(status_slot)
                 _set_system_status("running", step="validate", message="Validating schema")
                 _render_system_status(status_slot)
                 extracted_title = str(rec.get("title") or "").strip()
@@ -1026,7 +893,7 @@ if run_clicked:
                         )
 
             if not error_msg:
-                _set_system_status("running", step="dedupe", message="Deduplicating")
+                _set_system_status("running", step="dedupe", message="Checking Duplicates")
                 _render_system_status(status_slot)
                 similar_title = str(rec.get("title") or proposed_title)
                 similar = find_similar_title_records(records, similar_title, threshold=0.88)
@@ -1043,6 +910,7 @@ if run_clicked:
                 pdf_path = save_pdf_bytes(record_id, pdf_bytes, uploaded.name)
                 rec, save_status = _finalize_record(rec, router_log, record_id, pdf_path, records)
                 overwrite_records(records + [rec])
+                clear_records_cache()
 
                 st.session_state["ingest_last_brief_md"] = render_intelligence_brief(rec)
                 st.session_state["ingest_last_debug"] = {
@@ -1064,7 +932,7 @@ if run_clicked:
                     summary={
                         "priority": str(rec.get("priority") or "-"),
                         "confidence": str(rec.get("confidence") or "-"),
-                        "regions": [str(x) for x in (rec.get("regions_relevant_to_kiekert") or [])],
+                        "regions": [str(x) for x in (rec.get("regions_relevant_to_apex_mobility") or [])],
                         "topics": [str(x) for x in (rec.get("topics") or [])],
                     },
                 )
@@ -1090,10 +958,14 @@ if run_clicked:
         else:
             title = paste_title
             original_url_input = paste_url_input
+            _set_system_status("running", step="clean", message="Cleaning Data")
+            _render_system_status(status_slot)
             cleaned = clean_and_chunk(pasted)
             cleaned_text = cleaned["clean_text"]
             cleaned_meta = cleaned["meta"]
             cleaned_chunks = cleaned["chunks"]
+            _set_system_status("running", step="chunk", message="Preparing Context")
+            _render_system_status(status_slot)
             selected = select_context_chunks(
                 title.strip(),
                 cleaned_text,
@@ -1105,12 +977,12 @@ if run_clicked:
                 user_provided_url=original_url_input.strip(),
             )
 
-            records = load_records()
+            records = load_records_cached()
             rec = None
             router_log = {}
             error_msg = ""
 
-            _set_system_status("running", step="dedupe", message="Checking duplicates")
+            _set_system_status("running", step="dedupe", message="Checking Duplicates")
             _render_system_status(status_slot)
             dupe = find_exact_title_duplicate(records, title.strip())
             if dupe and not allow_duplicate_save:
@@ -1144,10 +1016,14 @@ if run_clicked:
             if not error_msg:
                 if original_url_input.strip() and not rec.get("original_url"):
                     rec["original_url"] = original_url_input.strip()
+                _set_system_status("running", step="normalize", message="Normalizing OEM Entities")
+                _render_system_status(status_slot)
                 rec = _postprocess_with_checks(rec, source_text=selected["context_pack"])
+                _set_system_status("running", step="confidence", message="Computing Confidence")
+                _render_system_status(status_slot)
                 rec["title"] = title.strip()
 
-                _set_system_status("running", step="dedupe", message="Deduplicating")
+                _set_system_status("running", step="dedupe", message="Checking Duplicates")
                 _render_system_status(status_slot)
                 similar = find_similar_title_records(records, rec.get("title", ""), threshold=0.88)
                 if similar and not allow_duplicate_save:
@@ -1162,6 +1038,7 @@ if run_clicked:
                 record_id = new_record_id()
                 rec, save_status = _finalize_record(rec, router_log, record_id, None, records)
                 overwrite_records(records + [rec])
+                clear_records_cache()
 
                 st.session_state["ingest_last_brief_md"] = render_intelligence_brief(rec)
                 st.session_state["ingest_last_debug"] = {
@@ -1182,7 +1059,7 @@ if run_clicked:
                     summary={
                         "priority": str(rec.get("priority") or "-"),
                         "confidence": str(rec.get("confidence") or "-"),
-                        "regions": [str(x) for x in (rec.get("regions_relevant_to_kiekert") or [])],
+                        "regions": [str(x) for x in (rec.get("regions_relevant_to_apex_mobility") or [])],
                         "topics": [str(x) for x in (rec.get("topics") or [])],
                     },
                 )

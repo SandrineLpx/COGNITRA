@@ -37,7 +37,7 @@ REGION_MIGRATION_MAP: dict[str, str] = {
 }
 
 # Region fields present in each record
-REGION_FIELDS = ["regions_mentioned", "regions_relevant_to_kiekert"]
+REGION_FIELDS = ["regions_mentioned", "regions_relevant_to_apex_mobility"]
 
 
 def migrate_record(rec: dict) -> tuple[dict, list[str]]:
