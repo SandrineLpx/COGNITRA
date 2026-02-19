@@ -329,7 +329,7 @@ class TestSingleRecordSynthesisPrompt:
         assert mode["actions_bullets"] == "2"
         assert mode["allow_trends"] is False
         assert mode["include_empty_regions"] is False
-        assert mode["include_topics"] is False
+        assert "include_topics" not in mode  # removed: topic section eliminated
 
     def test_single_record_prompt_enforces_executive_alert_structure(self):
         rec = sample_record(title="Single item", priority="High", confidence="High")
@@ -337,10 +337,15 @@ class TestSingleRecordSynthesisPrompt:
 
         assert "EXECUTIVE ALERT" in prompt
         assert "Target length: 350-450 words." in prompt
-        assert "Exactly 2 bullets: what happened + so-what for Kiekert." in prompt
-        assert "Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Kiekert." in prompt
+        # Executive Summary: implications-only job description
+        assert "SECTION JOB: State Apex Mobility strategic implications only." in prompt
+        assert "Exactly 2 bullets. Each bullet: maximum 3 sentences." in prompt
+        # High Priority: Supplier Implications sub-field format
+        assert "Supplier Implications:" in prompt
         assert "Exactly 2 bullets. Each must include: Owner + Action + Time horizon." in prompt
-        assert "EMERGING TRENDS" not in prompt
+        # EMERGING TRENDS heading should not appear as an output section (single mode)
+        # The words may still appear in procedure/rule text, so check for section heading format
+        assert "\nEMERGING TRENDS\n" not in prompt
         assert "No significant signals this period." not in prompt
         assert "KEY DEVELOPMENTS BY TOPIC" not in prompt
 

@@ -16,7 +16,18 @@
       "Bash(findstr:*)",
       "Bash(.venv/Scripts/python.exe -m py_compile:*)",
       "Bash(.venv/Scripts/python.exe -m pyflakes:*)",
-      "Bash(.venv/Scripts/python.exe:*)"
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(..venvScriptspython.exe -m pytest tests/ -v)",
+      "Bash(where:*)",
+      "Bash(\"C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.venv\\\\Scripts\\\\python.exe\" -c \"import briefing\")",
+      "Bash(\"C:\\\\Users\\\\sandr\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe\":*)",
+      "Bash(\"C:\\\\Users\\\\sandr\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe\" -c:*)",
+      "Bash(\"C:\\\\Users\\\\sandr\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python311\\\\python.exe\" -m pytest:*)",
+      "Bash(.venvScriptspython.exe -m pytest teststest_scenarios.py -v -k \"SingleRecord\")",
+      "Bash(cmd /c \"\"\"C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.venv\\\\Scripts\\\\python.exe\"\" -m pytest \"\"C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.claude\\\\worktrees\\\\nice-tharp\\\\tests\\\\test_scenarios.py\"\" -v -k SingleRecord 2>&1\")",
+      "Bash(powershell -Command:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh pr list:*)"
     ]
   }
 }

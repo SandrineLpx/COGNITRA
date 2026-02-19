@@ -189,7 +189,6 @@ def _choose_brief_mode(n: int) -> Dict[str, Any]:
             "actions_bullets": "2",
             "allow_trends": False,
             "include_empty_regions": False,
-            "include_topics": False,
         }
     if n <= 4:
         return {
@@ -200,7 +199,6 @@ def _choose_brief_mode(n: int) -> Dict[str, Any]:
             "actions_bullets": "3",
             "allow_trends": True,
             "include_empty_regions": False,
-            "include_topics": True,
         }
     return {
         "name": "standard",
@@ -210,14 +208,12 @@ def _choose_brief_mode(n: int) -> Dict[str, Any]:
         "actions_bullets": "3-6",
         "allow_trends": True,
         "include_empty_regions": True,
-        "include_topics": True,
     }
 
 
 def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
     mode = _choose_brief_mode(len(records))
     is_single = mode["name"] == "single"
-    topic_list = "\n".join(f"  - {t}" for t in CANON_TOPICS)
     region_list = "\n".join(f"  - {r}" for r in FOOTPRINT_REGIONS)
     slim = [_slim_record(r) for r in records]
     records_json = json.dumps(slim, indent=1, default=str)
@@ -230,29 +226,39 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         if is_single
         else "Draft a weekly executive brief."
     )
+
+    # ── EXECUTIVE SUMMARY: implications only, no raw OEM facts ──────────────
     exec_section = (
-        "- Exactly 2 bullets: what happened + so-what for Kiekert.\n"
-        "- If numeric financial deltas exist in records (margin %, profit change, sales %, deliveries %, mix %, pricing), "
-        "include at least one exact numeric value from evidence.\n"
-        "- Include at least one explicit Tier-1 implication: pricing pressure, volume volatility, premium content risk/opportunity, "
-        "regional sourcing shift, or technology value migration.\n"
+        "SECTION JOB: State Apex Mobility strategic implications only. "
+        "Do NOT restate OEM event descriptions — the reader gets those from High Priority Developments. "
+        "Lead every bullet with the business consequence, not the triggering event.\n"
+        "- Exactly 2 bullets. Each bullet: maximum 3 sentences.\n"
+        "- Each bullet must name one Tier-1 implication: pricing pressure, volume volatility, "
+        "premium content risk/opportunity, regional sourcing shift, or technology value migration.\n"
+        "- If numeric financial deltas exist in the records (margin %, profit change, sales %, "
+        "deliveries %, mix %, pricing), include at least one exact figure.\n"
         "- End each bullet with (REC:<id>).\n\n"
         if is_single
         else (
-            f"- {mode['exec_bullets']} bullets maximum. Each bullet synthesizes a cross-record theme, not a "
-            "single article. Interpret through the Kiekert lens:\n"
+            "SECTION JOB: State Apex Mobility strategic implications only. "
+            "Do NOT restate OEM event descriptions — the reader gets those from High Priority Developments. "
+            "Lead every bullet with the business consequence for Apex Mobility, not the triggering event.\n"
+            f"- {mode['exec_bullets']} bullets maximum. Each bullet synthesizes a cross-record theme "
+            "through the Apex Mobility lens:\n"
             "  * Closure systems demand / technology shifts\n"
             "  * OEM program timing and platform decisions\n"
             "  * Footprint / sourcing risk (China, US, Mexico, Europe tariffs)\n"
             "  * Pricing pressure and supplier margin impact\n"
             "  * Supply chain disruptions affecting door-module BOM\n"
-            "- If numeric financial deltas exist in records (margin %, profit change, sales %, deliveries %, mix %, pricing), "
-            "include at least one exact numeric value from evidence.\n"
-            "- Include at least one explicit Tier-1 implication: pricing pressure, volume volatility, premium content risk/opportunity, "
-            "regional sourcing shift, or technology value migration.\n"
+            "- Each bullet: maximum 3 sentences. First sentence = the Apex Mobility implication. "
+            "Second sentence = supporting evidence with number (if available). "
+            "Third sentence = Tier-1 so-what (optional, only if it adds new information).\n"
+            "- If numeric financial deltas exist in the records (margin %, profit change, sales %, "
+            "deliveries %, mix %, pricing), include at least one exact figure.\n"
             "- End each bullet with (REC:<id>, REC:<id>).\n\n"
         )
     )
+
     region_section = (
         "Include ONLY regions present in the records. Do NOT add empty-region placeholder lines.\n"
         if not mode["include_empty_regions"]
@@ -261,25 +267,49 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
             "If a region has no signal, write 'No significant signals this period.'\n"
         )
     )
-    topic_section = (
-        ""
-        if not mode["include_topics"]
+
+    # ── HIGH PRIORITY DEVELOPMENTS: OEM facts + Supplier Implications sub-field ──
+    priority_item_format = (
+        "  Format each item as:\n"
+        "  * [OEM/Company] — [What happened, 1-2 sentences, include exact numbers if available]. (REC:<id>)\n"
+        "    Supplier Implications: [1 sentence: what this means specifically for Apex Mobility — "
+        "closure systems volume, pricing, program timing, footprint, or technology content.]\n"
+        "  NOTE: All Apex Mobility supplier implications belong ONLY in the 'Supplier Implications' "
+        "sub-field. Do NOT repeat supplier implications in the Executive Summary or Emerging Trends.\n"
+    )
+    priority_instruction = (
+        "- Exactly 1 item. OEM/Company + what happened + exact figures if available.\n"
+        + priority_item_format
+        + "- Only include items where priority=High in the records.\n"
+        + "- Cite (REC:<id>).\n\n"
+        if mode["priority_bullets"] == "1"
         else (
-            "KEY DEVELOPMENTS BY TOPIC\n"
-            "Use these canonical topic labels exactly (include only topics with records):\n"
-            f"{topic_list}\n"
-            "For each topic, 1-3 bullets synthesizing across records. Cite (REC:<id>).\n\n"
+            f"- Up to {mode['priority_bullets']} items. Each: OEM/Company + what happened + exact figures if available.\n"
+            + priority_item_format
+            + "- Only include items where priority=High in the records.\n"
+            + "- If a topic has unique detail not covered by a High Priority item, add it as a sub-bullet "
+            "under the most relevant High Priority item rather than creating a separate section.\n"
+            + "- Cite (REC:<id>).\n\n"
         )
     )
+
+    # ── EMERGING TRENDS: forward-looking only, no past-tense restatement ────
     trends_section = (
         ""
         if not mode["allow_trends"]
         else (
             "EMERGING TRENDS\n"
+            "SECTION JOB: Forward-looking synthesis only — what might happen next quarter or beyond, "
+            "not what already happened. Do NOT re-describe events already covered in High Priority Developments.\n"
             "- 1-3 bullets. Each trend MUST reference >=2 distinct records.\n"
-            "- If fewer than 2 records support a trend, do not include it.\n\n"
+            "- Each bullet must use future-oriented language: 'may accelerate', 'is likely to', "
+            "'could shift', 'appears poised to', 'suggests an emerging risk of'.\n"
+            "- No past-tense restatement of record facts. If you find yourself writing '[OEM] did X', "
+            "you are restating High Priority — reframe as '[OEM]'s X decision may lead to Y for Apex Mobility'.\n"
+            "- Do NOT include Apex Mobility supplier implications here; those belong in High Priority sub-fields.\n\n"
         )
     )
+
     actions_section = (
         "- Exactly 2 bullets. Each must include: Owner + Action + Time horizon.\n"
         "- Keep actions concise and grounded with (REC:<id>).\n\n"
@@ -292,40 +322,37 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
             "- Ground each in a specific development above.\n\n"
         )
     )
-    priority_instruction = (
-        "- Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Kiekert.\n"
-        if mode["priority_bullets"] == "1"
-        else f"- Up to {mode['priority_bullets']} bullets. Each: Company/OEM + what happened + why it matters to Kiekert.\n"
-    )
 
-    uncertainty_required = _has_uncertainty_signals(records)
+    # ── CONFLICTS & UNCERTAINTY: always required, never 'None observed' ─────
+    uncertainty_extra = (
+        "Uncertainty signals detected in the input records (confidence=Medium/Low or forecast language present). "
+        if _has_uncertainty_signals(records)
+        else ""
+    )
     uncertainty_section = (
-        "CONFLICTS & UNCERTAINTY (REQUIRED — at least 1 item)\n"
-        "Uncertainty signals detected in the input records. You MUST include at least one item.\n"
-        "- Flag any contradictory figures, dates, or claims between records.\n"
-        "- Flag any claim where confidence=Low or confidence=Medium, or evidence is single-sourced.\n"
-        "- Flag claims containing forecast language (forecast, could, weighing, sources said, expected) "
-        "and note the uncertainty. Cite (REC:<id>).\n"
-        "- Flag strategy-shift or guidance-change topics that lack concrete commitments.\n\n"
-        if uncertainty_required
-        else (
-            "CONFLICTS & UNCERTAINTY\n"
-            "- Flag any contradictory figures, dates, or claims between records.\n"
-            "- Flag any claim where confidence=Low or evidence is single-sourced.\n"
-            "- If none, write: 'None observed this period.'\n\n"
-        )
+        "CONFLICTS & UNCERTAINTY (REQUIRED — at least 1 item every brief)\n"
+        + uncertainty_extra
+        + "You MUST include at least one item. Choose from:\n"
+        "- Contradictory figures, dates, or claims between records.\n"
+        "- Any claim where confidence=Low or confidence=Medium, or evidence is single-sourced.\n"
+        "- Claims containing forecast language (forecast, could, weighing, sources said, expected) "
+        "— note the uncertainty and cite (REC:<id>).\n"
+        "- Strategy-shift or guidance-change topics that lack concrete commitments.\n"
+        "- If no hard contradictions exist, surface an unconfirmed forward-looking claim or a "
+        "strategic signal that lacks a concrete commitment from the records.\n"
+        "BANNED OUTPUT: 'None observed this period.' is never an acceptable answer for this section.\n\n"
     )
 
     return (
-        "You are a competitive intelligence analyst for Kiekert, a global automotive "
+        "You are a competitive intelligence analyst for Apex Mobility, a global automotive "
         "closure systems supplier (door latches, strikers, handles, smart entry, cinch "
         f"systems, window regulators). {intro}\n\n"
         f"Period: {week_range}\n"
         f"Records provided: {len(records)}\n"
         f"Target length: {mode['max_words']} words.\n\n"
         "SYNTHESIS PROCEDURE (follow in order, do not skip)\n"
-        "1. CLUSTER: group records by theme (not one-record-per-bullet).\n"
         f"0. VALID IDS: use only these record IDs in REC citations: {record_ids_text}\n"
+        "1. CLUSTER: group records by theme (not one-record-per-bullet).\n"
         "2. VALIDATE: for every claim, confirm it appears in at least one record's "
         "evidence_bullets or key_insights. Cite the record_id inline as (REC:<id>). "
         "If a claim draws from multiple records, cite all.\n"
@@ -338,7 +365,19 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "5. ROLLUP FRAMING: if records include _macro_theme_rollups with 'Premium OEM Financial/Strategy Stress' "
         "or 'China Tech-Driven Premium Disruption', elevate that framing implicitly in the Executive Summary. "
         "Do not print rollup labels explicitly unless >3 records support the same rollup.\n"
-        "6. WRITE: produce the brief in the structure below.\n\n"
+        "6. SECTION DISCIPLINE: each section has a distinct, non-overlapping job (see instructions per section). "
+        "A fact or implication should appear in exactly ONE section. "
+        "OEM event facts belong in HIGH PRIORITY DEVELOPMENTS. "
+        "Apex Mobility supplier implications belong in the 'Supplier Implications' sub-field of each High Priority item. "
+        "Strategic outlook for Apex Mobility belongs in EXECUTIVE SUMMARY. "
+        "Forward projections belong in EMERGING TRENDS.\n"
+        "7. SELF-REVIEW: before outputting, scan your draft for cross-section repetition:\n"
+        "   - If the same OEM name + event appears in both EXECUTIVE SUMMARY and HIGH PRIORITY, "
+        "remove it from EXECUTIVE SUMMARY (keep only the Apex Mobility implication).\n"
+        "   - If the same trend appears verbatim in both EMERGING TRENDS and HIGH PRIORITY, "
+        "remove it from EMERGING TRENDS and reframe as a forward projection only.\n"
+        "   - If CONFLICTS & UNCERTAINTY says 'None observed', you have failed step 7 — add at least one item.\n"
+        "8. WRITE: produce the brief in the structure below.\n\n"
         "LENGTH SCALING (internal, do not print):\n"
         "- If 1 record: Executive Summary max 2 bullets; High Priority max 1; Footprint only mentioned regions; Recommended Actions max 2.\n"
         "- If 2-4 records: Executive Summary max 3 bullets; High Priority max 3.\n"
@@ -351,12 +390,9 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         + exec_section
         + "HIGH PRIORITY DEVELOPMENTS\n"
         + priority_instruction
-        + "- Only include items where priority=High in the records.\n"
-        + "- Cite (REC:<id>).\n\n"
         + "FOOTPRINT REGION SIGNALS\n"
         + region_section
         + f"{region_list}\n\n"
-        + topic_section
         + trends_section
         + uncertainty_section
         + "RECOMMENDED ACTIONS\n"
@@ -382,6 +418,13 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         + "- NUMERIC ENFORCEMENT: when records contain numeric financial deltas (margin %, profit/sales/deliveries/mix/pricing), "
         + "include at least one exact numeric value in EXECUTIVE SUMMARY.\n"
         + "- TIER-1 LENS: include at least one explicit Tier-1 implication grounded in evidence bullets; do not speculate beyond records.\n"
+        + "- BANNED OPENERS: never start a sentence or clause with 'This signals', 'This indicates', "
+        + "'This necessitates', 'This underscores', or 'This highlights' as a standalone clause opener "
+        + "following a comma or period. Use specific subject-verb constructions instead "
+        + "(e.g., 'Apex Mobility faces...', 'Procurement should expect...', 'The shift implies...').\n"
+        + "- NO SECTION REPETITION: the same OEM event or Apex Mobility implication must not appear "
+        + "in more than one section. If it fits two sections, place it in the section whose job it best matches "
+        + "and omit it from the other.\n"
         + "- No emojis. Executive tone.\n\n"
         + "APPROVED RECORDS (JSON list):\n"
         + records_json
