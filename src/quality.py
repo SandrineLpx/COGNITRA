@@ -1118,7 +1118,10 @@ def run_brief_qc(
         uncertainty_text
         and not re.search(r"\bnone observed\b|\bnone\b|\bn/?a\b", uncertainty_text, re.IGNORECASE)
     )
-    if uncertainty_required and not uncertainty_non_empty:
+    # Executive-mode briefs omit the standalone CONFLICTS & UNCERTAINTY section and surface
+    # uncertainty inline per High Priority item instead — skip the penalty in that case.
+    is_executive_mode = "EXECUTIVE VERSION" in (brief_text or "")
+    if uncertainty_required and not uncertainty_non_empty and not is_executive_mode:
         findings.append(
             _brief_finding(
                 run_id,

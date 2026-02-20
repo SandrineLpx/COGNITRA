@@ -424,13 +424,21 @@ with st.expander("Advanced controls", expanded=False):
         priority_filter = st.multiselect("Priority", ["High", "Medium", "Low"], default=["High", "Medium", "Low"], key="wb_priority")
 
     st.markdown("**Generation settings**")
-    a1, a2, a3 = st.columns(3)
+    a1, a2, a3, a4 = st.columns(4)
     with a1:
         provider = st.selectbox("AI provider", ["gemini", "claude", "chatgpt"], index=0, key="wb_provider")
     with a2:
         web_check_enabled = st.checkbox("Web coherence check (Gemini)", value=False, key="wb_web_check")
     with a3:
         model_override = st.text_input("Model override", value="", key="wb_model_override")
+    with a4:
+        output_mode = st.radio(
+            "Output mode",
+            ["operational", "executive"],
+            index=0,
+            key="wb_output_mode",
+            help="Operational: full brief (all sections). Executive: summary + high priority only, with inline uncertainty caveats.",
+        )
 
 week_range = f"Last {int(days)} days by {date_basis_field}"
 candidates_seed = select_weekly_candidates(records, days=36500, include_excluded=include_excluded)
@@ -600,6 +608,7 @@ if st.button("Generate AI Brief", type="primary", disabled=not selected_records)
                 provider=provider,
                 web_check=bool(web_check_enabled and provider == "gemini"),
                 model_override=(model_override.strip() or None),
+                output_mode=output_mode,
             )
         except Exception as exc:
             st.error(f"Synthesis failed: {exc}")
