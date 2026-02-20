@@ -26,8 +26,8 @@ The core design philosophy is "minimal AI": the LLM handles only extraction and 
 | Google Gemini 2.5 Flash-Lite / Flash | LLM structured JSON extraction + weekly brief synthesis |
 | Streamlit | Multipage web app (5 pages + Home landing page) |
 | PyMuPDF + pdfplumber | PDF text extraction with fallback |
-| Altair + pandas + matplotlib | Interactive trend analytics and charting |
-| Python 3.9+ / pytest | Language and test framework (97 tests across 4 modules) |
+| Altair + pandas | Interactive trend analytics and charting |
+| Python 3.9+ / pytest | Language and test framework (105 tests across 5 modules) |
 | JSONL (flat files) | Record storage — no database required |
 
 ### Skills Developed
@@ -204,8 +204,8 @@ Everything else is deterministic:
   * Insights page with canonical/all-records toggle and four trend analysis charts:
     * **Topic Momentum:** weighted counting (1/n per topic), pct_change, Emerging/Expanding/Fading/Stable classification, rendered via Altair with tooltips and detail table
     * **Top Company Mentions:** top 10 by frequency with canonicalization and within-record deduplication
-    * **Priority Distribution Over Time:** weekly stacked bars with High-Ratio and Volatility Index secondary line chart
-    * **Confidence Distribution (Computed):** weekly stacked bars showing extraction quality trend, plus LLM override rate metrics (total computed, count overridden, override %)
+    * **Geographic Heatmap:** region-by-topic signal density matrix across all records
+    * **Quality Score Trend:** line chart of weighted_overall_score, weighted_record_score, weighted_brief_score over time (from `data/quality/quality_runs.jsonl`); KPI metrics row with delta-from-prior-run for R3, R4, R5
   * Export to CSV for Power BI (canonical and all records support)
   * Weekly Executive Brief page for digest drafting, email templates, and AI brief generation
 
@@ -243,7 +243,7 @@ This project uses a controlled taxonomy and watchlist to reduce ambiguity and dr
 
 * Canonical topic taxonomy (9 topics)
 * Company watchlist (including “Our company” section)
-* Two-tier footprint region architecture: display-level buckets (Asia, Western/Eastern Europe, Africa, US, Latin America) and Apex Mobility footprint regions (India, China, Japan, Thailand, Mexico, Russia + display regions); ~60 country-to-region mappings
+* Two-tier footprint region architecture: 34 canonical region values including individual Apex Mobility-relevant countries by name (France, Germany, United States, China, Japan, South Korea, Czech Republic, Morocco, etc.) and sub-regional buckets (West Europe, Central Europe, East Europe, NAFTA, ASEAN, Africa, Middle East, etc.); ~90 country-to-region mappings via `COUNTRY_TO_FOOTPRINT`
 
 ## 6. Prompting and Output Specification
 
@@ -360,7 +360,7 @@ The LLM returns a single JSON object per article, enforced by Gemini's structure
   "keywords":                  ["STRING  — 3-15 items"],
   "country_mentions":          ["STRING"],
   "regions_mentioned":         ["STRING  — free-text, up to 15"],
-  "regions_relevant_to_apex_mobility": ["STRING  — enum: India | China | Western Europe | Eastern Europe | Russia | Africa | US | Mexico | Latin America | Thailand | Japan | Asia"],
+  "regions_relevant_to_apex_mobility": ["STRING  — enum: 34 values; individual countries (France, Germany, United States, China, Japan, South Korea, Czech Republic, Morocco, India, Thailand, etc.) + sub-regional buckets (West Europe, Central Europe, East Europe, NAFTA, ASEAN, Africa, Middle East, Oceania, Rest of World, etc.)"],
   "evidence_bullets":          ["STRING  — 2-4 factual bullets"],
   "key_insights":              ["STRING  — 2-4 analytical insights"],
   "review_status":             "STRING  — enum: Approved | Disapproved | Pending",
@@ -396,10 +396,10 @@ Each record includes 2–4 evidence bullets:
 * **Local extraction:** PyMuPDF with pdfplumber fallback
 * **LLM provider:** Gemini 2.5-flash-lite (primary) + Gemini 2.5-flash (fallback/repair) via `google-genai` with structured JSON schema
 * **Storage:** JSONL (JSON Lines format)
-* **Charting:** Altair (Topic Momentum interactive charts), matplotlib (other charts), pandas aggregations
+* **Charting:** Altair (all interactive trend charts), pandas aggregations
 * **Reporting:** Power BI optional (CSV export ready)
 * **Language:** Python 3.9+
-* **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, altair, google-genai, pytest
+* **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, altair, google-genai, pytest
 
 For the MVP, the solution is implemented as a multi-page Streamlit web app that supports PDF ingestion (single and bulk), duplicate detection, record review, analytics, trend analysis, and weekly briefing workflows in a lightweight interface. The app includes five main pages plus a Home landing page: (1) Ingest with duplicate blocking and bulk PDF upload, (2) Review & Approve with queue filtering, record detail/edit, JSON editing, approve/disapprove, and confidence detail breakdown, (3) Weekly Executive Brief for digest drafting and AI-generated executive briefs, (4) Insights with trend analysis charts including confidence distribution, and (5) Admin for bulk export and maintenance. Processed outputs are stored as JSONL (JSON Lines), where each intelligence record is appended as one JSON object per line, enabling simple persistence and fast reload without a database. Duplicate records are stored separately with metadata pointing to the canonical record (higher-ranked source). API usage is tracked per-model in `data/api_usage.json` with midnight Pacific Time reset. For reporting and downstream analysis, the app includes:
 
@@ -426,13 +426,14 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
 5. **Noise classification** (`_classify_noise()` in `pages/01_Ingest.py`):
    * Uses cleanup meta (removed_ratio, removed_line_count, top_removed_patterns) to classify document as low/normal/high noise
    * Thresholds: high if removed_ratio > 0.18 or removed_lines > 250 or OCR/table/header patterns detected; low if removed_ratio < 0.08 and removed_lines < 80
-6. **Two extraction modes** (user-selectable):
-   * **Chunked mode (default for long/noisy docs):** meta-based model routing with two-phase chunk repair:
+6. **Extraction mode (automatic — no user toggle):**
+   * Chunking is determined automatically from cleaned-document chunk metadata (`choose_extraction_strategy()` in `src/model_router.py`). There is no manual mode selector.
+   * **Chunked extraction (used when document produces multiple chunks):** meta-based model routing with two-phase chunk repair:
      * **Model selection:** high-noise → Flash directly (skip Flash-Lite); low/normal-noise → Flash-Lite
      * **Phase 1:** all chunks extracted with initial model via `extract_single_pass()`
      * **Phase 2:** only failed chunks retried with stronger model (if Flash-Lite was initial); successful chunks untouched
      * **Merge:** majority voting (source_type, actor_type), union+dedup (entities, topics, regions), highest-confidence date, short-bullet filtering
-   * **Single-context mode:** score paragraphs (watchlist, keyword, country hits), build bounded context pack, single model call with two-pass strategy (Flash-Lite → Flash fallback)
+   * **Single-context mode (used when document produces 1 chunk):** score paragraphs (watchlist, keyword, country hits), build bounded context pack, single model call with two-pass strategy (Flash-Lite → Flash fallback)
 7. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, infer publish_date and source_type from text patterns, remove invalid regulator entities)
 8. **Deterministic priority classification** (`_boost_priority()` in `src/postprocess.py`):
    * Upgrades to High when: `mentions_our_company` is true, footprint region + closure topic/keyword, or footprint region + key OEM customer (Volkswagen, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes-Benz, etc.)
@@ -557,26 +558,29 @@ This section documents the three most impactful design decisions and the reasoni
 ```
 *Rule 1 (identify S&P from its header marker) and rule 2 (Reuters is cited inside the article, not the publisher) correctly classify the source.*
 
-**Approach chosen:** The extraction prompt (`extraction_prompt()` in `src/model_router.py`) was rewritten with explicit, numbered rules. The current prompt (as of 2026-02-18) contains ten numbered rules, plus two embedded guidance blocks (topic classification and competitor context):
+**Approach chosen:** The extraction prompt (`extraction_prompt()` in `src/model_router.py`) was rewritten with explicit, numbered rules. The current prompt contains **thirteen numbered rules**, plus two embedded guidance blocks (topic classification and competitor context). *(The prompt evolved from an initial 10-rule version — see §7.5.12 for the coherence overhaul that added rules 6, 11, and 13 and restructured the sequence.)*
 
 **Current rules (verbatim):**
 
 1. **Publisher identification:** `source_type is the PUBLISHER of the document. If 'S&P Global', 'S&P Global Mobility', 'AutoIntelligence | Headline Analysis', or '(c) S&P Global' appears, set source_type='S&P'. If MarkLines is the publisher, set source_type='MarkLines'.`
 2. **Cited-source disambiguation:** `If Reuters or Bloomberg is only cited inside the article, do NOT set source_type to Reuters/Bloomberg unless they are clearly the publisher. Use 'Financial News' for financial publications (WSJ, FT, CNBC, Nikkei) and 'Industry Publication' for automotive trade press that are not Automotive News. Use 'Other' only when no specific type fits.`
-3. **Actor type constraint:** `actor_type must be one of: oem, supplier, technology, industry, other. Use 'technology' for tech companies (Nvidia, Qualcomm, Huawei, Google, etc.); use 'industry' for broad market/sector items not tied to one company; otherwise use 'other' when uncertain.`
+3. **Actor type constraint:** `actor_type must be one of: oem, supplier, technology, industry, other. Use 'supplier' for the closure system competitors listed below. Use 'technology' for tech companies (Nvidia, Qualcomm, Huawei, Google, etc.); use 'industry' for broad market/sector items not tied to one company; otherwise use 'other' when uncertain.`
 4. **Date normalization:** `publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.`
-5. **Evidence bullet constraint:** `evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.`
-6. **Numeric grounding:** `If numeric facts are present in the article, at least one evidence_bullet must include a specific numeric value verbatim (e.g., percentage change, margin %, profit forecast, sales delta, production volume, year-over-year change, ranking gap). Prefer financial/competitive metrics. Do not fabricate, infer, or calculate numbers. If no numeric facts are present, proceed normally.`
-7. **Government entities explicit extraction:** `government_entities: list ONLY government bodies, regulators, or agencies explicitly named in the text (e.g. 'NHTSA', 'European Commission', 'French Ministry of Industry'). Do NOT infer entities from country context alone — if the text says 'the government' in a France/Spain context but never names the EU or a specific agency, return an empty list. If none are explicitly named, return [].`
-8. **List deduplication:** `Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.`
-9. **Software/AI features evidence:** `If the article mentions major software/AI features (e.g., AI voice controls, SDV, infotainment, autonomy), include at least one evidence bullet on that and include relevant keywords from text (e.g., AI, software, voice controls, infotainment, OpenAI, Microsoft, Google).`
-10. **Country mentions operational filter:** `country_mentions: list ONLY countries that are explicit operational markets in this article (countries where production volumes, vehicle registrations, plant locations, sales, or revenue data are reported). Do NOT include countries mentioned only as geopolitical backdrop, tariff context, or macro reference — e.g., if the text says 'US tariff conflicts' but reports no US market data, do not include United States. Only include a country if the article reports facts about that country's market.`
+5. **Evidence bullet constraint:** `evidence_bullets must be 2-4 short factual bullets, each <= 25 words. Extract verbatim facts and data points directly from the source text. No interpretation.`
+6. **Key insights analytical constraint:** `key_insights must be 2-4 analytical bullets interpreting what the facts mean — implications for OEMs, suppliers, or the automotive market. Do NOT repeat evidence_bullets verbatim; add analytical value (e.g., 'This signals...', 'Risk for...', 'Opportunity in...').`
+7. **Numeric grounding:** `If numeric facts are present in the article, at least one evidence_bullet must include a specific numeric value verbatim (e.g., percentage change, margin %, profit forecast, sales delta, production volume, year-over-year change, ranking gap). Prefer financial/competitive metrics. Do not fabricate, infer, or calculate numbers. If no numeric facts are present, proceed normally.`
+8. **Government entities explicit extraction:** `government_entities: list ONLY government bodies, regulators, or agencies explicitly named in the text (e.g. 'NHTSA', 'European Commission', 'French Ministry of Industry'). Do NOT infer entities from country context alone — if the text says 'the government' in a France/Spain context but never names the EU or a specific agency, return an empty list. If none are explicitly named, return [].`
+9. **Software/AI features evidence:** `If the article mentions major software/AI features (e.g., AI voice controls, SDV, infotainment, autonomy), include at least one evidence_bullet on that feature.`
+10. **Country mentions operational filter:** `country_mentions: list ONLY countries where the article explicitly reports operational market data (production volumes, vehicle registrations, plant locations, sales, revenue for that country). Do NOT include countries mentioned only as geopolitical backdrop, tariff context, or macro reference — e.g., if the text says 'US tariff conflicts' but reports no US market data, do not include United States. Only include a country if the article reports facts about that country's market.`
+11. **Keywords signal quality:** `keywords: capture the key topics, technologies, policies, and actors of the article. Include brand and company names that play a material role in the article. Exclude country names, region names, publisher names, and generic measurement phrases ('year over year', month names, 'Q1', 'fiscal year').`
+12. **List deduplication and normalization:** `Deduplicate all list fields. Normalize common abbreviations to canonical form: US/USA/U.S. → 'United States', UK/U.K. → 'United Kingdom', EU/E.U. → 'European Union'.`
+13. **Notes field:** `notes: leave empty unless there is important context not captured by other fields (e.g., conflicting data in the article, a quality concern about the source, or a key caveat).`
 
-**Embedded guidance blocks (between rules 4 and 5):**
+**Embedded guidance blocks (between rules 3 and 4, after the COMPETITORS block):**
+- **CLOSURE SYSTEMS COMPETITORS**: Tier 1 (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku) and Tier 2 (Ushin, Witte, Mitsuba, Fudi, PHA, Cebi, Tri-Circle) recognized as `actor_type='supplier'`; Apex Mobility triggers `mentions_our_company=true`. *(Block placed immediately after rule 3 so the model sees the supplier list before deciding to default to 'other'.)*
 - **TOPIC CLASSIFICATION**: Explicit boundary rules for all 9 canonical topics (e.g., "OEM Strategy = broad pivots, NOT single program updates"; "'Closure Technology & Innovation': ONLY when latch/door/handle/digital key/smart entry/cinch appears explicitly").
-- **CLOSURE SYSTEMS COMPETITORS**: Tier 1 (Hi-Lex, Aisin, Brose, Huf, Magna, Inteva, Mitsui Kinzoku) and Tier 2 (Ushin, Witte, Mitsuba, Fudi, PHA, Cebi, Tri-Circle) recognized as `actor_type='supplier'`; Apex Mobility triggers `mentions_our_company=true`.
 
-**Full verbatim extraction prompt:**
+**Full verbatim extraction prompt (current — 13 rules):**
 
 ```
 You are extracting structured intelligence for Apex Mobility, an automotive closure systems supplier
@@ -592,11 +596,15 @@ Return JSON only matching the schema. Follow these rules strictly:
    (Automotive Logistics, Just Auto, Wards Auto, etc.) that are not Automotive News.
    Use 'Other' only when no specific type fits.
 3) actor_type must be one of: oem, supplier, technology, industry, other.
+   Use 'supplier' for the closure system competitors listed below.
    Use 'technology' for tech companies (Nvidia, Qualcomm, Huawei, Google, etc.);
    use 'industry' for broad market/sector items not tied to one company;
    otherwise use 'other' when uncertain.
-4) publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like
-   '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.
+
+CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):
+Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku
+Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle
+Our company: Apex Mobility (set mentions_our_company=true if mentioned)
 
 TOPIC CLASSIFICATION — pick 1-4 topics using these rules:
 - 'OEM Strategy & Powertrain Shifts': broad OEM strategic pivots (BEV/ICE mix, vertical
@@ -617,34 +625,38 @@ TOPIC CLASSIFICATION — pick 1-4 topics using these rules:
   (financial lens). NOT exec churn without financial angle.
 - 'Executive & Organizational': leadership changes, governance, org restructuring.
 
-CLOSURE SYSTEMS COMPETITORS — recognize these as suppliers (actor_type='supplier'):
-Tier 1: Hi-Lex, Aisin, Brose, Huf, Magna (Magna Closures/Mechatronics), Inteva, Mitsui Kinzoku
-Tier 2: Ushin, Witte, Mitsuba, Fudi (BYD subsidiary), PHA, Cebi, Tri-Circle
-Our company: Apex Mobility (set mentions_our_company=true if mentioned)
-
-5) evidence_bullets must be 2-4 short factual bullets, each <= 25 words. No long paragraphs.
-6) If numeric facts are present in the article, at least one evidence_bullet must include a
+4) publish_date: extract and normalize to YYYY-MM-DD when present. Handle patterns like
+   '4 Feb 2026', '11 Feb 2026', 'Feb. 4, 2026', 'February 4, 2026'. Else return null.
+5) evidence_bullets must be 2-4 short factual bullets, each <= 25 words.
+   Extract verbatim facts and data points directly from the source text. No interpretation.
+6) key_insights must be 2-4 analytical bullets interpreting what the facts mean — implications
+   for OEMs, suppliers, or the automotive market. Do NOT repeat evidence_bullets verbatim;
+   add analytical value (e.g., 'This signals...', 'Risk for...', 'Opportunity in...').
+7) If numeric facts are present in the article, at least one evidence_bullet must include a
    specific numeric value verbatim (e.g., percentage change, margin %, profit forecast, sales
    delta, production volume, year-over-year change, ranking gap). Prefer financial/competitive
-   metrics. Prefer financial forecast numbers over feature numbers when selecting the numeric
-   bullet. Do not fabricate, infer, or calculate numbers. If no numeric facts are present,
+   metrics. Do not fabricate, infer, or calculate numbers. If no numeric facts are present,
    proceed normally.
-7) government_entities: list ONLY government bodies, regulators, or agencies explicitly named
+8) government_entities: list ONLY government bodies, regulators, or agencies explicitly named
    in the text (e.g. 'NHTSA', 'European Commission', 'French Ministry of Industry').
    Do NOT infer entities from country context alone — if the text says 'the government' in a
    France/Spain context but never names the EU or a specific agency, return an empty list.
    If none are explicitly named, return [].
-8) Deduplicate list fields and normalize US/USA/U.S. variants to one canonical form.
 9) If the article mentions major software/AI features (e.g., AI voice controls, SDV,
-   infotainment, autonomy), include at least one evidence bullet on that and include relevant
-   keywords from text (e.g., AI, software, voice controls, infotainment, OpenAI, Microsoft,
-   Google).
-10) country_mentions: list ONLY countries that are explicit operational markets in this article
-    (countries where production volumes, vehicle registrations, plant locations, sales, or
-    revenue data are reported). Do NOT include countries mentioned only as geopolitical
-    backdrop, tariff context, or macro reference — e.g., if the text says 'US tariff conflicts'
-    but reports no US market data, do not include United States. Only include a country if
-    the article reports facts about that country's market.
+   infotainment, autonomy), include at least one evidence_bullet on that feature.
+10) country_mentions: list ONLY countries where the article explicitly reports operational
+    market data (production volumes, vehicle registrations, plant locations, sales, revenue
+    for that country). Do NOT include countries mentioned only as geopolitical backdrop,
+    tariff context, or macro reference. Only include a country if the article reports facts
+    about that country's market.
+11) keywords: capture the key topics, technologies, policies, and actors of the article.
+    Include brand and company names that play a material role in the article (OEMs, suppliers,
+    tech companies). Exclude country names, region names, publisher names, and generic
+    measurement phrases ('year over year', month names, 'Q1', 'fiscal year').
+12) Deduplicate all list fields. Normalize common abbreviations to canonical form:
+    US/USA/U.S. → 'United States', UK/U.K. → 'United Kingdom', EU/E.U. → 'European Union'.
+13) notes: leave empty unless there is important context not captured by other fields
+    (e.g., conflicting data in the article, a quality concern about the source, or a key caveat).
 Use only the provided text.
 
 INPUT (context pack):
@@ -794,7 +806,7 @@ Our company: Apex Mobility (set mentions_our_company=true if mentioned)
 **Workaround for the transition:** Rather than deleting everything immediately, the outdated spec files were moved to `References/Archives/` to preserve project history. A `QUARTERLY_REVIEW.md` checklist was created to formalize the ongoing maintenance process, ordered from lowest-risk changes (company watchlist — pure reference, no code) to highest-risk (region enums — run tests after every change).
 
 > **[FIGURE 4 — Extraction Prompt Before vs. After (Section 7.5.8)]**
-> *Side-by-side comparison showing the extraction prompt before consolidation (plain rules only, no topic disambiguation, no competitor context) and after (TOPIC CLASSIFICATION block with per-topic boundary rules + CLOSURE SYSTEMS COMPETITORS block with Tier 1/Tier 2 supplier names). The "before" version had 5 rules; the "after" version has 10 numbered rules plus two embedded domain-guidance blocks.*
+> *Side-by-side comparison showing the extraction prompt before consolidation (plain rules only, no topic disambiguation, no competitor context) and after (TOPIC CLASSIFICATION block with per-topic boundary rules + CLOSURE SYSTEMS COMPETITORS block with Tier 1/Tier 2 supplier names). The "before" version had 5 rules; the initial "after" version had 10 numbered rules; after the §7.5.12 coherence overhaul the current version has 13 numbered rules plus two embedded domain-guidance blocks.*
 
 #### 7.5.9 API quota tracking + smart chunk recommendations
 
@@ -888,13 +900,13 @@ The former rules 7 and 8 (list deduplication and software/AI features) were renu
 
 | Change | What was fixed |
 |---|---|
-| Competitors block moved after rule 3 | actor_type rule and supplier list now adjacent; model sees full supplier context before defaulting to 'other' |
-| Rule 6 added for `key_insights` | Must interpret facts analytically, not repeat bullets verbatim |
-| Software/AI rule (former 9) trimmed | Removed redundant keyword instruction; evidence bullet instruction kept |
-| `country_mentions` and `regions_mentioned` separated | country_mentions = operational market data only; regions_mentioned = geographic scope (display buckets) |
+| COMPETITORS block moved immediately after rule 3 | actor_type rule and supplier list now adjacent; model sees full supplier context before defaulting to 'other' |
+| Rule 6 added for `key_insights` | Must interpret facts analytically, not repeat bullets verbatim (former rule 6 numeric grounding shifted to rule 7) |
+| Software/AI rule (now rule 9) trimmed | Removed redundant keyword instruction; evidence bullet instruction kept |
+| `country_mentions` and `regions_mentioned` separated | country_mentions = operational market data only (rule 10); regions_mentioned = geographic scope framing |
 | Rule 11 added for `keywords` | Positive: include brand/company names. Negative: exclude countries, regions, publishers, generic measurement phrases |
+| Rule 12 normalization expanded | US/USA/U.S. → 'United States', UK/U.K. → 'United Kingdom', EU/E.U. → 'European Union' |
 | Rule 13 added for `notes` | Leave empty unless there is a genuine caveat not captured elsewhere |
-| Normalization rule expanded | US/USA/U.S. → 'United States', UK/U.K. → 'United Kingdom', EU/E.U. → 'European Union' |
 
 **Concrete before/after — keywords field (S&P Western European registrations, 6 Feb 2026):**
 
@@ -986,12 +998,13 @@ if "China" in merged and "China" not in implied:
 ### 8.2 Accuracy checks (taxonomy and regions)
 
 * Topic consistency: are topics chosen from canonical list? any drift?
-* Region roll-ups (two-tier architecture):
+* Region roll-ups (unified region architecture):
 
-  * Display regions: Asia, Western Europe, Eastern Europe, Africa, US, Latin America
-  * Footprint regions: India, China, Japan, Thailand, Mexico, Russia + display regions
-  * Country-to-region mappings: ~60 countries mapped via `COUNTRY_TO_FOOTPRINT` in `postprocess.py`
-  * Legacy migration: `Europe (including Russia)` → `Western Europe` unless Russia explicitly present
+  * 34 canonical region values (identical for both `regions_mentioned` and `regions_relevant_to_apex_mobility`)
+  * Individual Apex Mobility-relevant countries by name: France, Germany, United States, China, Japan, South Korea, Czech Republic, Morocco, Italy, Portugal, Spain, Sweden, United Kingdom, Thailand, India, Taiwan, Russia
+  * Sub-regional buckets: West Europe, Central Europe, East Europe, NAFTA, ASEAN, Indian Subcontinent, Africa, Middle East, Oceania, Andean, Mercosul, Central America, Rest of World, plus generic catch-alls (Europe, South America, South Asia)
+  * Country-to-region mappings: ~90 countries mapped via `COUNTRY_TO_FOOTPRINT` in `postprocess.py`
+  * Legacy migration: old names (`Western Europe` → `West Europe`, `Eastern Europe` → `East Europe`, `Latin America` → `South America`, `Asia` → `South Asia`) handled via `REGION_ALIASES`
 
 ### 8.3 Case studies (recommended for the report)
 
@@ -1419,10 +1432,12 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 
 *This appendix documents the implementation milestones and recent changes to the system. It is provided for technical completeness and is not part of the main report body.*
 
-**Version:** 6.3
-**Completion Date:** February 17, 2026
+**Version:** 6.4
+**Completion Date:** February 20, 2026
 
 ## A.1 2026-02 Changes
+
+### v6.3 changes (February 17, 2026)
 
 - **Footprint regions moved to Option B buckets:** `Western Europe`, `Eastern Europe`, `Russia` (replacing legacy `Europe (including Russia)`), with backward-compatible migration in postprocess.
 - **Chunking behavior is automatic in Ingest UI:** the manual chunk-mode toggle was removed; extraction path is selected from cleaned-document chunk metadata.
@@ -1434,6 +1449,13 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 - **Priority and confidence rules removed from extraction prompt:** Both are now computed entirely by deterministic postprocess; the extraction prompt now has 10 rules focused on factual extraction only.
 - **Insights page simplified (2026-02-18):** Priority Distribution Over Time, Confidence Distribution, High-Ratio chart, and LLM Override Rate metrics removed; Quality Score Trend chart added.
 - **Country mentions geo signal distortion fix (2026-02-18):** Added rule 10 to `extraction_prompt()` — `country_mentions` now requires countries to be explicit operational markets only.
+
+### v6.4 changes (February 20, 2026)
+
+- **Extraction prompt expanded to 13 rules:** Added rule 6 (`key_insights` analytical constraint), rule 11 (`keywords` signal quality guidance), and rule 13 (`notes` field constraint). Normalization rule expanded to include UK/EU canonical forms. COMPETITORS block repositioned immediately after rule 3. See §7.5.12.
+- **Region architecture final canonical names:** Canonical region names finalized as `West Europe`, `East Europe`, `South Asia` (replacing `Western Europe`, `Eastern Europe`, `Asia`). `REGION_ALIASES` in postprocess handles backward compatibility for stored records.
+- **matplotlib removed from Insights page:** All trend charts in `pages/04_Insights.py` now use Altair exclusively. matplotlib dependency removed.
+- **Test suite expanded to 105 tests across 5 modules:** `tests/test_brief_qc.py` added (3 tests) covering brief QC check logic. Total: test_scenarios (33) + test_macro_themes (42) + test_regions_bucketed (24) + test_publish_date_pdf (3) + test_brief_qc (3).
 
 ## Key Features Delivered
 
@@ -1451,18 +1473,21 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
    - Non-chunked path: original two-pass strategy (Flash-Lite → Flash) via `route_and_extract()` preserved for single-context documents
    - `routing_metrics` in every record JSON includes `raw_chars` and `clean_chars`: tracks how many characters were in the raw extracted text vs the cleaned text sent to the model (enabling downstream analysis of cleaning impact per document)
 
-3. **Hardened Extraction Prompt** (10 numbered rules + 2 embedded guidance blocks)
+3. **Hardened Extraction Prompt** (13 numbered rules + 2 embedded guidance blocks)
    - Rule 1–2: Publisher-vs-cited-source identification (prevents S&P articles being tagged as "Reuters")
    - Rule 3: Actor type constraint (oem/supplier/technology/industry/other)
+   - COMPETITORS block: immediately after rule 3 (Tier 1/Tier 2 suppliers + Apex Mobility identity)
+   - TOPIC CLASSIFICATION block: boundary rules for all 9 canonical topics
    - Rule 4: Strict date normalization (multiple patterns → YYYY-MM-DD)
-   - Rule 5: Evidence bullet length cap (25 words max per bullet)
-   - Rule 6: Numeric grounding (at least one bullet must include a verbatim numeric fact when present)
-   - Rule 7: Government entities explicit extraction (ONLY named agencies; no inference from country context)
-   - Rule 8: List deduplication and US/USA/U.S. normalization
-   - Rule 9: Software/AI features evidence (SDV, infotainment, autonomy → at least one evidence bullet + keywords)
+   - Rule 5: Evidence bullet length cap (25 words max per bullet, verbatim facts)
+   - Rule 6: key_insights analytical constraint (interpret facts, do not repeat bullets)
+   - Rule 7: Numeric grounding (at least one bullet must include a verbatim numeric fact when present)
+   - Rule 8: Government entities explicit extraction (ONLY named agencies; no inference from country context)
+   - Rule 9: Software/AI features evidence (SDV, infotainment, autonomy → at least one evidence bullet)
    - Rule 10: Country mentions operational filter (ONLY countries where market data is reported; excludes tariff/geopolitical context)
-   - Embedded: TOPIC CLASSIFICATION block with boundary rules for all 9 canonical topics
-   - Embedded: CLOSURE SYSTEMS COMPETITORS block (Tier 1/Tier 2 suppliers + Apex Mobility identity)
+   - Rule 11: Keywords signal quality (include brands/actors; exclude countries, regions, publishers, generic phrases)
+   - Rule 12: List deduplication and canonical normalization (US/UK/EU)
+   - Rule 13: Notes field guidance (leave empty unless genuine caveat)
    - Repair prompt includes specific validation errors for targeted fixes
    - Priority and confidence are NOT in the extraction prompt — both are computed deterministically by postprocess
 
@@ -1488,7 +1513,7 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
    - Deterministic publisher-weighted ranking (S&P=100, Bloomberg=90, Reuters=80, Financial News=78, MarkLines=76, Automotive News=75, Industry Publication=72, ... Other=50)
    - Confidence and completeness scoring for tie-breaking
 
-8. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/03_Weekly_Executive_Brief.py`)
+8. **Weekly Briefing Workflow** (`src/briefing.py` + `pages/03_Brief.py`)
    - Candidate selection from last N days (configurable, default 30, max 90; auto-excludes duplicates)
    - Share-ready detection (High priority + High confidence)
    - Deterministic Markdown brief + executive email template generation
@@ -1517,7 +1542,7 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
     - Unit-testable helpers: `weighted_explode`, `explode_list_column`, `classify_topic_momentum`, `canonicalize_company`, `week_start`, `get_effective_date`
     - Note: Priority Distribution Over Time and Confidence Distribution charts were removed (pipeline-debugging metrics, not end-user analytics)
 
-12. **Review & Approve** (`pages/02_Review_Approve.py`)
+12. **Review & Approve** (`pages/02_Review.py`)
     - Unified queue with filters (review status, priority, source type, topic, date range, text search)
     - Title-first expandable cards with inline Approve/Review buttons, batch actions, sorted newest-first
     - Record detail with Next/Previous navigation, title+metrics header, Quick Approve with auto-advance
@@ -1532,7 +1557,7 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
     - Supports large datasets outside Streamlit UI
 
 15. **Testing & Validation** (`tests/`)
-    - 97 test cases across 4 test modules (`test_scenarios.py`, `test_macro_themes.py`, `test_regions_bucketed.py`, `test_publish_date_pdf.py`)
+    - 105 test cases across 5 test modules (`test_scenarios.py`, `test_macro_themes.py`, `test_regions_bucketed.py`, `test_publish_date_pdf.py`, `test_brief_qc.py`)
     - Publisher ranking hierarchy validation
     - Weekly briefing logic verification
     - Exact and fuzzy duplicate detection tests
@@ -1544,10 +1569,10 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 
 - **Models:** Gemini 2.5-flash-lite (primary, 10 RPM / 20 RPD) + Gemini 2.5-flash (fallback/repair/AI brief, 5 RPM / 20 RPD) via `google-genai` with structured JSON schema; both $0 on free tier
 - **UI:** Streamlit (5-page multi-page app + Home landing page)
-- **Charting:** Altair (Topic Momentum interactive charts), matplotlib (other charts), pandas aggregations
+- **Charting:** Altair (all interactive trend charts), pandas aggregations
 - **Storage:** JSONL (JSON Lines format) + `data/api_usage.json` for quota tracking
 - **Language:** Python 3.9+
-- **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, matplotlib, altair, google-genai, pytest
+- **Dependencies:** streamlit, pymupdf, pdfplumber, pandas, altair, google-genai, pytest
 
 ## Pages
 
@@ -1555,10 +1580,10 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 |---|------|------|---------|
 | — | Home | `Home.py` | Landing page with workflow navigation guide |
 | 1 | Ingest | `pages/01_Ingest.py` | Single + bulk PDF upload, extraction, noise routing, quota display |
-| 2 | Review & Approve | `pages/02_Review_Approve.py` | Queue filtering, record detail/edit, JSON editing, approve/disapprove, confidence breakdown |
-| 3 | Weekly Executive Brief | `pages/03_Weekly_Executive_Brief.py` | Candidate selection, deterministic + AI-generated briefs, saved brief comparison |
-| 4 | Insights | `pages/04_Insights.py` | Trend charts, canonical toggle, topic/company/priority/confidence analytics |
-| 5 | Admin | `pages/08_Admin.py` | Bulk CSV/JSONL export, dedup metrics, maintenance utilities |
+| 2 | Review & Approve | `pages/02_Review.py` | Queue filtering, record detail/edit, JSON editing, approve/disapprove, confidence breakdown |
+| 3 | Weekly Executive Brief | `pages/03_Brief.py` | Candidate selection, deterministic + AI-generated briefs, saved brief comparison |
+| 4 | Insights | `pages/04_Insights.py` | Trend charts, canonical toggle, topic/company/geographic heatmap, quality trend analytics |
+| 5 | Admin | `pages/Admin.py` | Bulk CSV/JSONL export, dedup metrics, maintenance utilities |
 
 ---
 
@@ -1568,10 +1593,10 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 
 ## A) Product & Scope
 
-- **MVP features:** PDF upload (single + bulk), text paste, noisy-PDF cleanup, chunked extraction with meta-based routing, duplicate detection, weekly briefing (deterministic + AI-generated), executive email generation, trend analysis (Insights page), consolidated Review & Approve workflow
+- **MVP features:** PDF upload (single + bulk), text paste, noisy-PDF cleanup, automatic chunked extraction with meta-based routing, duplicate detection, weekly briefing (deterministic + AI-generated), executive email generation, trend analysis (Insights page), consolidated Review & Approve workflow
 - **Duplicate detection:** Exact title block + similar story auto-ranking by source quality
 - **Deduplication logic:** Publisher ranking (S&P > Bloomberg > Reuters > Financial News > MarkLines > Automotive News > Industry Publication > ... > Other) + confidence + completeness
-- **Priority classification:** LLM prompt rules + deterministic `_boost_priority()` postprocess with 4 signal checks
+- **Priority classification:** Deterministic `_boost_priority()` postprocess with 4 signal checks (LLM prompt no longer contains priority rules)
 
 ## B) Technical Choices
 
@@ -1580,12 +1605,12 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 - **Chunking:** Overlapping chunks for long documents with per-chunk extraction and merge
 - **Quota management:** File-based RPD tracker with midnight PT reset, sidebar display, smart chunk recommendations
 - **UI:** Streamlit 5-page app for lightweight, interactive workflows
-- **Charting:** Altair for interactive Topic Momentum; matplotlib + pandas for other charts
+- **Charting:** Altair for all interactive trend charts; pandas aggregations
 - **Storage:** JSONL for simplicity and scalability without database overhead
 
 ## C) Evaluation
 
-- **Test coverage:** 97 tests across 4 modules (duplicate detection, ranking, briefing, macro themes, regions, company canonicalization)
+- **Test coverage:** 105 tests across 5 modules (duplicate detection, ranking, briefing, macro themes, regions, company canonicalization, brief QC checks)
 - **Quality gates:** Schema validation, evidence requirement, review gating (auto-approve + manual), duplicate suppression, priority classification, computed confidence scoring
 - **Token tracking:** Per-call usage logging + per-model RPD quota tracking for cost monitoring and optimization
 - **Regression prevention:** Comprehensive test suite for all new features
@@ -1598,8 +1623,8 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 ## E) Reporting
 
 - **Exports:** CSV (canonical and all) ready for Power BI; JSONL (canonical + dups) for analysis
-- **In-app:** Insights page with trend analysis charts (Topic Momentum, Company Mentions, Priority Distribution), Weekly Executive Brief with deterministic + AI-generated briefs, Admin metrics, token usage display, quota sidebar
-- **CLI:** Standalone bulk deduplication script with diagnostic output
+- **In-app:** Insights page with trend analysis charts (Topic Momentum, Company Mentions, Geographic Heatmap, Quality Score Trend), Weekly Executive Brief with deterministic + AI-generated briefs, Admin metrics, token usage display, quota sidebar
+- **CLI:** Standalone bulk deduplication script with diagnostic output; quality pipeline via `scripts/run_quality.py`
 
 ---
 
