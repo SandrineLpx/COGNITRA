@@ -6,7 +6,7 @@ Run with: pytest test_scenarios.py -v
 import pytest
 import json
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from src.storage import new_record_id, utc_now_iso
 from src.dedupe import (
@@ -31,12 +31,22 @@ from src.text_clean_chunk import clean_and_chunk
 # ============================================================================
 
 
+def _today_str() -> str:
+    """Return today's date as YYYY-MM-DD (used by fixtures to stay current)."""
+    return date.today().isoformat()
+
+
+def _days_ago_str(n: int) -> str:
+    """Return a date N days before today as YYYY-MM-DD."""
+    return (date.today() - timedelta(days=n)).isoformat()
+
+
 def sample_record(
     title: str = "Default Title",
     source_type: str = "Reuters",
     priority: str = "High",
     confidence: str = "High",
-    publish_date: str = "2026-02-12",
+    publish_date: str = None,
     created_at: str = None,
     is_duplicate: bool = False,
     duplicate_story_of: str = None,
@@ -50,7 +60,7 @@ def sample_record(
         "source_type": source_type,
         "priority": priority,
         "confidence": confidence,
-        "publish_date": publish_date,
+        "publish_date": publish_date if publish_date is not None else _today_str(),
         "created_at": now,
         "original_url": "https://example.com",
         "actor_type": "oem",
@@ -232,19 +242,21 @@ class TestSourceQualityScoring:
 # ============================================================================
 
 
-class TestOWeeklyBriefing:
+class TestWeeklyBriefing:
     """Test weekly briefing selection and rendering."""
 
     def test_select_weekly_candidates_filters_by_days(self):
         """Should only include records from the last N days."""
-        old = sample_record(publish_date="2026-02-01")
-        recent = sample_record(publish_date="2026-02-12")
+        # Use relative dates so tests remain valid regardless of current date.
+        old = sample_record(publish_date=_days_ago_str(30))
+        recent = sample_record(publish_date=_days_ago_str(2))
 
         records = [old, recent]
         candidates = select_weekly_candidates(records, days=7)
 
         assert len(candidates) >= 1
         assert recent["record_id"] in [c["record_id"] for c in candidates]
+        assert old["record_id"] not in [c["record_id"] for c in candidates]
 
     def test_share_ready_items_prioritized(self):
         """Share-ready items (High/High) should come first."""
@@ -277,6 +289,20 @@ class TestOWeeklyBriefing:
 
         assert is_share_ready(share_ready) is True
         assert is_share_ready(not_ready) is False
+
+    def test_boundary_exactly_n_days_ago_is_included(self):
+        """Record published exactly N days ago (cutoff boundary) should be included."""
+        # select_weekly_candidates uses: rd >= (today - timedelta(days=N))
+        # A record at exactly N days ago is ON the boundary and must be included.
+        boundary_record = sample_record(publish_date=_days_ago_str(7))
+        candidates = select_weekly_candidates([boundary_record], days=7)
+        assert len(candidates) == 1, "Record at exact boundary (7 days ago) must be included"
+
+    def test_boundary_one_day_past_cutoff_is_excluded(self):
+        """Record published N+1 days ago (just outside cutoff) should be excluded."""
+        just_outside = sample_record(publish_date=_days_ago_str(8))
+        candidates = select_weekly_candidates([just_outside], days=7)
+        assert len(candidates) == 0, "Record one day past the cutoff must be excluded"
 
 
 # ============================================================================

@@ -5,6 +5,8 @@
 2) Install dependencies:
    - `pip install -r requirements.txt`
    - or `pip install .[dev]`
+   - Core packages: `streamlit`, `pandas`, `matplotlib`, `altair`, `pymupdf`, `pdfplumber`, `google-genai`
+   - Test runner (included in `requirements.txt` and `.[dev]`): `pytest`
 3) Run:
    ```bash
    streamlit run Home.py
