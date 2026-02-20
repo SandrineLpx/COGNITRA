@@ -61,10 +61,10 @@ st.markdown(
     "Most intelligence is never shared."
     "</h1>"
     "<p style='margin:0.3rem 0 0.5rem; font-size:1.25rem; font-weight:400; color:#64748B;'>"
-    "Because there's too much of it."
+    "Because volume exceeds processing capacity."
     "</p>"
     "<p style='margin:0 0 0.25rem; font-size:0.9rem; color:#64748B;'>"
-    "Cognitra structures information into validated records before it allows synthesis."
+    "Cognitra turns documents into validated records — then synthesizes."
     "</p>"
     "<div class='cg-divider'></div>",
     unsafe_allow_html=True,
@@ -75,30 +75,61 @@ st.markdown(
 # ---------------------------------------------------------------------------
 
 st.markdown(
-    "<p style='text-align:center; font-size:0.95rem; font-style:italic; "
-    "color:#64748B; margin:0.75rem 0 1.25rem;'>"
-    "This is not a summarization tool. It is a controlled intelligence architecture."
+    "<p style='text-align:center; font-size:1.05rem; font-weight:600; "
+    "color:#0F172A; margin:0.75rem 0 0.2rem;'>"
+    "Not a summarization tool."
+    "</p>"
+    "<p style='text-align:center; font-size:1.05rem; font-weight:600; "
+    "color:#0F172A; margin:0 0 1.1rem;'>"
+    "A governed intelligence pipeline."
     "</p>",
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# 3. Live metrics row
+# 3. Start here CTA
+# ---------------------------------------------------------------------------
+
+st.markdown(
+    "<p style='font-size:0.85rem; color:#64748B; margin:0 0 0.4rem;'>Start here:</p>",
+    unsafe_allow_html=True,
+)
+b1, b2, b3, _ = st.columns([1, 1, 1, 3])
+with b1:
+    if st.button("Ingest a PDF", use_container_width=True):
+        st.switch_page("pages/01_Ingest.py")
+with b2:
+    if st.button("Review queue", use_container_width=True):
+        st.switch_page("pages/02_Review.py")
+with b3:
+    if st.button("Generate weekly brief", use_container_width=True):
+        st.switch_page("pages/03_Brief.py")
+
+# ---------------------------------------------------------------------------
+# 4. Live metrics row
 # ---------------------------------------------------------------------------
 
 k1, k2, k3, k4 = st.columns(4)
 with k1:
-    ui.kpi_card("Validated Records", len(canonical), caption="Structured and approved")
+    ui.kpi_card("Validated Records", len(canonical), caption="Structured \u00b7 Scored \u00b7 Approved")
 with k2:
-    ui.kpi_card("Pending Governance", pending_count, caption="Awaiting analyst sign-off")
+    ui.kpi_card("Pending Governance", pending_count, caption="Human gate pending")
 with k3:
-    ui.kpi_card("Surfaced Signals", high_pri_count, caption="Escalated by deterministic rules")
+    ui.kpi_card("Surfaced Signals", high_pri_count, caption="Elevated by rule-based scoring")
 with k4:
     ui.kpi_card("Latest Structured Ingest", last_ingest, caption="Last document structured")
 
 # ---------------------------------------------------------------------------
-# 4. Architecture strip
+# 5. Architecture strip
 # ---------------------------------------------------------------------------
+
+st.markdown(
+    "<p style='font-size:0.8rem; font-weight:600; color:#64748B; "
+    "letter-spacing:0.06em; text-transform:uppercase; margin:1rem 0 0.25rem;'>"
+    "How Cognitra Works (Controlled Pipeline)"
+    "</p>",
+    unsafe_allow_html=True,
+)
 
 _PIPELINE = [
     ("Extract", "Strict JSON schema — factual fields only"),
@@ -107,7 +138,7 @@ _PIPELINE = [
     ("Render", "From validated records only — never from raw PDFs"),
 ]
 
-with ui.card("STRUCTURE BEFORE SYNTHESIS", "Use the left sidebar to navigate to any step."):
+with ui.card("STRUCTURE BEFORE SYNTHESIS"):
     cols = st.columns(len(_PIPELINE))
     for col, (step, desc) in zip(cols, _PIPELINE):
         with col:
@@ -115,7 +146,7 @@ with ui.card("STRUCTURE BEFORE SYNTHESIS", "Use the left sidebar to navigate to 
             st.caption(desc)
 
 # ---------------------------------------------------------------------------
-# 5. Controlled AI usage
+# 6. Controlled AI usage
 # ---------------------------------------------------------------------------
 
 with ui.card("Controlled AI Usage"):
@@ -125,9 +156,26 @@ with ui.card("Controlled AI Usage"):
         "- No synthesis from raw PDFs\n"
         "- Human review before reporting"
     )
+    st.markdown(
+        "<p style='font-size:0.8rem; color:#64748B; margin-top:0.6rem;'>"
+        "Cost-aware: one extraction call per document. Deterministic rendering thereafter."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
 # ---------------------------------------------------------------------------
-# 6. CSV drift warning (operational — keep at bottom)
+# 7. Page footer
+# ---------------------------------------------------------------------------
+
+st.markdown(
+    "<p style='text-align:center; font-size:0.8rem; color:#94A3B8; margin:1.5rem 0 0.5rem;'>"
+    "Briefs are rendered from approved records — never from raw documents."
+    "</p>",
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------------------------------
+# 8. CSV drift warning (operational — keep at bottom)
 # ---------------------------------------------------------------------------
 
 _csv_warnings = _cached_csv_warnings(_path_signature(Path("data/new_country_mapping.csv")))
