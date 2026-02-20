@@ -1,4 +1,4 @@
-﻿import streamlit as st
+import streamlit as st
 import pandas as pd
 import altair as alt
 import re
@@ -562,713 +562,765 @@ for line in snapshot_insights:
     else:
         st.markdown(f"- {line}")
 
-# â”€â”€ Weekly Histogram â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-trend_col1, trend_col2 = st.columns(2)
+# Requested top 3 charts
+st.subheader("Top charts")
 
-with trend_col1:
-    st.subheader("Weekly Record Volume")
-    weekly = fdf.dropna(subset=["event_day"]).copy()
-    if not weekly.empty:
-        weekly["event_week"] = weekly["event_day"].dt.to_period("W").dt.start_time
-        weekly["source_type"] = weekly.get("source_type", pd.Series(index=weekly.index)).fillna("Unknown")
-        weekly_hist = (
-            weekly.groupby(["event_week", "source_type"], dropna=False)
-            .size()
-            .reset_index(name="count")
-        )
-        weekly_hist["week_label"] = weekly_hist["event_week"].dt.strftime("%Y-%m-%d")
-        chart = (
-            alt.Chart(weekly_hist)
-            .mark_bar()
-            .encode(
-                x=alt.X("week_label:O", title="Week (start)"),
-                y=alt.Y("count:Q", title="Records"),
-                color=alt.Color("source_type:N", title="Source"),
-                tooltip=["event_week:T", "source_type:N", "count:Q"],
+topic_long = explode_list_column(fdf[["record_id", "topics"]].copy(), "topics")
+if not topic_long.empty:
+    topic_long["record_id"] = topic_long["record_id"].astype(str)
+    topic_long = topic_long.drop_duplicates(subset=["record_id", "topics"])
+topic_counts_df = (
+    topic_long.groupby("topics", as_index=False)
+    .agg(records=("record_id", "nunique"))
+    .sort_values("records", ascending=False)
+    .rename(columns={"topics": "topic"})
+    .head(8)
+    if not topic_long.empty else pd.DataFrame(columns=["topic", "records"])
+)
+
+region_long = explode_list_column(
+    fdf[["record_id", "regions_relevant_to_apex_mobility"]].copy(),
+    "regions_relevant_to_apex_mobility",
+)
+if not region_long.empty:
+    region_long["record_id"] = region_long["record_id"].astype(str)
+    region_long = region_long.drop_duplicates(subset=["record_id", "regions_relevant_to_apex_mobility"])
+region_counts_df = (
+    region_long.groupby("regions_relevant_to_apex_mobility", as_index=False)
+    .agg(records=("record_id", "nunique"))
+    .sort_values("records", ascending=False)
+    .rename(columns={"regions_relevant_to_apex_mobility": "region"})
+    .head(6)
+    if not region_long.empty else pd.DataFrame(columns=["region", "records"])
+)
+if not region_counts_df.empty:
+    region_total = max(float(region_counts_df["records"].sum()), 1.0)
+    region_counts_df["pct"] = (region_counts_df["records"] / region_total * 100.0).round(1)
+
+company_long = explode_list_column(fdf[["record_id", "companies_mentioned"]].copy(), "companies_mentioned")
+if not company_long.empty:
+    company_long["company"] = company_long["companies_mentioned"].apply(canonicalize_company)
+    company_long["record_id"] = company_long["record_id"].astype(str)
+    company_long = company_long.drop_duplicates(subset=["record_id", "company"])
+company_counts_df = (
+    company_long.groupby("company", as_index=False)
+    .agg(records=("record_id", "nunique"))
+    .sort_values("records", ascending=False)
+    .head(7)
+    if not company_long.empty else pd.DataFrame(columns=["company", "records"])
+)
+
+t1, t2 = st.columns(2, gap="large")
+with t1:
+    with st.container(border=True):
+        st.markdown("**Records by topic**")
+        if not topic_counts_df.empty:
+            topic_chart = (
+                alt.Chart(topic_counts_df)
+                .mark_bar(cornerRadiusEnd=4)
+                .encode(
+                    x=alt.X("records:Q", title="Records"),
+                    y=alt.Y("topic:N", sort="-x", title=None),
+                    color=alt.value("#2f76d2"),
+                    tooltip=["topic:N", "records:Q"],
+                )
+                .properties(height=300)
             )
-            .properties(height=280)
-        )
-        st.altair_chart(chart, width='stretch')
+            st.altair_chart(topic_chart, width='stretch')
+        else:
+            st.caption("No topic coverage in current selection.")
+
+with t2:
+    with st.container(border=True):
+        st.markdown("**Coverage by region**")
+        if not region_counts_df.empty:
+            donut_left, donut_right = st.columns([1.5, 1.2], gap="small")
+            with donut_left:
+                donut_chart = (
+                    alt.Chart(region_counts_df)
+                    .mark_arc(innerRadius=70, outerRadius=110)
+                    .encode(
+                        theta=alt.Theta("records:Q"),
+                        color=alt.Color("region:N", scale=alt.Scale(scheme="blues"), legend=None),
+                        tooltip=[
+                            alt.Tooltip("region:N", title="Region"),
+                            alt.Tooltip("records:Q", title="Records", format=".0f"),
+                            alt.Tooltip("pct:Q", title="Share %", format=".1f"),
+                        ],
+                    )
+                    .properties(height=300)
+                )
+                st.altair_chart(donut_chart, width='stretch')
+            with donut_right:
+                for _, row in region_counts_df.iterrows():
+                    st.markdown(f"- {str(row['region'])}: {float(row['pct']):.1f}%")
+        else:
+            st.caption("No region coverage in current selection.")
+
+with st.container(border=True):
+    st.markdown("**Top companies by records**")
+    if not company_counts_df.empty:
+        max_records = max(int(company_counts_df["records"].max()), 1)
+        for rank, row in enumerate(company_counts_df.itertuples(index=False), start=1):
+            left_col, right_col = st.columns([2.4, 4.6], gap="small")
+            with left_col:
+                rank_col, name_col = st.columns([0.35, 1.65], gap="small")
+                with rank_col:
+                    st.caption(str(rank))
+                with name_col:
+                    st.markdown(f"**{row.company}**")
+            with right_col:
+                bar_col, value_col = st.columns([8, 1], gap="small")
+                with bar_col:
+                    st.progress(float(row.records) / float(max_records))
+                with value_col:
+                    st.markdown(f"**{int(row.records)}**")
     else:
-        st.caption("No dated records for weekly histogram.")
+        st.caption("No company mentions in current selection.")
 
-with trend_col2:
-    st.subheader("Topic Momentum")
-    st.caption("Weighted topic frequency change: recent half vs prior half of date range.")
-    dated_rows = fdf.dropna(subset=["event_day"])
-    if not dated_rows.empty and "topics" in dated_rows:
-        date_min = dated_rows["event_day"].min()
-        date_max = dated_rows["event_day"].max()
-        midpoint = date_min + (date_max - date_min) / 2
-        prior_df = dated_rows[dated_rows["event_day"] < midpoint]
-        recent_df = dated_rows[dated_rows["event_day"] >= midpoint]
-        st.caption(
-            f"Prior: {date_min.strftime('%b %d')} - {(midpoint - pd.Timedelta(days=1)).strftime('%b %d')}  |  "
-            f"Recent: {midpoint.strftime('%b %d')} - {date_max.strftime('%b %d')}"
-        )
+with st.expander("Record insights", expanded=False):
+    trend_col1, trend_col2 = st.columns(2)
 
-        prior_w = weighted_explode(prior_df, "topics")
-        recent_w = weighted_explode(recent_df, "topics")
-
-        prior_counts = prior_w.groupby("topics")["_weight"].sum() if not prior_w.empty else pd.Series(dtype=float)
-        recent_counts = recent_w.groupby("topics")["_weight"].sum() if not recent_w.empty else pd.Series(dtype=float)
-
-        all_topics_set = sorted(set(prior_counts.index) | set(recent_counts.index))
-        if all_topics_set:
-            momentum = pd.DataFrame({
-                "topic": all_topics_set,
-                "prior": [round(prior_counts.get(t, 0.0), 2) for t in all_topics_set],
-                "recent": [round(recent_counts.get(t, 0.0), 2) for t in all_topics_set],
-            })
-            momentum["delta"] = round(momentum["recent"] - momentum["prior"], 2)
-            momentum["pct_change"] = round(
-                (momentum["recent"] - momentum["prior"]) / momentum["prior"].clip(lower=1e-9), 1
+    with trend_col1:
+        st.subheader("Weekly Record Volume")
+        weekly = fdf.dropna(subset=["event_day"]).copy()
+        if not weekly.empty:
+            weekly["event_week"] = weekly["event_day"].dt.to_period("W").dt.start_time
+            weekly["source_type"] = weekly.get("source_type", pd.Series(index=weekly.index)).fillna("Unknown")
+            weekly_hist = (
+                weekly.groupby(["event_week", "source_type"], dropna=False)
+                .size()
+                .reset_index(name="count")
             )
-            momentum["class"] = momentum.apply(
-                lambda r: classify_topic_momentum(r["prior"], r["recent"], r["delta"]), axis=1
-            )
-            momentum = momentum.sort_values("delta")
-            momentum["color_group"] = momentum["delta"].apply(
-                lambda d: "Rising" if d > 0 else ("Falling" if d < 0 else "Flat")
-            )
+            weekly_hist["week_label"] = weekly_hist["event_week"].dt.strftime("%Y-%m-%d")
             chart = (
-                alt.Chart(momentum)
+                alt.Chart(weekly_hist)
                 .mark_bar()
                 .encode(
-                    x=alt.X("delta:Q", title="Weighted change in mentions"),
-                    y=alt.Y("topic:N", sort=momentum["topic"].tolist(), title=None),
-                    color=alt.Color("color_group:N", legend=None),
-                    tooltip=["topic", "prior", "recent", "delta", "pct_change", "class"],
+                    x=alt.X("week_label:O", title="Week (start)"),
+                    y=alt.Y("count:Q", title="Records"),
+                    color=alt.Color("source_type:N", title="Source"),
+                    tooltip=["event_week:T", "source_type:N", "count:Q"],
                 )
-                .properties(height=max(180, len(momentum) * 24))
+                .properties(height=280)
             )
-            rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule().encode(x="x:Q")
-            st.altair_chart(chart + rule, width='stretch')
+            st.altair_chart(chart, width='stretch')
         else:
-            st.caption("Not enough topic data for momentum chart.")
-    else:
-        st.caption("Not enough dated records for momentum chart.")
+            st.caption("No dated records for weekly histogram.")
 
-# â”€â”€ Region x Topic Heatmap â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-st.subheader("Region-Topic Signal Matrix")
-st.caption("Shows where footprint signals concentrate across topics. Weighted mode gives each record total weight 1 to reduce multi-tag inflation.")
-if "regions_relevant_to_apex_mobility" in fdf and "topics" in fdf:
-    hm_cols = ["regions_relevant_to_apex_mobility", "topics"]
-    rid_col = "record_id"
-    if rid_col in fdf.columns:
-        hm_cols = [rid_col] + hm_cols
-    hm = fdf[hm_cols].copy()
-    if rid_col not in hm.columns:
-        rid_col = "_rid"
-        hm[rid_col] = hm.index.astype(str)
-
-    hm["regions_relevant_to_apex_mobility"] = hm["regions_relevant_to_apex_mobility"].apply(safe_list)
-    hm["topics"] = hm["topics"].apply(safe_list)
-    hm = hm[
-        (hm["regions_relevant_to_apex_mobility"].apply(len) > 0)
-        & (hm["topics"].apply(len) > 0)
-    ].copy()
-
-    if not hm.empty:
-        h1, h2, h3 = st.columns(3)
-        with h1:
-            top_regions = st.slider("Top regions", min_value=6, max_value=20, value=12, step=1, key="ins_heatmap_top_regions")
-        with h2:
-            top_topics = st.slider("Top topics", min_value=4, max_value=16, value=10, step=1, key="ins_heatmap_top_topics")
-        with h3:
-            heat_metric = st.selectbox(
-                "Heatmap metric",
-                options=["Weighted Share (%)", "Record Count"],
-                index=0,
-                key="ins_heatmap_metric",
+    with trend_col2:
+        st.subheader("Topic Momentum")
+        dated_rows = fdf.dropna(subset=["event_day"])
+        if not dated_rows.empty and "topics" in dated_rows:
+            date_min = dated_rows["event_day"].min()
+            date_max = dated_rows["event_day"].max()
+            midpoint = date_min + (date_max - date_min) / 2
+            prior_df = dated_rows[dated_rows["event_day"] < midpoint]
+            recent_df = dated_rows[dated_rows["event_day"] >= midpoint]
+            st.caption(
+                f"Prior: {date_min.strftime('%b %d')} - {(midpoint - pd.Timedelta(days=1)).strftime('%b %d')} | "
+                f"Recent: {midpoint.strftime('%b %d')} - {date_max.strftime('%b %d')}"
             )
-        if heat_metric == "Weighted Share (%)":
-            st.caption("Weighted Share (%): each record contributes total weight 1 across all its region-topic pairs.")
+
+            prior_w = weighted_explode(prior_df, "topics")
+            recent_w = weighted_explode(recent_df, "topics")
+
+            prior_counts = prior_w.groupby("topics")["_weight"].sum() if not prior_w.empty else pd.Series(dtype=float)
+            recent_counts = recent_w.groupby("topics")["_weight"].sum() if not recent_w.empty else pd.Series(dtype=float)
+
+            all_topics_set = sorted(set(prior_counts.index) | set(recent_counts.index))
+            if all_topics_set:
+                momentum = pd.DataFrame({
+                    "topic": all_topics_set,
+                    "prior": [round(prior_counts.get(t, 0.0), 2) for t in all_topics_set],
+                    "recent": [round(recent_counts.get(t, 0.0), 2) for t in all_topics_set],
+                })
+                momentum["delta"] = round(momentum["recent"] - momentum["prior"], 2)
+                momentum["pct_change"] = round(
+                    (momentum["recent"] - momentum["prior"]) / momentum["prior"].clip(lower=1e-9), 1
+                )
+                momentum["class"] = momentum.apply(
+                    lambda r: classify_topic_momentum(r["prior"], r["recent"], r["delta"]), axis=1
+                )
+                momentum = momentum.sort_values("delta")
+                momentum["color_group"] = momentum["delta"].apply(
+                    lambda d: "Rising" if d > 0 else ("Falling" if d < 0 else "Flat")
+                )
+                chart = (
+                    alt.Chart(momentum)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("delta:Q", title="Weighted change in mentions"),
+                        y=alt.Y("topic:N", sort=momentum["topic"].tolist(), title=None),
+                        color=alt.Color("color_group:N", legend=None),
+                        tooltip=["topic", "prior", "recent", "delta", "pct_change", "class"],
+                    )
+                    .properties(height=max(260, len(momentum) * 30))
+                )
+                rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule().encode(x="x:Q")
+                st.altair_chart(chart + rule, width='stretch')
+            else:
+                st.caption("Not enough topic data for momentum chart.")
         else:
-            st.caption("Record Count: number of unique records tagged with each region-topic pair.")
+            st.caption("Not enough dated records for momentum chart.")
 
-        hm["_region_count"] = hm["regions_relevant_to_apex_mobility"].apply(lambda lst: max(len(lst), 1))
-        hm["_topic_count"] = hm["topics"].apply(lambda lst: max(len(lst), 1))
-        hm["_pair_weight"] = 1.0 / (hm["_region_count"] * hm["_topic_count"])
+    st.subheader("Region-Topic Signal Matrix")
+    st.caption("Shows where footprint signals concentrate across topics. Weighted mode gives each record total weight 1 to reduce multi-tag inflation.")
+    if "regions_relevant_to_apex_mobility" in fdf and "topics" in fdf:
+        hm_cols = ["regions_relevant_to_apex_mobility", "topics"]
+        rid_col = "record_id"
+        if rid_col in fdf.columns:
+            hm_cols = [rid_col] + hm_cols
+        hm = fdf[hm_cols].copy()
+        if rid_col not in hm.columns:
+            rid_col = "_rid"
+            hm[rid_col] = hm.index.astype(str)
 
-        hm_long = hm.explode("regions_relevant_to_apex_mobility").explode("topics")
-        hm_long["regions_relevant_to_apex_mobility"] = hm_long["regions_relevant_to_apex_mobility"].astype(str).str.strip()
-        hm_long["topics"] = hm_long["topics"].astype(str).str.strip()
-        hm_long = hm_long[
-            hm_long["regions_relevant_to_apex_mobility"].ne("")
-            & hm_long["topics"].ne("")
+        hm["regions_relevant_to_apex_mobility"] = hm["regions_relevant_to_apex_mobility"].apply(safe_list)
+        hm["topics"] = hm["topics"].apply(safe_list)
+        hm = hm[
+            (hm["regions_relevant_to_apex_mobility"].apply(len) > 0)
+            & (hm["topics"].apply(len) > 0)
         ].copy()
-        hm_long = hm_long.drop_duplicates(subset=[rid_col, "regions_relevant_to_apex_mobility", "topics"])
 
-        if not hm_long.empty:
-            matrix = (
-                hm_long
-                .groupby(["regions_relevant_to_apex_mobility", "topics"], as_index=False)
-                .agg(
-                    record_pair_count=(rid_col, "nunique"),
-                    weighted_signal=("_pair_weight", "sum"),
+        if not hm.empty:
+            h1, h2, h3 = st.columns(3)
+            with h1:
+                top_regions = st.slider("Top regions", min_value=6, max_value=20, value=12, step=1, key="ins_heatmap_top_regions")
+            with h2:
+                top_topics = st.slider("Top topics", min_value=4, max_value=16, value=10, step=1, key="ins_heatmap_top_topics")
+            with h3:
+                heat_metric = st.selectbox(
+                    "Heatmap metric",
+                    options=["Weighted Share (%)", "Record Count"],
+                    index=0,
+                    key="ins_heatmap_metric",
                 )
-            )
-            matrix["weighted_signal"] = matrix["weighted_signal"].round(4)
-
-            region_order = (
-                matrix.groupby("regions_relevant_to_apex_mobility")["weighted_signal"]
-                .sum()
-                .sort_values(ascending=False)
-                .head(top_regions)
-                .index
-                .tolist()
-            )
-            topic_order = (
-                matrix.groupby("topics")["weighted_signal"]
-                .sum()
-                .sort_values(ascending=False)
-                .head(top_topics)
-                .index
-                .tolist()
-            )
-            matrix = matrix[
-                matrix["regions_relevant_to_apex_mobility"].isin(region_order)
-            &   matrix["topics"].isin(topic_order)
-            ].copy()
-
-            matrix["weighted_share_pct"] = (
-                matrix["weighted_signal"] / max(float(matrix["weighted_signal"].sum()), 1e-9) * 100.0
-            ).round(1)
-            matrix["record_count"] = matrix["record_pair_count"].astype(float)
-
             if heat_metric == "Weighted Share (%)":
-                denom = max(float(matrix["weighted_signal"].sum()), 1e-9)
-                matrix["value"] = (matrix["weighted_signal"] / denom * 100.0).round(1)
-                color_title = "Weighted Share (%)"
-                value_fmt = ".1f"
-                label_threshold = 4.0
+                st.caption("Weighted Share (%): each record contributes total weight 1 across all its region-topic pairs.")
             else:
-                matrix["value"] = matrix["record_count"]
-                color_title = "Record Count"
-                value_fmt = ".0f"
-                label_threshold = max(float(matrix["value"].max()) * 0.4, 2.0)
+                st.caption("Record Count: number of unique records tagged with each region-topic pair.")
 
-            region_order = [r for r in region_order if r in set(matrix["regions_relevant_to_apex_mobility"])]
-            topic_order = [t for t in topic_order if t in set(matrix["topics"])]
+            hm["_region_count"] = hm["regions_relevant_to_apex_mobility"].apply(lambda lst: max(len(lst), 1))
+            hm["_topic_count"] = hm["topics"].apply(lambda lst: max(len(lst), 1))
+            hm["_pair_weight"] = 1.0 / (hm["_region_count"] * hm["_topic_count"])
 
-            heat = alt.Chart(matrix).mark_rect().encode(
-                x=alt.X("topics:N", sort=topic_order, title="Topic"),
-                y=alt.Y("regions_relevant_to_apex_mobility:N", sort=region_order, title="Footprint Region"),
-                color=alt.Color("value:Q", title=color_title, scale=alt.Scale(scheme="teals")),
-                tooltip=[
-                    alt.Tooltip("regions_relevant_to_apex_mobility:N", title="Region"),
-                    alt.Tooltip("topics:N", title="Topic"),
-                    alt.Tooltip("record_pair_count:Q", title="Record pairs", format=".0f"),
-                    alt.Tooltip("weighted_signal:Q", title="Weighted signal", format=".3f"),
-                    alt.Tooltip("value:Q", title=color_title, format=value_fmt),
-                ],
-            ).properties(height=max(280, len(region_order) * 24))
+            hm_long = hm.explode("regions_relevant_to_apex_mobility").explode("topics")
+            hm_long["regions_relevant_to_apex_mobility"] = hm_long["regions_relevant_to_apex_mobility"].astype(str).str.strip()
+            hm_long["topics"] = hm_long["topics"].astype(str).str.strip()
+            hm_long = hm_long[
+                hm_long["regions_relevant_to_apex_mobility"].ne("")
+                & hm_long["topics"].ne("")
+            ].copy()
+            hm_long = hm_long.drop_duplicates(subset=[rid_col, "regions_relevant_to_apex_mobility", "topics"])
 
-            if len(matrix) <= 140:
-                labels = alt.Chart(matrix).mark_text(fontSize=10).encode(
-                    x=alt.X("topics:N", sort=topic_order),
-                    y=alt.Y("regions_relevant_to_apex_mobility:N", sort=region_order),
-                    text=alt.Text("value:Q", format=value_fmt),
-                    color=alt.condition(f"datum.value > {label_threshold}", alt.value("white"), alt.value("#0f172a")),
+            if not hm_long.empty:
+                matrix = (
+                    hm_long
+                    .groupby(["regions_relevant_to_apex_mobility", "topics"], as_index=False)
+                    .agg(
+                        record_pair_count=(rid_col, "nunique"),
+                        weighted_signal=("_pair_weight", "sum"),
+                    )
                 )
-                st.altair_chart(heat + labels, width='stretch')
+                matrix["weighted_signal"] = matrix["weighted_signal"].round(4)
+
+                region_order = (
+                    matrix.groupby("regions_relevant_to_apex_mobility")["weighted_signal"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(top_regions)
+                    .index
+                    .tolist()
+                )
+                topic_order = (
+                    matrix.groupby("topics")["weighted_signal"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(top_topics)
+                    .index
+                    .tolist()
+                )
+                matrix = matrix[
+                    matrix["regions_relevant_to_apex_mobility"].isin(region_order)
+                &   matrix["topics"].isin(topic_order)
+                ].copy()
+
+                matrix["weighted_share_pct"] = (
+                    matrix["weighted_signal"] / max(float(matrix["weighted_signal"].sum()), 1e-9) * 100.0
+                ).round(1)
+                matrix["record_count"] = matrix["record_pair_count"].astype(float)
+
+                if heat_metric == "Weighted Share (%)":
+                    denom = max(float(matrix["weighted_signal"].sum()), 1e-9)
+                    matrix["value"] = (matrix["weighted_signal"] / denom * 100.0).round(1)
+                    color_title = "Weighted Share (%)"
+                    value_fmt = ".1f"
+                    label_threshold = 4.0
+                else:
+                    matrix["value"] = matrix["record_count"]
+                    color_title = "Record Count"
+                    value_fmt = ".0f"
+                    label_threshold = max(float(matrix["value"].max()) * 0.4, 2.0)
+
+                region_order = [r for r in region_order if r in set(matrix["regions_relevant_to_apex_mobility"])]
+                topic_order = [t for t in topic_order if t in set(matrix["topics"])]
+
+                heat = alt.Chart(matrix).mark_rect().encode(
+                    x=alt.X("topics:N", sort=topic_order, title="Topic"),
+                    y=alt.Y("regions_relevant_to_apex_mobility:N", sort=region_order, title="Footprint Region"),
+                    color=alt.Color("value:Q", title=color_title, scale=alt.Scale(scheme="teals")),
+                    tooltip=[
+                        alt.Tooltip("regions_relevant_to_apex_mobility:N", title="Region"),
+                        alt.Tooltip("topics:N", title="Topic"),
+                        alt.Tooltip("record_pair_count:Q", title="Record pairs", format=".0f"),
+                        alt.Tooltip("weighted_signal:Q", title="Weighted signal", format=".3f"),
+                        alt.Tooltip("value:Q", title=color_title, format=value_fmt),
+                    ],
+                ).properties(height=max(360, len(region_order) * 30))
+
+                if len(matrix) <= 140:
+                    labels = alt.Chart(matrix).mark_text(fontSize=10).encode(
+                        x=alt.X("topics:N", sort=topic_order),
+                        y=alt.Y("regions_relevant_to_apex_mobility:N", sort=region_order),
+                        text=alt.Text("value:Q", format=value_fmt),
+                        color=alt.condition(f"datum.value > {label_threshold}", alt.value("white"), alt.value("#0f172a")),
+                    )
+                    st.altair_chart(heat + labels, width='stretch')
+                else:
+                    st.altair_chart(heat, width='stretch')
             else:
-                st.altair_chart(heat, width='stretch')
+                st.caption("No region-topic pairs for matrix.")
         else:
             st.caption("No region-topic pairs for matrix.")
-    else:
-        st.caption("No region-topic pairs for matrix.")
 
-st.subheader("Top Company Mentions")
-if "companies_mentioned" in fdf:
-    c1, c2 = st.columns(2)
-    with c1:
-        top_n = st.slider("Top companies", min_value=5, max_value=25, value=10, step=1, key="ins_top_companies_n")
-    with c2:
-        metric_mode = st.selectbox(
-            "Metric",
-            options=["Records mentioning company", "Share of filtered records (%)"],
-            index=0,
-            key="ins_top_companies_metric",
-        )
-
-    # Explode safely, canonicalize, and keep one mention per record/company.
-    co_df = fdf[["record_id", "companies_mentioned"]].copy()
-    co_long = explode_list_column(co_df, "companies_mentioned")
-    if not co_long.empty:
-        co_long["company"] = co_long["companies_mentioned"].apply(canonicalize_company)
-        co_long["record_id"] = co_long["record_id"].astype(str)
-        co_long = co_long.drop_duplicates(subset=["record_id", "company"])
-
-        total_records = max(fdf.get("record_id", pd.Series(dtype=str)).astype(str).nunique(), 1)
-        agg = (
-            co_long.groupby("company", as_index=False)
-            .agg(records=("record_id", "nunique"))
-            .sort_values("records", ascending=False)
-        )
-        agg["share_pct"] = (agg["records"] / total_records * 100.0).round(1)
-        agg = agg.head(top_n).copy()
-        agg["value_label"] = agg["records"].astype(int).astype(str)
-        if metric_mode == "Share of filtered records (%)":
-            agg["value"] = agg["share_pct"]
-            agg["value_label"] = agg["share_pct"].map(lambda x: f"{x:.1f}%")
-            x_title = "Share of filtered records (%)"
-            x_fmt = ".1f"
-        else:
-            agg["value"] = agg["records"].astype(float)
-            x_title = "Records mentioning company"
-            x_fmt = ".0f"
-
-        if not agg.empty:
-            chart = alt.Chart(agg).mark_bar(cornerRadiusEnd=4).encode(
-                x=alt.X("value:Q", title=x_title),
-                y=alt.Y("company:N", sort="-x", title=None),
-                color=alt.Color("records:Q", legend=None, scale=alt.Scale(scheme="blues")),
-                tooltip=[
-                    alt.Tooltip("company:N", title="Company"),
-                    alt.Tooltip("records:Q", title="Records", format=".0f"),
-                    alt.Tooltip("share_pct:Q", title="Share %", format=".1f"),
-                ],
-            )
-            labels = chart.mark_text(align="left", dx=4, fontSize=11).encode(
-                text=alt.Text("value:Q", format=x_fmt),
-            )
-            st.altair_chart(chart + labels, width='stretch')
-        else:
-            st.caption("No company mentions in filtered records.")
-    else:
-        st.caption("No company mentions in filtered records.")
-else:
-    st.caption("No company data available.")
-
-# â”€â”€ Quality Score Trend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-st.divider()
-st.subheader("Extraction Quality Score")
-st.caption("Quality scores from automated QC runs. Higher is better (0-100). Run `python scripts/run_quality.py` to generate data.")
-
-qc_runs = read_quality_jsonl(QUALITY_RUNS_LOG)
-if qc_runs and len(qc_runs) >= 1:
-    qc_df = pd.DataFrame(qc_runs)
-
-    # --- KPI metrics row (latest run vs prior) ---
-    latest = qc_runs[-1]
-    prior = qc_runs[-2] if len(qc_runs) >= 2 else {}
-
-    def _delta(key):
-        cur = latest.get(key)
-        prev = prior.get(key)
-        if cur is not None and prev is not None:
-            return round(float(cur) - float(prev), 2)
-        return None
-
-    def _delta_text(key: str, percent: bool = False) -> str | None:
-        delta_val = _delta(key)
-        if delta_val is None:
-            return None
-        if abs(delta_val) < 1e-9:
-            return "No change"
-        direction = "Increase" if delta_val > 0 else "Decrease"
-        if percent:
-            return f"{direction} {abs(delta_val):.0%}"
-        return f"{direction} {abs(delta_val):.1f}"
-
-    q1, q2, q3, q4 = st.columns(4)
-    with q1:
-        ui.kpi_card(
-            "Overall Score",
-            f"{latest.get('weighted_overall_score', '-')}",
-            caption=_delta_text("weighted_overall_score", percent=False),
-        )
-    with q2:
-        ui.kpi_card(
-            "Evidence Grounding",
-            f"{latest.get('KPI-R3', 0):.0%}",
-            caption=_delta_text("KPI-R3", percent=True),
-        )
-    with q3:
-        ui.kpi_card(
-            "Canonicalization",
-            f"{latest.get('KPI-R4', 0):.0%}",
-            caption=_delta_text("KPI-R4", percent=True),
-        )
-    with q4:
-        ui.kpi_card(
-            "Geo Determinism",
-            f"{latest.get('KPI-R5', 0):.0%}",
-            caption=_delta_text("KPI-R5", percent=True),
-        )
-
-    bucket = st.radio(
-        "Group runs by",
-        options=["Hour", "Day", "Week", "Version"],
-        index=1,
-        horizontal=True,
-        key="qc_score_bucket",
-    )
-
-    # --- Quality score trend line chart ---
-    if "created_at" in qc_df.columns and len(qc_df) >= 2:
-        # Normalize to timezone-naive UTC timestamps so day/week buckets render
-        # consistently (no browser-local timezone date shifts).
-        qc_df["run_date"] = (
-            pd.to_datetime(qc_df["created_at"], errors="coerce", utc=True)
-            .dt.tz_convert(None)
-        )
-        qc_df["run_version_num"] = pd.to_numeric(qc_df.get("run_version"), errors="coerce")
-        if qc_df["run_version_num"].isna().all():
-            qc_df["run_version_num"] = pd.Series(range(1, len(qc_df) + 1), index=qc_df.index, dtype=float)
-        score_cols = ["weighted_overall_score", "weighted_record_score", "weighted_brief_score"]
-        available = [c for c in score_cols if c in qc_df.columns]
-        if available:
-            plot_df = qc_df[["run_date", "run_version_num"] + available].dropna(subset=["run_date"])
-            melted = plot_df.melt(
-                id_vars=["run_date", "run_version_num"],
-                value_vars=available,
-                var_name="Score Type",
-                value_name="Score",
-            )
-            melted["Score Type"] = melted["Score Type"].map({
-                "weighted_overall_score": "Overall",
-                "weighted_record_score": "Record",
-                "weighted_brief_score": "Brief",
-            })
-            melted = melted.dropna(subset=["Score Type", "Score"])
-
-            if bucket == "Version":
-                melted["run_bucket_version"] = pd.to_numeric(melted["run_version_num"], errors="coerce")
-                chart_df = (
-                    melted
-                    .dropna(subset=["run_bucket_version"])
-                    .groupby(["run_bucket_version", "Score Type"], as_index=False)
-                    .agg(
-                        Score=("Score", "mean"),
-                        Runs=("Score", "count"),
-                    )
-                    .sort_values("run_bucket_version")
-                )
-                chart_df["bucket_version"] = chart_df["run_bucket_version"].round().astype(int).astype(str)
-            else:
-                chart_df = pd.DataFrame()
-
-            if bucket == "Hour":
-                melted["run_bucket"] = melted["run_date"].dt.floor("h")
-            elif bucket == "Day":
-                melted["run_bucket"] = melted["run_date"].dt.floor("D")
-            elif bucket == "Week":
-                melted["run_bucket"] = melted["run_date"].dt.to_period("W-SUN").apply(lambda p: p.start_time)
-
-            if bucket in {"Hour", "Day", "Week"}:
-                chart_df = (
-                    melted
-                    .dropna(subset=["run_bucket"])
-                    .groupby(["run_bucket", "Score Type"], as_index=False)
-                    .agg(
-                        Score=("Score", "mean"),
-                        Runs=("Score", "count"),
-                    )
-                    .sort_values("run_bucket")
-                )
-                chart_df["bucket_day"] = chart_df["run_bucket"].dt.strftime("%Y-%m-%d")
-                chart_df["bucket_week"] = "Week of " + chart_df["bucket_day"]
-
-            if bucket == "Hour":
-                x_enc = alt.X("run_bucket:T", title="QC Run Hour")
-                tooltip_fields = ["run_bucket:T", "Score Type:N", "Score:Q", "Runs:Q"]
-            elif bucket == "Day":
-                day_order = chart_df["bucket_day"].drop_duplicates().tolist()
-                x_enc = alt.X("bucket_day:N", title="QC Run Day", sort=day_order)
-                tooltip_fields = ["bucket_day:N", "Score Type:N", "Score:Q", "Runs:Q"]
-            elif bucket == "Week":
-                week_order = chart_df["bucket_week"].drop_duplicates().tolist()
-                x_enc = alt.X("bucket_week:N", title="QC Run Week", sort=week_order)
-                tooltip_fields = ["bucket_week:N", "Score Type:N", "Score:Q", "Runs:Q"]
-            else:
-                version_order = chart_df["bucket_version"].drop_duplicates().tolist()
-                x_enc = alt.X("bucket_version:N", title="QC Run Version", sort=version_order)
-                tooltip_fields = ["bucket_version:N", "Score Type:N", "Score:Q", "Runs:Q"]
-
-            lines = alt.Chart(chart_df).mark_line(point=True, strokeWidth=2).encode(
-                x=x_enc,
-                y=alt.Y("Score:Q", title="Quality Score", scale=alt.Scale(domain=[0, 100])),
-                color=alt.Color("Score Type:N", scale=alt.Scale(
-                    domain=["Overall", "Record", "Brief"],
-                    range=["#1f77b4", "#2ca02c", "#ff7f0e"],
-                ), legend=alt.Legend(title="Score Series", orient="top", direction="horizontal")),
-                tooltip=tooltip_fields,
-            )
-
-            thresholds = pd.DataFrame([
-                {"Score": 80, "label": "Good (80)"},
-                {"Score": 60, "label": "Warning (60)"},
-            ])
-            rules = alt.Chart(thresholds).mark_rule(strokeDash=[4, 4], opacity=0.5).encode(
-                y="Score:Q",
-                color=alt.Color("label:N", scale=alt.Scale(
-                    domain=["Good (80)", "Warning (60)"],
-                    range=["#2ca02c", "#d62728"],
-                ), legend=alt.Legend(title="Thresholds")),
-            )
-
-            st.altair_chart(lines + rules, width='stretch')
-    else:
-        st.caption("Need at least 2 QC runs to show trend chart.")
-else:
-    st.info("No quality runs found. Run `python scripts/run_quality.py` to generate quality data.")
-
-# â”€â”€ Quality KPI Breakdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-st.subheader("QC Quick View")
-
-_KPI_META = [
-    # code, label, group, format, direction, target
-    ("KPI-R1", "High-severity error rate",       "Record", "pct",   "lower",  "< 5%"),
-    ("KPI-R2", "Medium-severity error rate",     "Record", "pct",   "lower",  "< 15%"),
-    ("KPI-R3", "Evidence grounding pass rate",   "Record", "pct",   "higher", "> 80%"),
-    ("KPI-R4", "Canonicalization pass rate",     "Record", "pct",   "higher", "> 90%"),
-    ("KPI-R5", "Geo determinism pass rate",      "Record", "pct",   "higher", "> 80%"),
-    ("KPI-B1", "Ungrounded claims (count)",      "Brief",  "int",   "lower",  "= 0"),
-    ("KPI-B2", "Overreach citations (count)",    "Brief",  "int",   "lower",  "= 0"),
-    ("KPI-B3", "Uncertainty compliance rate",    "Brief",  "pct",   "higher", "> 80%"),
-    ("KPI-B4", "Cross-record themes cited",      "Brief",  "int",   "higher", "higher is better"),
-    ("KPI-B5", "Action specificity (count)",     "Brief",  "int",   "higher", "higher is better"),
-]
-
-if qc_runs and len(qc_runs) >= 1:
-    latest_run = qc_runs[-1]
-    prior_run = qc_runs[-2] if len(qc_runs) >= 2 else {}
-
-    s1, s2, s3 = st.columns(3)
-
-    def _score_metric(col, key: str, label: str) -> None:
-        cur = latest_run.get(key)
-        prev = prior_run.get(key)
-        if cur is None:
-            with col:
-                ui.kpi_card(label, "Not available")
-            return
-        delta = _format_delta_change(cur, prev, kind="float")
-        with col:
-            ui.kpi_card(label, f"{float(cur):.1f}", caption=delta)
-
-    _score_metric(s1, "weighted_record_score", "Record score")
-    _score_metric(s2, "weighted_brief_score", "Brief score")
-    _score_metric(s3, "weighted_overall_score", "Overall score")
-
-    record_qc_rows = read_quality_jsonl(RECORD_QC_LOG)
-    brief_qc_rows = read_quality_jsonl(BRIEF_QC_LOG)
-
-    latest_record_run = _record_qc_runs_for_breakdown(qc_runs)
-    latest_record_run = latest_record_run[0] if latest_record_run else None
-    qc_breakdown = build_record_qc_breakdown(
-        records,
-        qc_runs,
-        record_qc_rows,
-        selected_run=latest_record_run,
-    )
-
-    latest_brief_runs = _brief_qc_runs_for_breakdown(qc_runs)
-    latest_brief_run = latest_brief_runs[0] if latest_brief_runs else None
-    brief_breakdown = build_brief_qc_breakdown(
-        qc_runs,
-        brief_qc_rows,
-        selected_run=latest_brief_run,
-    )
-
-    st.markdown("**Needs Attention**")
-    n1, n2 = st.columns(2)
-    with n1:
-        worst_record = None
-        if qc_breakdown:
-            bad_rows = [row for row in qc_breakdown["rows"] if row.get("total_findings", 0) > 0]
-            if bad_rows:
-                worst_record = min(
-                    bad_rows,
-                    key=lambda r: (r.get("score", 100), -r.get("high", 0), -r.get("medium", 0), r.get("record_id", "")),
-                )
-        if worst_record:
-            st.caption(
-                f"Record: `{worst_record['record_id']}` | score {worst_record['score']} | "
-                f"{worst_record['high']}H/{worst_record['medium']}M/{worst_record['low']}L"
-            )
-            st.caption("Action: inspect in Review and fix finding drivers.")
-        else:
-            st.caption("No record-level findings in latest record QC run.")
-
-    with n2:
-        if brief_breakdown:
-            score_val = brief_breakdown.get("weighted_brief_score")
-            st.caption(
-                f"Brief: `{brief_breakdown.get('brief_id') or 'Not available'}` | "
-                f"score {('Not available' if score_val is None else f'{float(score_val):.1f}')} | "
-                f"{brief_breakdown['high']}H/{brief_breakdown['medium']}M/{brief_breakdown['low']}L"
-            )
-            brief_file = f"data/briefs/{brief_breakdown['brief_id']}.md" if brief_breakdown.get("brief_id") else ""
-            if brief_file:
-                st.caption(f"Action: regenerate `{brief_file}` in Brief, Saved Brief Browser.")
-        else:
-            st.caption("No brief-level findings in latest brief QC run.")
-
-    with st.expander("Advanced: KPI Breakdown", expanded=False):
-        rows = []
-        for code, label, group, fmt, direction, target in _KPI_META:
-            cur = latest_run.get(code)
-            prev = prior_run.get(code)
-            if cur is None:
-                val_str = "Not available"
-            elif fmt == "pct":
-                val_str = f"{cur:.0%}"
-            elif fmt == "score":
-                val_str = f"{cur:.1f}"
-            else:
-                val_str = str(int(cur))
-
+with st.expander("Quality related", expanded=False):
+    # â”€â”€ Quality Score Trend â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    st.divider()
+    st.subheader("Extraction Quality Score")
+    st.caption("Quality scores from automated QC runs. Higher is better (0-100). Run `python scripts/run_quality.py` to generate data.")
+    
+    qc_runs = read_quality_jsonl(QUALITY_RUNS_LOG)
+    if qc_runs and len(qc_runs) >= 1:
+        qc_df = pd.DataFrame(qc_runs)
+    
+        # --- KPI metrics row (latest run vs prior) ---
+        latest = qc_runs[-1]
+        prior = qc_runs[-2] if len(qc_runs) >= 2 else {}
+    
+        def _delta(key):
+            cur = latest.get(key)
+            prev = prior.get(key)
             if cur is not None and prev is not None:
-                delta = float(cur) - float(prev)
-                delta_kind = "pct" if fmt == "pct" else ("int" if fmt == "int" else "float")
-                delta_str = _format_delta_change(cur, prev, kind=delta_kind) or "Not available"
-                good = (direction == "higher" and delta > 0) or (direction == "lower" and delta < 0)
-                flat = delta == 0
-                trend_label = "no change" if flat else ("improved" if good else "declined")
-                delta_str = f"{delta_str} ({trend_label})"
-            else:
-                delta_str = "Not available"
+                return round(float(cur) - float(prev), 2)
+            return None
 
-            rows.append(
-                {
-                    "Group": group,
-                    "KPI": code,
-                    "Description": label,
-                    "Latest": val_str,
-                    "vs Prior": delta_str,
-                    "Target": target,
-                }
+        def _delta_text(key: str, percent: bool = False) -> str | None:
+            delta_val = _delta(key)
+            if delta_val is None:
+                return None
+            if abs(delta_val) < 1e-9:
+                return "No change"
+            direction = "Increase" if delta_val > 0 else "Decrease"
+            if percent:
+                return f"{direction} {abs(delta_val):.0%}"
+            return f"{direction} {abs(delta_val):.1f}"
+    
+        q1, q2, q3, q4 = st.columns(4)
+        with q1:
+            ui.kpi_card(
+                "Overall Score",
+                f"{latest.get('weighted_overall_score', '-')}",
+                caption=_delta_text("weighted_overall_score", percent=False),
             )
-        st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+        with q2:
+            ui.kpi_card(
+                "Evidence Grounding",
+                f"{latest.get('KPI-R3', 0):.0%}",
+                caption=_delta_text("KPI-R3", percent=True),
+            )
+        with q3:
+            ui.kpi_card(
+                "Canonicalization",
+                f"{latest.get('KPI-R4', 0):.0%}",
+                caption=_delta_text("KPI-R4", percent=True),
+            )
+        with q4:
+            ui.kpi_card(
+                "Geo Determinism",
+                f"{latest.get('KPI-R5', 0):.0%}",
+                caption=_delta_text("KPI-R5", percent=True),
+            )
+    
+        bucket = st.radio(
+            "Group runs by",
+            options=["Hour", "Day", "Week", "Version"],
+            index=0,
+            horizontal=True,
+            key="qc_score_bucket",
+        )
+    
+        # --- Quality score trend line chart ---
+        if "created_at" in qc_df.columns and len(qc_df) >= 2:
+            # Normalize to timezone-naive UTC timestamps so day/week buckets render
+            # consistently (no browser-local timezone date shifts).
+            qc_df["run_date"] = (
+                pd.to_datetime(qc_df["created_at"], errors="coerce", utc=True)
+                .dt.tz_convert(None)
+            )
+            qc_df["run_version_num"] = pd.to_numeric(qc_df.get("run_version"), errors="coerce")
+            if qc_df["run_version_num"].isna().all():
+                qc_df["run_version_num"] = pd.Series(range(1, len(qc_df) + 1), index=qc_df.index, dtype=float)
+            score_cols = ["weighted_overall_score", "weighted_record_score", "weighted_brief_score"]
+            available = [c for c in score_cols if c in qc_df.columns]
+            if available:
+                plot_df = qc_df[["run_date", "run_version_num"] + available].dropna(subset=["run_date"])
+                melted = plot_df.melt(
+                    id_vars=["run_date", "run_version_num"],
+                    value_vars=available,
+                    var_name="Score Type",
+                    value_name="Score",
+                )
+                melted["Score Type"] = melted["Score Type"].map({
+                    "weighted_overall_score": "Overall",
+                    "weighted_record_score": "Record",
+                    "weighted_brief_score": "Brief",
+                })
+                melted = melted.dropna(subset=["Score Type", "Score"])
+    
+                if bucket == "Version":
+                    melted["run_bucket_version"] = pd.to_numeric(melted["run_version_num"], errors="coerce")
+                    chart_df = (
+                        melted
+                        .dropna(subset=["run_bucket_version"])
+                        .groupby(["run_bucket_version", "Score Type"], as_index=False)
+                        .agg(
+                            Score=("Score", "mean"),
+                            Runs=("Score", "count"),
+                        )
+                        .sort_values("run_bucket_version")
+                    )
+                    chart_df["bucket_version"] = chart_df["run_bucket_version"].round().astype(int).astype(str)
+                else:
+                    chart_df = pd.DataFrame()
+    
+                if bucket == "Hour":
+                    melted["run_bucket"] = melted["run_date"].dt.floor("h")
+                elif bucket == "Day":
+                    melted["run_bucket"] = melted["run_date"].dt.floor("D")
+                elif bucket == "Week":
+                    melted["run_bucket"] = melted["run_date"].dt.to_period("W-SUN").apply(lambda p: p.start_time)
+    
+                if bucket in {"Hour", "Day", "Week"}:
+                    chart_df = (
+                        melted
+                        .dropna(subset=["run_bucket"])
+                        .groupby(["run_bucket", "Score Type"], as_index=False)
+                        .agg(
+                            Score=("Score", "mean"),
+                            Runs=("Score", "count"),
+                        )
+                        .sort_values("run_bucket")
+                    )
+                    chart_df["bucket_day"] = chart_df["run_bucket"].dt.strftime("%Y-%m-%d")
+                    chart_df["bucket_week"] = "Week of " + chart_df["bucket_day"]
+    
+                if bucket == "Hour":
+                    x_enc = alt.X("run_bucket:T", title="QC Run Hour")
+                    tooltip_fields = ["run_bucket:T", "Score Type:N", "Score:Q", "Runs:Q"]
+                elif bucket == "Day":
+                    day_order = chart_df["bucket_day"].drop_duplicates().tolist()
+                    x_enc = alt.X("bucket_day:N", title="QC Run Day", sort=day_order)
+                    tooltip_fields = ["bucket_day:N", "Score Type:N", "Score:Q", "Runs:Q"]
+                elif bucket == "Week":
+                    week_order = chart_df["bucket_week"].drop_duplicates().tolist()
+                    x_enc = alt.X("bucket_week:N", title="QC Run Week", sort=week_order)
+                    tooltip_fields = ["bucket_week:N", "Score Type:N", "Score:Q", "Runs:Q"]
+                else:
+                    version_order = chart_df["bucket_version"].drop_duplicates().tolist()
+                    x_enc = alt.X("bucket_version:N", title="QC Run Version", sort=version_order)
+                    tooltip_fields = ["bucket_version:N", "Score Type:N", "Score:Q", "Runs:Q"]
 
-    with st.expander("Advanced: Record QC Drilldown", expanded=False):
-        if qc_breakdown:
-            breakdown_runs = _record_qc_runs_for_breakdown(qc_runs)
-            selected_breakdown_run = None
-            if breakdown_runs:
-                selected_breakdown_run = st.selectbox(
-                    "QC version",
-                    options=breakdown_runs,
+                lines = alt.Chart(chart_df).mark_line(point=True, strokeWidth=2).encode(
+                    x=x_enc,
+                    y=alt.Y("Score:Q", title="Quality Score", scale=alt.Scale(domain=[0, 100])),
+                    color=alt.Color("Score Type:N", scale=alt.Scale(
+                        domain=["Overall", "Record", "Brief"],
+                        range=["#1f77b4", "#2ca02c", "#ff7f0e"],
+                    ), legend=alt.Legend(title="Score Series", orient="top", direction="horizontal")),
+                    tooltip=tooltip_fields,
+                )
+
+                good_rule = (
+                    alt.Chart(pd.DataFrame([{"Score": 80}]))
+                    .mark_rule(color="#2ca02c", strokeDash=[4, 4], opacity=0.5)
+                    .encode(y="Score:Q")
+                )
+                warning_rule = (
+                    alt.Chart(pd.DataFrame([{"Score": 60}]))
+                    .mark_rule(color="#d62728", strokeDash=[4, 4], opacity=0.5)
+                    .encode(y="Score:Q")
+                )
+
+                st.altair_chart(lines + good_rule + warning_rule, width='stretch')
+        else:
+            st.caption("Need at least 2 QC runs to show trend chart.")
+    else:
+        st.info("No quality runs found. Run `python scripts/run_quality.py` to generate quality data.")
+    
+    # â”€â”€ Quality KPI Breakdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    st.subheader("QC Quick View")
+    
+    _KPI_META = [
+        # code, label, group, format, direction, target
+        ("KPI-R1", "High-severity error rate",       "Record", "pct",   "lower",  "< 5%"),
+        ("KPI-R2", "Medium-severity error rate",     "Record", "pct",   "lower",  "< 15%"),
+        ("KPI-R3", "Evidence grounding pass rate",   "Record", "pct",   "higher", "> 80%"),
+        ("KPI-R4", "Canonicalization pass rate",     "Record", "pct",   "higher", "> 90%"),
+        ("KPI-R5", "Geo determinism pass rate",      "Record", "pct",   "higher", "> 80%"),
+        ("KPI-B1", "Ungrounded claims (count)",      "Brief",  "int",   "lower",  "= 0"),
+        ("KPI-B2", "Overreach citations (count)",    "Brief",  "int",   "lower",  "= 0"),
+        ("KPI-B3", "Uncertainty compliance rate",    "Brief",  "pct",   "higher", "> 80%"),
+        ("KPI-B4", "Cross-record themes cited",      "Brief",  "int",   "higher", "higher is better"),
+        ("KPI-B5", "Action specificity (count)",     "Brief",  "int",   "higher", "higher is better"),
+    ]
+    
+    if qc_runs and len(qc_runs) >= 1:
+        latest_run = qc_runs[-1]
+        prior_run = qc_runs[-2] if len(qc_runs) >= 2 else {}
+    
+        s1, s2, s3 = st.columns(3)
+    
+        def _score_metric(col, key: str, label: str) -> None:
+            cur = latest_run.get(key)
+            prev = prior_run.get(key)
+            if cur is None:
+                with col:
+                    ui.kpi_card(label, "Not available")
+                return
+            delta = _format_delta_change(cur, prev, kind="float")
+            with col:
+                ui.kpi_card(label, f"{float(cur):.1f}", caption=delta)
+    
+        _score_metric(s1, "weighted_record_score", "Record score")
+        _score_metric(s2, "weighted_brief_score", "Brief score")
+        _score_metric(s3, "weighted_overall_score", "Overall score")
+    
+        record_qc_rows = read_quality_jsonl(RECORD_QC_LOG)
+        brief_qc_rows = read_quality_jsonl(BRIEF_QC_LOG)
+    
+        latest_record_run = _record_qc_runs_for_breakdown(qc_runs)
+        latest_record_run = latest_record_run[0] if latest_record_run else None
+        qc_breakdown = build_record_qc_breakdown(
+            records,
+            qc_runs,
+            record_qc_rows,
+            selected_run=latest_record_run,
+        )
+    
+        latest_brief_runs = _brief_qc_runs_for_breakdown(qc_runs)
+        latest_brief_run = latest_brief_runs[0] if latest_brief_runs else None
+        brief_breakdown = build_brief_qc_breakdown(
+            qc_runs,
+            brief_qc_rows,
+            selected_run=latest_brief_run,
+        )
+    
+        st.markdown("**Needs Attention**")
+        n1, n2 = st.columns(2)
+        with n1:
+            worst_record = None
+            if qc_breakdown:
+                bad_rows = [row for row in qc_breakdown["rows"] if row.get("total_findings", 0) > 0]
+                if bad_rows:
+                    worst_record = min(
+                        bad_rows,
+                        key=lambda r: (r.get("score", 100), -r.get("high", 0), -r.get("medium", 0), r.get("record_id", "")),
+                    )
+            if worst_record:
+                st.caption(
+                    f"Record: `{worst_record['record_id']}` | score {worst_record['score']} | "
+                    f"{worst_record['high']}H/{worst_record['medium']}M/{worst_record['low']}L"
+                )
+                st.caption("Action: inspect in Review and fix finding drivers.")
+            else:
+                st.caption("No record-level findings in latest record QC run.")
+    
+        with n2:
+            if brief_breakdown:
+                score_val = brief_breakdown.get("weighted_brief_score")
+                st.caption(
+                    f"Brief: `{brief_breakdown.get('brief_id') or 'Not available'}` | "
+                    f"score {('Not available' if score_val is None else f'{float(score_val):.1f}')} | "
+                    f"{brief_breakdown['high']}H/{brief_breakdown['medium']}M/{brief_breakdown['low']}L"
+                )
+                brief_file = f"data/briefs/{brief_breakdown['brief_id']}.md" if brief_breakdown.get("brief_id") else ""
+                if brief_file:
+                    st.caption(f"Action: regenerate `{brief_file}` in Brief, Saved Brief Browser.")
+            else:
+                st.caption("No brief-level findings in latest brief QC run.")
+    
+        with st.expander("Advanced: KPI Breakdown", expanded=False):
+            rows = []
+            for code, label, group, fmt, direction, target in _KPI_META:
+                cur = latest_run.get(code)
+                prev = prior_run.get(code)
+                if cur is None:
+                    val_str = "Not available"
+                elif fmt == "pct":
+                    val_str = f"{cur:.0%}"
+                elif fmt == "score":
+                    val_str = f"{cur:.1f}"
+                else:
+                    val_str = str(int(cur))
+
+                if cur is not None and prev is not None:
+                    delta = float(cur) - float(prev)
+                    delta_kind = "pct" if fmt == "pct" else ("int" if fmt == "int" else "float")
+                    delta_str = _format_delta_change(cur, prev, kind=delta_kind) or "Not available"
+                    good = (direction == "higher" and delta > 0) or (direction == "lower" and delta < 0)
+                    flat = delta == 0
+                    trend_label = "no change" if flat else ("improved" if good else "declined")
+                    delta_str = f"{delta_str} ({trend_label})"
+                else:
+                    delta_str = "Not available"
+    
+                rows.append(
+                    {
+                        "Group": group,
+                        "KPI": code,
+                        "Description": label,
+                        "Latest": val_str,
+                        "vs Prior": delta_str,
+                        "Target": target,
+                    }
+                )
+            st.dataframe(pd.DataFrame(rows), width='stretch', hide_index=True)
+    
+        with st.expander("Advanced: Record QC Drilldown", expanded=False):
+            if qc_breakdown:
+                breakdown_runs = _record_qc_runs_for_breakdown(qc_runs)
+                selected_breakdown_run = None
+                if breakdown_runs:
+                    selected_breakdown_run = st.selectbox(
+                        "QC version",
+                        options=breakdown_runs,
+                        format_func=lambda r: (
+                            f"v{_to_int(r.get('run_version'), 0)}"
+                            f" | {str(r.get('created_at') or '')[:19]}"
+                            f" | {str(r.get('qc_scope') or 'pipeline')}"
+                        ),
+                        key="qc_breakdown_version_pick",
+                    )
+                breakdown = build_record_qc_breakdown(
+                    records,
+                    qc_runs,
+                    record_qc_rows,
+                    selected_run=selected_breakdown_run,
+                )
+    
+                if breakdown:
+                    show_only_bad = st.checkbox(
+                        "Show only records with findings",
+                        value=True,
+                        key="qc_breakdown_show_only_bad",
+                    )
+                    breakdown_df = pd.DataFrame(breakdown["rows"])
+                    if show_only_bad:
+                        breakdown_df = breakdown_df[breakdown_df["total_findings"] > 0]
+    
+                    display_cols = [
+                        "record_id",
+                        "title",
+                        "score",
+                        "high",
+                        "medium",
+                        "low",
+                        "total_findings",
+                        "top_finding_types",
+                        "priority",
+                        "confidence",
+                        "review_status",
+                    ]
+                    st.dataframe(
+                        breakdown_df[display_cols] if not breakdown_df.empty else pd.DataFrame(columns=display_cols),
+                        width='stretch',
+                        hide_index=True,
+                    )
+    
+                    inspect_options = [
+                        row for row in breakdown["rows"]
+                        if row["total_findings"] > 0
+                    ]
+                    if inspect_options:
+                        selected = st.selectbox(
+                            "Inspect record findings",
+                            options=inspect_options,
+                            format_func=lambda x: f"{x['record_id']} | score {x['score']} | {x['title'][:80]}",
+                            key="qc_breakdown_record_pick",
+                        )
+                        selected_findings = selected.get("_findings") or []
+                        finding_cols = [
+                            "version",
+                            "severity",
+                            "finding_type",
+                            "field",
+                            "impact",
+                            "notes",
+                            "status",
+                        ]
+                        st.dataframe(
+                            pd.DataFrame(selected_findings).reindex(columns=finding_cols),
+                            width='stretch',
+                            hide_index=True,
+                        )
+            else:
+                st.caption("No record-level QC findings available.")
+    
+        with st.expander("Advanced: Brief QC Drilldown", expanded=False):
+            brief_runs = _brief_qc_runs_for_breakdown(qc_runs)
+            if brief_runs:
+                selected_brief_run = st.selectbox(
+                    "Inspect brief QC run",
+                    options=brief_runs,
                     format_func=lambda r: (
                         f"v{_to_int(r.get('run_version'), 0)}"
                         f" | {str(r.get('created_at') or '')[:19]}"
-                        f" | {str(r.get('qc_scope') or 'pipeline')}"
+                        f" | {str(r.get('brief_id') or '')}"
                     ),
-                    key="qc_breakdown_version_pick",
+                    key="qc_brief_breakdown_version_pick",
                 )
-            breakdown = build_record_qc_breakdown(
-                records,
-                qc_runs,
-                record_qc_rows,
-                selected_run=selected_breakdown_run,
-            )
-
-            if breakdown:
-                show_only_bad = st.checkbox(
-                    "Show only records with findings",
-                    value=True,
-                    key="qc_breakdown_show_only_bad",
+                detail = build_brief_qc_breakdown(
+                    qc_runs,
+                    brief_qc_rows,
+                    selected_run=selected_brief_run,
                 )
-                breakdown_df = pd.DataFrame(breakdown["rows"])
-                if show_only_bad:
-                    breakdown_df = breakdown_df[breakdown_df["total_findings"] > 0]
-
-                display_cols = [
-                    "record_id",
-                    "title",
-                    "score",
-                    "high",
-                    "medium",
-                    "low",
-                    "total_findings",
-                    "top_finding_types",
-                    "priority",
-                    "confidence",
-                    "review_status",
-                ]
-                st.dataframe(
-                    breakdown_df[display_cols] if not breakdown_df.empty else pd.DataFrame(columns=display_cols),
-                    width='stretch',
-                    hide_index=True,
-                )
-
-                inspect_options = [
-                    row for row in breakdown["rows"]
-                    if row["total_findings"] > 0
-                ]
-                if inspect_options:
-                    selected = st.selectbox(
-                        "Inspect record findings",
-                        options=inspect_options,
-                        format_func=lambda x: f"{x['record_id']} | score {x['score']} | {x['title'][:80]}",
-                        key="qc_breakdown_record_pick",
+                if detail:
+                    b_show_high_only = st.checkbox(
+                        "Show only High-severity brief findings",
+                        value=True,
+                        key="qc_brief_show_only_high",
                     )
-                    selected_findings = selected.get("_findings") or []
+                    findings_df = pd.DataFrame(detail["rows"])
+                    if b_show_high_only and not findings_df.empty and "severity" in findings_df.columns:
+                        findings_df = findings_df[findings_df["severity"].astype(str).str.title() == "High"]
+    
                     finding_cols = [
                         "version",
                         "severity",
-                        "finding_type",
-                        "field",
-                        "impact",
+                        "issue_type",
+                        "section",
+                        "claim_text",
                         "notes",
                         "status",
                     ]
                     st.dataframe(
-                        pd.DataFrame(selected_findings).reindex(columns=finding_cols),
+                        findings_df.reindex(columns=finding_cols) if not findings_df.empty else pd.DataFrame(columns=finding_cols),
                         width='stretch',
                         hide_index=True,
                     )
-        else:
-            st.caption("No record-level QC findings available.")
-
-    with st.expander("Advanced: Brief QC Drilldown", expanded=False):
-        brief_runs = _brief_qc_runs_for_breakdown(qc_runs)
-        if brief_runs:
-            selected_brief_run = st.selectbox(
-                "Inspect brief QC run",
-                options=brief_runs,
-                format_func=lambda r: (
-                    f"v{_to_int(r.get('run_version'), 0)}"
-                    f" | {str(r.get('created_at') or '')[:19]}"
-                    f" | {str(r.get('brief_id') or '')}"
-                ),
-                key="qc_brief_breakdown_version_pick",
-            )
-            detail = build_brief_qc_breakdown(
-                qc_runs,
-                brief_qc_rows,
-                selected_run=selected_brief_run,
-            )
-            if detail:
-                b_show_high_only = st.checkbox(
-                    "Show only High-severity brief findings",
-                    value=True,
-                    key="qc_brief_show_only_high",
-                )
-                findings_df = pd.DataFrame(detail["rows"])
-                if b_show_high_only and not findings_df.empty and "severity" in findings_df.columns:
-                    findings_df = findings_df[findings_df["severity"].astype(str).str.title() == "High"]
-
-                finding_cols = [
-                    "version",
-                    "severity",
-                    "issue_type",
-                    "section",
-                    "claim_text",
-                    "notes",
-                    "status",
-                ]
-                st.dataframe(
-                    findings_df.reindex(columns=finding_cols) if not findings_df.empty else pd.DataFrame(columns=finding_cols),
-                    width='stretch',
-                    hide_index=True,
-                )
-        else:
-            st.caption("No brief-level QC runs available.")
-else:
-    st.info("Run `python scripts/run_quality.py` to populate QC details.")
-
+            else:
+                st.caption("No brief-level QC runs available.")
+    else:
+        st.info("Run `python scripts/run_quality.py` to populate QC details.")
+    

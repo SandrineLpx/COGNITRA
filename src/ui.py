@@ -59,6 +59,26 @@ def _inject_css() -> None:
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+[data-testid="stSidebar"] [data-testid="stExpander"] summary {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: #E5E7EB !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stExpander"] summary p,
+[data-testid="stSidebar"] [data-testid="stExpander"] summary span {
+  color: #E5E7EB !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stExpander"] summary svg {
+  color: #E5E7EB !important;
+  fill: #E5E7EB !important;
 }
 
 [data-testid="stSidebar"] hr {
@@ -326,12 +346,15 @@ def render_page_header(title: str, subtitle: Optional[str] = None, active_step: 
 
 
 def _render_sidebar_brand() -> None:
+    logo_path = Path("assets/logo/cognitra-logo.png")
     icon_path = Path("assets/logo/cognitra-icon.png")
-    if icon_path.exists():
+    if logo_path.exists():
+        st.sidebar.image(str(logo_path), width=165)
+    elif icon_path.exists():
         st.sidebar.image(str(icon_path), width=40)
+        st.sidebar.markdown("### COGNITRA")
     else:
-        st.sidebar.markdown("### C")
-    st.sidebar.markdown("### COGNITRA")
+        st.sidebar.markdown("### COGNITRA")
     st.sidebar.caption("Automotive competitive intelligence")
     st.sidebar.divider()
 
