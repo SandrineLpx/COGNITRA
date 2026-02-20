@@ -14,7 +14,6 @@ import streamlit as st
 
 from src import ui
 from src.briefing import (
-    render_weekly_brief_md,
     select_weekly_candidates,
     synthesize_weekly_brief_llm,
 )
@@ -107,12 +106,43 @@ def _render_brief_collapsible(text: str) -> None:
             else:
                 st.caption("No content in this section.")
 
+
+def _first_text(values: Any) -> str:
+    if isinstance(values, list):
+        for item in values:
+            text = str(item or "").strip()
+            if text:
+                return text
+    text = str(values or "").strip()
+    return text
+
+
+def _preview_source_date(rec: Dict[str, Any]) -> str:
+    source = str(rec.get("source_type") or "-").strip() or "-"
+    publish = str(rec.get("publish_date") or "").strip()
+    if publish:
+        return f"{source} - {publish}"
+    created = str(rec.get("created_at") or "").strip()
+    created_date = created[:10] if len(created) >= 10 else "-"
+    return f"{source} - {created_date}"
+
+
+def _build_quick_preview_text(records: List[Dict[str, Any]]) -> str:
+    if not records:
+        return "No items selected for this week."
+
+    lines: List[str] = []
+    for rec in records:
+        snippet = _first_text(rec.get("key_insights")) or _first_text(rec.get("evidence_bullets")) or "No key insight/evidence line."
+        lines.append(f"- {snippet} ({_preview_source_date(rec)})")
+    return "\n".join(lines)
+
 st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("weekly")
 ui.init_page(active_step="Brief")
 ui.render_page_header(
-    "03 Brief",
-    subtitle="Select records and generate weekly executive brief output",
+    "Brief",
+    subtitle="Executive intelligence briefs generated from approved, structured records. No raw document content — only validated JSON inputs.",
     active_step="Brief",
 )
 ui.render_sidebar_utilities(model_label="gemini")
@@ -182,11 +212,91 @@ def _brief_sidecar_meta(brief_path: Optional[Path]) -> Dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
-def _save_brief(brief_text: str, week_range: str, selected_ids: List[str], usage: Dict[str, Any]) -> Path:
+def _brief_family_and_version_from_name(file_name: str) -> Tuple[str, int]:
+    stem = Path(str(file_name or "")).stem or "brief"
+    m = re.match(r"^(?P<root>.+?)(?:-v(?P<ver>\d+))?$", stem)
+    root = (m.group("root") if m else stem) or "brief"
+    version = int(m.group("ver")) if m and m.group("ver") else 1
+    return root, max(version, 1)
+
+
+def _infer_brief_status(file_name: str) -> str:
+    return "draft" if "draft" in str(file_name or "").lower() else "final"
+
+
+def _rewrite_brief_index(rows: List[Dict[str, Any]]) -> None:
     BRIEFS_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    path = BRIEFS_DIR / f"brief_{ts}.md"
+    payload = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+    BRIEF_INDEX.write_text((payload + "\n") if payload else "", encoding="utf-8")
+
+
+def _synchronize_sidecar_status(file_name: str, status: str) -> None:
+    if not file_name:
+        return
+    sidecar = (BRIEFS_DIR / file_name).with_suffix(".meta.json")
+    if not sidecar.exists():
+        return
+    try:
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+    except Exception:
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    meta["status"] = status
+    fam, ver = _brief_family_and_version_from_name(file_name)
+    meta.setdefault("brief_family_id", fam)
+    meta.setdefault("version", ver)
+    sidecar.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _supersede_previous_finals(brief_family_id: str, new_file_name: str) -> None:
+    rows = _read_jsonl(BRIEF_INDEX)
+    if not rows:
+        return
+    changed = False
+    superseded_files: List[str] = []
+    for row in rows:
+        file_name = Path(str(row.get("file") or "")).name
+        if not file_name or file_name == new_file_name:
+            continue
+        fam, ver = _brief_family_and_version_from_name(file_name)
+        row_family = str(row.get("brief_family_id") or fam)
+        row_version = int(row.get("version") or ver)
+        row_status = str(row.get("status") or _infer_brief_status(file_name)).strip().lower()
+        row["brief_family_id"] = row_family
+        row["version"] = row_version
+        if row_family == brief_family_id and row_status == "final":
+            row["status"] = "superseded"
+            superseded_files.append(file_name)
+            changed = True
+    if changed:
+        _rewrite_brief_index(rows)
+        for file_name in superseded_files:
+            _synchronize_sidecar_status(file_name, "superseded")
+        clear_brief_history_cache()
+
+
+def _save_brief_to_path(
+    path: Path,
+    brief_text: str,
+    week_range: str,
+    selected_ids: List[str],
+    usage: Dict[str, Any],
+    *,
+    status: str = "final",
+    brief_family_id: Optional[str] = None,
+    version: Optional[int] = None,
+    supersedes_file: Optional[str] = None,
+) -> Path:
+    BRIEFS_DIR.mkdir(parents=True, exist_ok=True)
     path.write_text(brief_text, encoding="utf-8")
+    file_name = path.name
+    inferred_family, inferred_version = _brief_family_and_version_from_name(file_name)
+    status_norm = str(status or "final").strip().lower()
+    if status_norm not in {"final", "superseded", "draft"}:
+        status_norm = "final"
+    family = str(brief_family_id or inferred_family)
+    ver = int(version or inferred_version)
 
     meta = {
         "created_at": _now_iso(),
@@ -194,12 +304,66 @@ def _save_brief(brief_text: str, week_range: str, selected_ids: List[str], usage
         "file": str(path),
         "selected_record_ids": list(selected_ids),
         "usage": usage or {},
+        "status": status_norm,
+        "brief_family_id": family,
+        "version": ver,
     }
+    if supersedes_file:
+        meta["supersedes_file"] = str(supersedes_file)
     path.with_suffix(".meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     with BRIEF_INDEX.open("a", encoding="utf-8") as f:
         f.write(json.dumps(meta, ensure_ascii=False) + "\n")
     clear_brief_history_cache()
     return path
+
+
+def _save_brief(brief_text: str, week_range: str, selected_ids: List[str], usage: Dict[str, Any]) -> Path:
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    path = BRIEFS_DIR / f"brief_{ts}.md"
+    family, ver = _brief_family_and_version_from_name(path.name)
+    return _save_brief_to_path(
+        path,
+        brief_text,
+        week_range,
+        selected_ids,
+        usage,
+        status="final",
+        brief_family_id=family,
+        version=ver,
+    )
+
+
+def _next_regenerated_brief_path(base_file_name: str) -> Path:
+    root, current_ver = _brief_family_and_version_from_name(str(base_file_name or "brief"))
+    candidate_ver = max(2, current_ver + 1)
+    while True:
+        candidate = BRIEFS_DIR / f"{root}-v{candidate_ver}.md"
+        if not candidate.exists():
+            return candidate
+        candidate_ver += 1
+
+
+def _save_regenerated_brief(
+    base_file_name: str,
+    brief_text: str,
+    week_range: str,
+    selected_ids: List[str],
+    usage: Dict[str, Any],
+) -> Path:
+    path = _next_regenerated_brief_path(base_file_name)
+    family, ver = _brief_family_and_version_from_name(path.name)
+    _supersede_previous_finals(family, path.name)
+    return _save_brief_to_path(
+        path,
+        brief_text,
+        week_range,
+        selected_ids,
+        usage,
+        status="final",
+        brief_family_id=family,
+        version=ver,
+        supersedes_file=str(base_file_name or ""),
+    )
 
 
 def _synthesize_and_store(
@@ -329,6 +493,22 @@ def _safe_iso(value: Any) -> str:
         return s
 
 
+def _friendly_datetime(value: Any) -> str:
+    s = _safe_iso(value)
+    if not s:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(s)
+    except Exception:
+        return s
+    try:
+        if dt.tzinfo is not None:
+            dt = dt.astimezone()
+    except Exception:
+        pass
+    return dt.strftime("%b %d, %Y %I:%M %p")
+
+
 def _saved_brief_rows(records_by_id: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     seen: set[Tuple[str, str]] = set()
@@ -339,6 +519,10 @@ def _saved_brief_rows(records_by_id: Dict[str, Dict[str, Any]]) -> List[Dict[str
         file_name = Path(str(row.get("file") or default_file)).name
         if not file_name:
             return
+        inferred_family, inferred_version = _brief_family_and_version_from_name(file_name)
+        row_status = str(row.get("status") or _infer_brief_status(file_name)).strip().lower()
+        if row_status not in {"final", "superseded", "draft"}:
+            row_status = _infer_brief_status(file_name)
         created_at = _safe_iso(row.get("created_at"))
         key = (file_name, created_at)
         if key in seen:
@@ -358,10 +542,14 @@ def _saved_brief_rows(records_by_id: Dict[str, Dict[str, Any]]) -> List[Dict[str
                 "file_name": file_name,
                 "file_path": str(row.get("file") or (BRIEFS_DIR / file_name)),
                 "created_at": created_at,
+                "created_at_display": _friendly_datetime(created_at),
                 "week_range": str(row.get("week_range") or ""),
                 "record_count": len(selected_ids),
                 "selected_record_ids": selected_ids,
                 "key_themes": top_themes[:3],
+                "status": row_status,
+                "brief_family_id": str(row.get("brief_family_id") or inferred_family),
+                "version": int(row.get("version") or inferred_version),
             }
         )
 
@@ -386,33 +574,94 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
         st.info("No saved brief found yet.")
         return
 
-    browser_df = pd.DataFrame(
-        [
-            {
-                "created_at": row.get("created_at"),
-                "week_range": row.get("week_range"),
-                "record_count": row.get("record_count"),
-                "key_themes": ", ".join(row.get("key_themes") or []),
-                "file": row.get("file_name"),
-            }
-            for row in saved_rows
-        ]
-    )
-    st.dataframe(browser_df, width='stretch', hide_index=True)
-    options = list(range(len(saved_rows)))
-    idx = st.selectbox(
-        "Open saved brief",
-        options=options,
-        format_func=lambda i: (
-            f"{saved_rows[i].get('created_at') or '-'} | "
-            f"{saved_rows[i].get('week_range') or '-'} | "
-            f"{saved_rows[i].get('record_count')} records | "
-            f"{saved_rows[i].get('file_name')}"
-        ),
-        index=0,
-        key="wb_saved_open",
-    )
-    chosen = saved_rows[idx]
+    for i, row in enumerate(saved_rows):
+        row["brief_code"] = f"BRIEF-{len(saved_rows) - i:03d}"
+        status_raw = str(row.get("status") or _infer_brief_status(str(row.get("file_name") or ""))).strip().lower()
+        if status_raw not in {"final", "superseded", "draft"}:
+            status_raw = _infer_brief_status(str(row.get("file_name") or ""))
+        row["status"] = status_raw
+
+    sf1, sf2 = st.columns([2.2, 1.4])
+    with sf1:
+        search_query = st.text_input(
+            "Search briefs",
+            placeholder="Search briefs...",
+            key="wb_saved_search",
+            label_visibility="collapsed",
+        )
+    with sf2:
+        status_filter = st.selectbox(
+            "Status",
+            options=["All Statuses", "Final", "Superseded", "Draft"],
+            index=0,
+            key="wb_saved_status_filter",
+            label_visibility="collapsed",
+        )
+
+    query_tokens = [tok for tok in str(search_query or "").lower().split() if tok]
+    filtered_rows: List[Dict[str, Any]] = []
+    for row in saved_rows:
+        row_status = str(row.get("status") or "final").lower()
+        if status_filter != "All Statuses" and row_status != str(status_filter).lower():
+            continue
+        if query_tokens:
+            blob = " ".join(
+                [
+                    str(row.get("brief_code") or ""),
+                    str(row.get("file_name") or ""),
+                    str(row.get("week_range") or ""),
+                    str(row.get("created_at_display") or ""),
+                    " ".join(str(x) for x in (row.get("key_themes") or [])),
+                ]
+            ).lower()
+            if not all(tok in blob for tok in query_tokens):
+                continue
+        filtered_rows.append(row)
+
+    if not filtered_rows:
+        st.warning("No saved briefs match current selection.")
+        return
+
+    selected_file = str(st.session_state.get("wb_saved_selected_file") or "")
+    selectable_files = {str(r.get("file_name") or "") for r in filtered_rows}
+    if selected_file not in selectable_files:
+        selected_file = str(filtered_rows[0].get("file_name") or "")
+        st.session_state["wb_saved_selected_file"] = selected_file
+
+    lc, rc = st.columns([1.15, 3.45], gap="small")
+    with lc:
+        with st.container(border=True):
+            st.markdown('<div class="cg-kpi-label">HISTORY</div>', unsafe_allow_html=True)
+            for i, row in enumerate(filtered_rows):
+                if i > 0:
+                    st.divider()
+                row_file = str(row.get("file_name") or "")
+                is_selected = row_file == selected_file
+                hx1, hx2 = st.columns([3.2, 1.4], vertical_alignment="top")
+                with hx1:
+                    st.markdown(f"**{row.get('brief_code') or row_file}**")
+                    st.caption(str(row.get("week_range") or "-"))
+                    st.caption(f"{int(row.get('record_count') or 0)} records | {row.get('created_at_display') or '-'}")
+                with hx2:
+                    ui.status_badge(
+                        str(row.get("status") or "final"),
+                        kind=(
+                            "success"
+                            if str(row.get("status") or "").lower() == "final"
+                            else ("warning" if str(row.get("status") or "").lower() == "superseded" else "info")
+                        ),
+                    )
+                    if st.button(
+                        ("Opened" if is_selected else "Open"),
+                        key=f"wb_saved_pick_{i}_{row_file}",
+                        use_container_width=True,
+                        type="secondary",
+                    ):
+                        st.session_state["wb_saved_selected_file"] = row_file
+                        st.rerun()
+
+    chosen = next((r for r in filtered_rows if str(r.get("file_name") or "") == selected_file), filtered_rows[0])
+    idx = saved_rows.index(chosen)
     chosen_path = Path(str(chosen.get("file_path") or ""))
     if not chosen_path.exists():
         alt_path = BRIEFS_DIR / str(chosen.get("file_name") or "")
@@ -435,40 +684,41 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
             if str(theme).strip()
         }
     )
+    with rc:
+        with st.container(border=True):
+            st.caption(
+                f"{chosen.get('brief_code') or chosen.get('file_name')}  |  "
+                f"{chosen.get('week_range') or '-'}  |  "
+                f"{chosen.get('record_count')} records"
+            )
+            if chosen_path.exists():
+                _render_brief(chosen_path.read_text(encoding="utf-8"))
+            else:
+                st.warning("Saved brief markdown file was not found on disk.")
+            if missing_records:
+                st.caption(f"{missing_records} selected record(s) are missing from current records.jsonl.")
 
-    with ui.card("Brief Scorecards", "Snapshot for the selected saved brief."):
-        sc1, sc2, sc3, sc4 = st.columns(4)
-        sc1.metric("Saved briefs", len(saved_rows))
-        sc2.metric("Records in brief", len(selected_ids))
-        sc3.metric("High priority", priority_counts.get("High", 0))
-        sc4.metric("Macro themes", theme_count)
-        if missing_records:
-            st.caption(f"{missing_records} selected record(s) are missing from current records.jsonl.")
-
-    st.caption(
-        f"Selected: `{chosen.get('file_name')}` | "
-        f"week_range={chosen.get('week_range') or '-'} | "
-        f"records={chosen.get('record_count')}"
-    )
-    if chosen_path.exists():
-        _render_brief(chosen_path.read_text(encoding="utf-8"))
-    else:
-        st.warning("Saved brief markdown file was not found on disk.")
-
-    included_rows = []
-    for rid in selected_ids:
-        rec = records_by_id.get(str(rid), {})
-        included_rows.append(
-            {
-                "record_id": str(rid),
-                "title": str(rec.get("title") or "(record missing)"),
-                "priority": str(rec.get("priority") or "-"),
-                "confidence": str(rec.get("confidence") or "-"),
-                "source_type": str(rec.get("source_type") or "-"),
-            }
-        )
-    with st.expander("Included REC list", expanded=False):
+    with st.expander("Included records", expanded=False):
+        included_rows = []
+        for rid in selected_ids:
+            rec = records_by_id.get(str(rid), {})
+            included_rows.append(
+                {
+                    "record_id": str(rid),
+                    "title": str(rec.get("title") or "(record missing)"),
+                    "priority": str(rec.get("priority") or "-"),
+                    "confidence": str(rec.get("confidence") or "-"),
+                    "source_type": str(rec.get("source_type") or "-"),
+                }
+            )
         st.dataframe(pd.DataFrame(included_rows), width='stretch', hide_index=True)
+        mc1, mc2, mc3 = st.columns(3)
+        with mc1:
+            ui.kpi_card("Saved briefs", len(saved_rows))
+        with mc2:
+            ui.kpi_card("High priority", priority_counts.get("High", 0))
+        with mc3:
+            ui.kpi_card("Macro themes", theme_count)
 
     valid_selected_records = [
         rec
@@ -477,7 +727,7 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
     ]
     regen_week_range = str(chosen.get("week_range") or "Last 30 days")
 
-    with ui.card("Regenerate Brief", "Re-run synthesis for this saved brief selection."):
+    with st.expander("Regenerate brief", expanded=False):
         r1, r2, r3 = st.columns(3)
         with r1:
             regen_provider = st.selectbox(
@@ -524,6 +774,7 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
         regen_text = st.session_state.get("wb_saved_regen_text") or ""
         regen_usage = st.session_state.get("wb_saved_regen_usage") or {}
         regen_ids = st.session_state.get("wb_saved_regen_selected_ids") or selected_ids
+        suggested_regen_name = _next_regenerated_brief_path(current_file).name
         with st.expander("Regenerated brief (preview)", expanded=True):
             st.markdown(regen_text)
         st.caption(
@@ -537,13 +788,19 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
         s1, s2 = st.columns(2)
         with s1:
             if st.button("Save regenerated brief", key=f"wb_saved_regen_save_{idx}"):
-                path = _save_brief(regen_text, regen_week_range, list(regen_ids), regen_usage)
+                path = _save_regenerated_brief(
+                    current_file,
+                    regen_text,
+                    regen_week_range,
+                    list(regen_ids),
+                    regen_usage,
+                )
                 st.success(f"Saved: {path}")
         with s2:
             st.download_button(
                 "Download regenerated .md",
                 data=regen_text.encode("utf-8"),
-                file_name=f"regenerated_{str(chosen.get('file_name') or 'brief').replace('.md', '')}.md",
+                file_name=suggested_regen_name,
                 mime="text/markdown",
                 key=f"wb_saved_regen_dl_{idx}",
             )
@@ -571,280 +828,315 @@ default_days = 30
 if isinstance(meta_seed.get("week_range"), str):
     parts = str(meta_seed.get("week_range")).split()
     if len(parts) >= 2 and parts[0].lower() == "last" and parts[1].isdigit():
-        default_days = max(3, min(90, int(parts[1])))
-
-workspace_mode = st.radio(
-    "Workspace",
-    options=["Build This Week's Brief", "Saved Brief Browser"],
-    horizontal=True,
-    key="wb_workspace_mode",
-)
-if workspace_mode == "Saved Brief Browser":
-    _render_saved_brief_browser(records_by_id)
-    st.stop()
-
-st.subheader("Selection Workspace")
-hide_already_shared = st.checkbox(
-    "Hide records already included in saved briefs",
-    value=True,
-    key="wb_hide_shared",
-)
-c1, c2 = st.columns(2)
-with c1:
-    days = st.number_input("Days back", min_value=3, max_value=90, value=default_days, step=1, key="wb_days")
-with c2:
-    basis_label = st.selectbox(
-        "Time basis",
-        options=["Published date (publish_date)", "Record added date (created_at)"],
-        index=0,
-        key="wb_basis",
-    )
-candidate_filters_slot = st.container()
-st.caption("Quick mode: use these controls first. Open Advanced controls only if needed.")
-
-date_basis_field = "publish_date" if "publish_date" in basis_label else "created_at"
-
+        default_days = max(7, min(90, int(parts[1])))
 today = date.today()
-record_from_default = today - timedelta(days=7)
-publish_from_default = today - timedelta(days=20)
-include_excluded = False
-record_from = record_from_default
-record_to = today
-apply_publish_range = False
-publish_from = publish_from_default
-publish_to = today
-status_filter = ["Pending", "Approved"]
-priority_filter = ["High", "Medium", "Low"]
-share_ready_only = False
-region_filter: List[str] = []
-theme_filter: List[str] = []
-filter_search = ""
-provider = "gemini"
-web_check_enabled = False
-model_override = ""
+created_dates = [d for d in (_parse_created_at(r.get("created_at")) for r in records) if d]
+publish_dates = [d for d in (_parse_publish_date(r.get("publish_date")) for r in records) if d]
+default_record_from = min(created_dates) if created_dates else (today - timedelta(days=3650))
+default_record_to = max([today, *created_dates]) if created_dates else today
+default_publish_from = today - timedelta(days=20)
+default_publish_to = max([today, *publish_dates]) if publish_dates else today
 
-with st.expander("Advanced controls", expanded=False):
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        include_excluded = st.checkbox("Include records excluded from brief", value=False, key="wb_include_excluded")
-    with f2:
-        share_ready_only = st.checkbox("Share-ready only (High/High)", value=False, key="wb_share_ready")
-    with f3:
-        apply_publish_range = st.checkbox("Use publish date range", value=False, key="wb_use_publish_range")
 
-    f4, f5, f6, f7 = st.columns(4)
-    with f4:
-        record_from = st.date_input("Record added from", value=record_from_default, key="wb_record_from")
-    with f5:
-        record_to = st.date_input("Record added to", value=today, key="wb_record_to")
-    with f6:
-        publish_from = st.date_input("Publish from", value=publish_from_default, disabled=not apply_publish_range, key="wb_publish_from")
-    with f7:
-        publish_to = st.date_input("Publish to", value=today, disabled=not apply_publish_range, key="wb_publish_to")
+def _reset_brief_filters() -> None:
+    st.session_state["wb_hide_shared"] = True
+    st.session_state["wb_days"] = int(default_days)
+    st.session_state["wb_basis"] = "Record added date (created_at)"
+    st.session_state["wb_include_excluded"] = False
+    st.session_state["wb_share_ready"] = False
+    st.session_state["wb_use_publish_range"] = False
+    st.session_state["wb_record_from"] = default_record_from
+    st.session_state["wb_record_to"] = default_record_to
+    st.session_state["wb_publish_from"] = default_publish_from
+    st.session_state["wb_publish_to"] = default_publish_to
+    st.session_state["wb_status"] = ["Pending", "Approved"]
+    st.session_state["wb_priority"] = ["High", "Medium", "Low"]
+    st.session_state["wb_region"] = []
+    st.session_state["wb_theme"] = []
+    st.session_state["wb_filter_search"] = ""
+    st.session_state["wb_quick_region"] = "All Regions"
+    st.session_state["wb_quick_topic"] = "All Topics"
+    st.session_state["wb_quick_source"] = "All Sources"
+
+
+if st.session_state.pop("wb_clear_filters_requested", False):
+    _reset_brief_filters()
+
+# One-time reset to avoid stale filter carry-over hiding fresh records.
+if not st.session_state.get("_brief_filter_defaults_v3_applied", False):
+    _reset_brief_filters()
+    st.session_state["_brief_filter_defaults_v3_applied"] = True
+
+# Ensure hide-shared starts enabled by default for existing sessions.
+if not st.session_state.get("_brief_hide_shared_default_v1_applied", False):
+    st.session_state["wb_hide_shared"] = True
+    st.session_state["_brief_hide_shared_default_v1_applied"] = True
+
+tab_build, tab_saved = st.tabs(["Build This Week's Brief", "Saved Brief Browser"])
+with tab_saved:
+    _render_saved_brief_browser(records_by_id)
+
+with tab_build:
+    st.subheader("Selection Workspace")
+    days = int(st.session_state.get("wb_days", int(default_days)))
+    basis_label = str(st.session_state.get("wb_basis", "Record added date (created_at)"))
+    hide_already_shared = bool(st.session_state.get("wb_hide_shared", True))
+
+    date_basis_field = "publish_date" if "publish_date" in basis_label else "created_at"
+
+    include_excluded = False
+    record_from = default_record_from
+    record_to = default_record_to
+    apply_publish_range = False
+    publish_from = default_publish_from
+    publish_to = default_publish_to
+    region_filter: List[str] = []
+    topic_filter: List[str] = []
+    source_filter: List[str] = []
+    filter_search = ""
+    quick_region = "All Regions"
+    quick_topic = "All Topics"
+    quick_source = "All Sources"
+    provider = "gemini"
+    web_check_enabled = False
+    model_override = ""
+
+    week_range = f"Last {int(days)} days by {date_basis_field}"
+    candidates_seed = select_weekly_candidates(records, days=36500, include_excluded=include_excluded)
+    cutoff = date.today() - timedelta(days=int(days))
+
+    missing_basis_dates = 0
+    time_window_candidates: List[Dict[str, Any]] = []
+    for rec in candidates_seed:
+        rd = _record_date_by_basis(rec, date_basis_field)
+        if not rd:
+            missing_basis_dates += 1
+            continue
+        if rd >= cutoff:
+            time_window_candidates.append(rec)
+
+    brief_history = load_brief_history()
+    annotated_candidates: List[Dict[str, Any]] = []
+    for rec in time_window_candidates:
+        rec_id = str(rec.get("record_id") or "")
+        shared_rows = brief_history.get(rec_id, [])
+        latest_shared = shared_rows[-1] if shared_rows else {}
+        out = dict(rec)
+        out["already_shared"] = "Yes" if shared_rows else "No"
+        out["shared_brief_file"] = str(latest_shared.get("file") or "")
+        out["shared_brief_week_range"] = str(latest_shared.get("week_range") or "")
+        out["shared_brief_created_at"] = str(latest_shared.get("created_at") or "")
+        out["_already_shared_bool"] = bool(shared_rows)
+        annotated_candidates.append(out)
+
+    candidates = [r for r in annotated_candidates if not r.get("_already_shared_bool")] if hide_already_shared else annotated_candidates
+    region_options = sorted({str(x) for r in candidates for x in (r.get("regions_relevant_to_apex_mobility") or []) if str(x).strip()})
+    topic_options = sorted({str(x) for r in candidates for x in (r.get("topics") or []) if str(x).strip()})
+    source_options = sorted({str(r.get("source_type") or "").strip() for r in candidates if str(r.get("source_type") or "").strip()})
+
+    with st.expander("Filters", expanded=False):
+        quick_region_options = ["All Regions"] + region_options
+        quick_topic_options = ["All Topics"] + topic_options
+        quick_source_options = ["All Sources"] + source_options
+        q1, q2, q3, q4 = st.columns([2.3, 1.3, 1.4, 1.3])
+        with q1:
+            filter_search = st.text_input(
+                "Search records",
+                key="wb_filter_search",
+                placeholder="Search records...",
+                label_visibility="collapsed",
+            )
+        with q2:
+            quick_region = st.selectbox(
+                "Region",
+                quick_region_options,
+                key="wb_quick_region",
+                label_visibility="collapsed",
+            )
+        with q3:
+            quick_topic = st.selectbox(
+                "Topic",
+                quick_topic_options,
+                key="wb_quick_topic",
+                label_visibility="collapsed",
+            )
+        with q4:
+            quick_source = st.selectbox(
+                "Source",
+                quick_source_options,
+                key="wb_quick_source",
+                label_visibility="collapsed",
+            )
+        c1, c2 = st.columns([1.4, 1.8])
+        with c1:
+            days = st.number_input("Days back", min_value=3, max_value=90, step=1, key="wb_days")
+            hide_already_shared = st.checkbox(
+                "Hide records already included in saved briefs",
+                value=True,
+                key="wb_hide_shared",
+            )
+        with c2:
+            basis_label = st.selectbox(
+                "Time basis",
+                options=["Published date (publish_date)", "Record added date (created_at)"],
+                index=1,
+                key="wb_basis",
+            )
+
+    if quick_region != "All Regions" and not region_filter:
+        region_filter = [quick_region]
+    if quick_topic != "All Topics" and not topic_filter:
+        topic_filter = [quick_topic]
+    if quick_source != "All Sources" and not source_filter:
+        source_filter = [quick_source]
+
+    candidates = [r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved"]
+    if region_filter:
+        region_set = set(region_filter)
+        candidates = [r for r in candidates if region_set & set(r.get("regions_relevant_to_apex_mobility") or [])]
+    if topic_filter:
+        topic_set = set(topic_filter)
+        candidates = [r for r in candidates if topic_set & set(r.get("topics") or [])]
+    if source_filter:
+        source_set = set(source_filter)
+        candidates = [r for r in candidates if str(r.get("source_type") or "").strip() in source_set]
+    if filter_search.strip():
+        candidates = [r for r in candidates if _matches_filter_search(r, filter_search)]
+
+    def _in_record_range(rec: Dict[str, Any]) -> bool:
+        rd = _parse_created_at(rec.get("created_at"))
+        return bool(rd and record_from <= rd <= record_to)
+
+    def _in_publish_range(rec: Dict[str, Any]) -> bool:
+        pdv = _parse_publish_date(rec.get("publish_date"))
+        return bool(pdv and publish_from <= pdv <= publish_to)
+
+    candidates = [r for r in candidates if _in_record_range(r)]
+    if apply_publish_range:
+        candidates = [r for r in candidates if _in_publish_range(r)]
+
+    if missing_basis_dates:
+        st.caption(f"{missing_basis_dates} records missing `{date_basis_field}` were excluded from the time window.")
+
+    if not candidates:
+        st.warning("No candidates found for this period.")
+        st.stop()
+
+    approved_non_excluded = [
+        r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved" and not bool(r.get("is_duplicate", False))
+    ]
+    default_ids = [str(r.get("record_id")) for r in approved_non_excluded if r.get("record_id")]
+    default_set = set(default_ids)
+    kpi_slot = st.container()
+
+    selection_rows = []
+    for r in candidates:
+        rid = str(r.get("record_id") or "")
+        if not rid:
+            continue
+        selection_rows.append(
+            {
+                "Include": rid in default_set,
+                "record_id": rid,
+                "title": str(r.get("title") or "Untitled"),
+                "source": str(r.get("source_type") or "-"),
+                "priority": str(r.get("priority") or "-"),
+                "confidence": str(r.get("confidence") or "-"),
+                "in_brief": "Yes" if bool(r.get("_already_shared_bool")) else "No",
+            }
+        )
+
+    with st.expander("See included records", expanded=False):
+        selection_df = pd.DataFrame(selection_rows)
+        edited_df = st.data_editor(
+            selection_df,
+            width='stretch',
+            hide_index=True,
+            disabled=["record_id", "title", "source", "priority", "confidence", "in_brief"],
+            column_config={"Include": st.column_config.CheckboxColumn(required=True)},
+            key="weekly_selection_editor",
+        )
+    selected_ids = edited_df.loc[edited_df["Include"], "record_id"].astype(str).tolist() if not edited_df.empty else []
+    selected_set = set(selected_ids)
+    selected_records = [r for r in candidates if str(r.get("record_id")) in selected_set]
+
+    eligible_ids = set(default_ids)
+    missing_approved = eligible_ids - selected_set
+    if missing_approved:
+        st.warning(f"{len(missing_approved)} approved, non-excluded records are not selected for this brief.")
+
+    priority_counts = Counter(str(r.get("priority") or "-") for r in selected_records)
+    region_counts = Counter(str(x) for r in selected_records for x in (r.get("regions_relevant_to_apex_mobility") or []))
+    theme_counts = Counter(str(x) for r in selected_records for x in (r.get("macro_themes_detected") or []))
+    with kpi_slot:
+        bc1, bc2, bc3, bc4, bc5, bc6 = st.columns(6)
+        with bc1:
+            ui.kpi_card("Selected", len(selected_records))
+        with bc2:
+            ui.kpi_card("High priority", priority_counts.get("High", 0))
+        with bc3:
+            ui.kpi_card("Medium priority", priority_counts.get("Medium", 0))
+        with bc4:
+            ui.kpi_card("Low priority", priority_counts.get("Low", 0))
+        with bc5:
+            ui.kpi_card("Regions covered", len(region_counts))
+        with bc6:
+            ui.kpi_card("Macro themes covered", len(theme_counts))
+
+    st.divider()
+    st.markdown("## Executive-Ready Output")
 
     g1, g2 = st.columns(2)
     with g1:
-        status_filter = st.multiselect("Status", ["Pending", "Approved", "Disapproved"], default=["Pending", "Approved"], key="wb_status")
+        generate_clicked = st.button("Generate AI Brief", type="primary", disabled=not selected_records)
     with g2:
-        priority_filter = st.multiselect("Priority", ["High", "Medium", "Low"], default=["High", "Medium", "Low"], key="wb_priority")
+        regenerate_clicked = st.button("Regenerate AI Brief", disabled=not selected_records)
 
-    st.markdown("**Generation settings**")
-    a1, a2, a3 = st.columns(3)
-    with a1:
-        provider = st.selectbox("AI provider", ["gemini", "claude", "chatgpt"], index=0, key="wb_provider")
-    with a2:
-        web_check_enabled = st.checkbox("Web coherence check (Gemini)", value=False, key="wb_web_check")
-    with a3:
-        model_override = st.text_input("Model override", value="", key="wb_model_override")
-
-week_range = f"Last {int(days)} days by {date_basis_field}"
-candidates_seed = select_weekly_candidates(records, days=36500, include_excluded=include_excluded)
-cutoff = date.today() - timedelta(days=int(days))
-
-missing_basis_dates = 0
-time_window_candidates: List[Dict[str, Any]] = []
-for rec in candidates_seed:
-    rd = _record_date_by_basis(rec, date_basis_field)
-    if not rd:
-        missing_basis_dates += 1
-        continue
-    if rd >= cutoff:
-        time_window_candidates.append(rec)
-
-brief_history = load_brief_history()
-annotated_candidates: List[Dict[str, Any]] = []
-for rec in time_window_candidates:
-    rec_id = str(rec.get("record_id") or "")
-    shared_rows = brief_history.get(rec_id, [])
-    latest_shared = shared_rows[-1] if shared_rows else {}
-    out = dict(rec)
-    out["already_shared"] = "Yes" if shared_rows else "No"
-    out["shared_brief_file"] = str(latest_shared.get("file") or "")
-    out["shared_brief_week_range"] = str(latest_shared.get("week_range") or "")
-    out["shared_brief_created_at"] = str(latest_shared.get("created_at") or "")
-    out["_already_shared_bool"] = bool(shared_rows)
-    annotated_candidates.append(out)
-
-candidates = [r for r in annotated_candidates if not r.get("_already_shared_bool")] if hide_already_shared else annotated_candidates
-region_options = sorted({str(x) for r in candidates for x in (r.get("regions_relevant_to_apex_mobility") or []) if str(x).strip()})
-theme_options = sorted({str(x) for r in candidates for x in (r.get("macro_themes_detected") or []) if str(x).strip()})
-
-with candidate_filters_slot:
-    with st.expander("Advanced candidate filters", expanded=False):
-        g1, g2 = st.columns(2)
-        with g1:
-            region_filter = st.multiselect("Footprint region", region_options, default=[], key="wb_region")
-        with g2:
-            theme_filter = st.multiselect("Macro theme", theme_options, default=[], key="wb_theme")
-        filter_search = st.text_input(
-            "Filter search (any filterable value)",
-            value="",
-            key="wb_filter_search",
-            placeholder="e.g. approved high germany digital key",
+    if generate_clicked or regenerate_clicked:
+        _synthesize_and_store(
+            state_prefix="weekly_ai_brief",
+            selected_records=selected_records,
+            selected_ids=selected_ids,
+            week_range=week_range,
+            provider=provider,
+            web_check_enabled=web_check_enabled,
+            model_override=model_override,
         )
+
+    saved_text = st.session_state.get("weekly_ai_brief_text")
+    saved_usage = st.session_state.get("weekly_ai_brief_usage", {}) if saved_text else {}
+    saved_week_range = st.session_state.get("weekly_ai_brief_week_range", week_range) if saved_text else week_range
+    saved_ids = st.session_state.get("weekly_ai_brief_selected_ids", selected_ids) if saved_text else selected_ids
+    quick_preview_text = _build_quick_preview_text(selected_records)
+
+    with st.expander("Deterministic Preview", expanded=False):
+        st.caption(f"Quick preview for {week_range}")
+        st.markdown(quick_preview_text)
+
+    st.subheader("AI Brief")
+    if saved_text:
+        _render_brief_collapsible(saved_text)
         st.caption(
-            "Search scans title, status, priority/confidence, regions, themes, topics, companies, countries, source, and record ID."
+            f"Model: {saved_usage.get('model', 'unknown')} | "
+            f"prompt={saved_usage.get('prompt_tokens', '?')} "
+            f"output={saved_usage.get('output_tokens', '?')} "
+            f"total={saved_usage.get('total_tokens', '?')} | "
+            f"attempts={saved_usage.get('attempts', 1)} | "
+            f"validation_err={saved_usage.get('validation_errors_final', 0)}"
         )
-        st.caption("These filters are applied before record selection.")
-
-candidates = [r for r in candidates if normalize_review_status(r.get("review_status")) in set(status_filter)]
-candidates = [r for r in candidates if str(r.get("priority") or "Medium") in set(priority_filter)]
-if share_ready_only:
-    candidates = [r for r in candidates if r.get("priority") == "High" and r.get("confidence") == "High"]
-if region_filter:
-    region_set = set(region_filter)
-    candidates = [r for r in candidates if region_set & set(r.get("regions_relevant_to_apex_mobility") or [])]
-if theme_filter:
-    theme_set = set(theme_filter)
-    candidates = [r for r in candidates if theme_set & set(r.get("macro_themes_detected") or [])]
-if filter_search.strip():
-    candidates = [r for r in candidates if _matches_filter_search(r, filter_search)]
-
-def _in_record_range(rec: Dict[str, Any]) -> bool:
-    rd = _parse_created_at(rec.get("created_at"))
-    return bool(rd and record_from <= rd <= record_to)
-
-def _in_publish_range(rec: Dict[str, Any]) -> bool:
-    pdv = _parse_publish_date(rec.get("publish_date"))
-    return bool(pdv and publish_from <= pdv <= publish_to)
-
-candidates = [r for r in candidates if _in_record_range(r)]
-if apply_publish_range:
-    candidates = [r for r in candidates if _in_publish_range(r)]
-
-if missing_basis_dates:
-    st.caption(f"{missing_basis_dates} records missing `{date_basis_field}` were excluded from the time window.")
-
-if not candidates:
-    st.warning("No candidates found for this period.")
-    st.stop()
-
-approved_non_excluded = [
-    r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved" and not bool(r.get("is_duplicate", False))
-]
-default_ids = [str(r.get("record_id")) for r in approved_non_excluded if r.get("record_id")]
-default_set = set(default_ids)
-
-selection_rows = []
-for r in candidates:
-    rid = str(r.get("record_id") or "")
-    if not rid:
-        continue
-    selection_rows.append(
-        {
-            "Include": rid in default_set,
-            "record_id": rid,
-            "title": str(r.get("title") or "Untitled"),
-            "source": str(r.get("source_type") or "-"),
-            "priority": str(r.get("priority") or "-"),
-            "confidence": str(r.get("confidence") or "-"),
-            "in_brief": "Yes" if bool(r.get("_already_shared_bool")) else "No",
-        }
-    )
-
-st.caption("Select records to include in this brief.")
-selection_df = pd.DataFrame(selection_rows)
-edited_df = st.data_editor(
-    selection_df,
-    width='stretch',
-    hide_index=True,
-    disabled=["record_id", "title", "source", "priority", "confidence", "in_brief"],
-    column_config={"Include": st.column_config.CheckboxColumn(required=True)},
-    key="weekly_selection_editor",
-)
-selected_ids = edited_df.loc[edited_df["Include"], "record_id"].astype(str).tolist() if not edited_df.empty else []
-selected_set = set(selected_ids)
-selected_records = [r for r in candidates if str(r.get("record_id")) in selected_set]
-
-eligible_ids = set(default_ids)
-missing_approved = eligible_ids - selected_set
-if missing_approved:
-    st.warning(f"{len(missing_approved)} approved, non-excluded records are not selected for this brief.")
-
-priority_counts = Counter(str(r.get("priority") or "-") for r in selected_records)
-region_counts = Counter(str(x) for r in selected_records for x in (r.get("regions_relevant_to_apex_mobility") or []))
-theme_counts = Counter(str(x) for r in selected_records for x in (r.get("macro_themes_detected") or []))
-bc1, bc2, bc3, bc4, bc5, bc6 = st.columns(6)
-bc1.metric("Selected", len(selected_records))
-bc2.metric("High priority", priority_counts.get("High", 0))
-bc3.metric("Medium priority", priority_counts.get("Medium", 0))
-bc4.metric("Low priority", priority_counts.get("Low", 0))
-bc5.metric("Regions covered", len(region_counts))
-bc6.metric("Macro themes covered", len(theme_counts))
-
-st.divider()
-st.markdown("## Executive-Ready Output")
-
-g1, g2 = st.columns(2)
-with g1:
-    generate_clicked = st.button("Generate AI Brief", type="primary", disabled=not selected_records)
-with g2:
-    regenerate_clicked = st.button("Regenerate AI Brief", disabled=not selected_records)
-
-if generate_clicked or regenerate_clicked:
-    _synthesize_and_store(
-        state_prefix="weekly_ai_brief",
-        selected_records=selected_records,
-        selected_ids=selected_ids,
-        week_range=week_range,
-        provider=provider,
-        web_check_enabled=web_check_enabled,
-        model_override=model_override,
-    )
-
-saved_text = st.session_state.get("weekly_ai_brief_text")
-saved_usage = st.session_state.get("weekly_ai_brief_usage", {}) if saved_text else {}
-saved_week_range = st.session_state.get("weekly_ai_brief_week_range", week_range) if saved_text else week_range
-saved_ids = st.session_state.get("weekly_ai_brief_selected_ids", selected_ids) if saved_text else selected_ids
-brief_md = render_weekly_brief_md(selected_records, week_range)
-
-with st.expander("Deterministic Preview", expanded=False):
-    st.code(brief_md, language="markdown")
-
-st.subheader("AI Brief")
-if saved_text:
-    _render_brief_collapsible(saved_text)
-    st.caption(
-        f"Model: {saved_usage.get('model', 'unknown')} | "
-        f"prompt={saved_usage.get('prompt_tokens', '?')} "
-        f"output={saved_usage.get('output_tokens', '?')} "
-        f"total={saved_usage.get('total_tokens', '?')} | "
-        f"attempts={saved_usage.get('attempts', 1)} | "
-        f"validation_err={saved_usage.get('validation_errors_final', 0)}"
-    )
-    a1, a2 = st.columns(2)
-    with a1:
-        if st.button("Save brief"):
-            path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
-            st.success(f"Saved: {path}")
-    with a2:
-        st.download_button(
-            "Download brief",
-            data=saved_text.encode("utf-8"),
-            file_name=f"weekly_brief_{saved_week_range.replace(' ', '_')}.md",
-            mime="text/markdown",
-        )
-    with st.expander("Copy / Export (raw text)", expanded=False):
-        st.text_area("Copy-friendly version", value=saved_text, height=280)
-else:
-    st.info("Generate the AI brief to compare it with the deterministic preview.")
+        a1, a2 = st.columns(2)
+        with a1:
+            if st.button("Save brief"):
+                path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
+                st.success(f"Saved: {path}")
+        with a2:
+            st.download_button(
+                "Download brief",
+                data=saved_text.encode("utf-8"),
+                file_name=f"weekly_brief_{saved_week_range.replace(' ', '_')}.md",
+                mime="text/markdown",
+            )
+        with st.expander("Copy / Export (raw text)", expanded=False):
+            st.text_area("Copy-friendly version", value=saved_text, height=280)
+    else:
+        st.info("Generate the AI brief to compare it with the deterministic preview.")

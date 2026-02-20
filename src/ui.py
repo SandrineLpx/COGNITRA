@@ -152,6 +152,38 @@ def _inject_css() -> None:
   color: var(--cg-text-secondary);
 }
 
+.cg-kpi-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.05);
+  padding: 0.75rem 0.85rem;
+  min-height: 86px;
+  margin-bottom: 0.6rem;
+}
+
+.cg-kpi-label {
+  font-size: 0.75rem;
+  color: #475569;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 0.2rem;
+  font-weight: 600;
+}
+
+.cg-kpi-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.cg-kpi-caption {
+  font-size: 0.78rem;
+  color: #64748b;
+  margin-top: 0.2rem;
+}
+
 .stVerticalBlockBorderWrapper,
 [data-testid="stVerticalBlockBorderWrapper"] {
   border: 1px solid #E2E8F0 !important;
@@ -278,7 +310,7 @@ def render_workflow_bar(active_step: str) -> None:
     parts = ['<div class="cg-workflow">']
     for idx, step in enumerate(_WORKFLOW_ORDER, start=1):
         cls = "cg-step-item active" if step.lower() == active else "cg-step-item"
-        label = escape(f"{idx:02d} {step}")
+        label = escape(step)
         parts.append(f'<span class="{cls}"><span class="cg-step-label">{label}</span><span class="cg-step-dot"></span></span>')
         if idx < len(_WORKFLOW_ORDER):
             parts.append('<span class="cg-step-connector"></span>')
@@ -287,8 +319,6 @@ def render_workflow_bar(active_step: str) -> None:
 
 
 def render_page_header(title: str, subtitle: Optional[str] = None, active_step: Optional[str] = None) -> None:
-    if active_step:
-        render_workflow_bar(active_step)
     st.markdown(f'<h1 class="cg-page-title">{title}</h1>', unsafe_allow_html=True)
     if subtitle:
         st.markdown(f'<div class="cg-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
@@ -318,11 +348,11 @@ def _render_override_items(overrides: Dict[str, int]) -> None:
 def _render_sidebar_nav() -> None:
     with st.sidebar:
         st.page_link("Home.py", label="Home")
-        st.page_link("pages/01_Ingest.py", label="01 Ingest")
-        st.page_link("pages/02_Review.py", label="02 Review")
-        st.page_link("pages/03_Brief.py", label="03 Brief")
-        st.page_link("pages/04_Insights.py", label="04 Insights")
-        st.page_link("pages/Admin.py", label="Admin")
+        st.page_link("pages/01_Ingest.py", label="Ingest")
+        st.page_link("pages/02_Review.py", label="Review")
+        st.page_link("pages/03_Brief.py", label="Brief")
+        st.page_link("pages/04_Insights.py", label="Insights")
+        st.page_link("pages/Admin.py", label="Settings", icon=":material/settings:")
 
 
 def render_sidebar_utilities(
@@ -371,6 +401,26 @@ def status_badge(label: str, kind: str = "info", help_text: Optional[str] = None
     tip_attr = f' title="{escape(str(help_text), quote=True)}"' if help_text else ""
     safe_label = escape(str(label))
     st.markdown(f'<span class="cg-badge {cls}"{tip_attr}>{safe_label}</span>', unsafe_allow_html=True)
+
+
+def kpi_card(
+    label: str,
+    value: object,
+    caption: Optional[str] = None,
+    help_text: Optional[str] = None,
+) -> None:
+    safe_label = escape(str(label))
+    safe_value = escape(str(value))
+    tip_attr = f' title="{escape(str(help_text), quote=True)}"' if help_text else ""
+    parts = [
+        f'<div class="cg-kpi-card"{tip_attr}>',
+        f'<div class="cg-kpi-label">{safe_label}</div>',
+        f'<div class="cg-kpi-value">{safe_value}</div>',
+    ]
+    if caption:
+        parts.append(f'<div class="cg-kpi-caption">{escape(str(caption))}</div>')
+    parts.append("</div>")
+    st.markdown("".join(parts), unsafe_allow_html=True)
 
 
 def section_divider() -> None:

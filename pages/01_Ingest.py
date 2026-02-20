@@ -91,6 +91,7 @@ def _default_system_status() -> dict:
         "message": "System ready. Awaiting input.",
         "error": "",
         "summary": {},
+        "token": 0,
     }
 
 
@@ -119,6 +120,8 @@ def _set_system_status(
     error: str = "",
     summary: dict | None = None,
 ) -> None:
+    next_token = int(st.session_state.get("ingest_system_status_token", 0)) + 1
+    st.session_state["ingest_system_status_token"] = next_token
     status = _default_system_status()
     status.update(
         {
@@ -127,6 +130,7 @@ def _set_system_status(
             "message": message or status["message"],
             "error": error,
             "summary": summary or {},
+            "token": next_token,
         }
     )
     st.session_state["ingest_system_status"] = status
@@ -180,18 +184,21 @@ def _render_system_status(slot=None) -> None:
                 st.caption(message)
             if summary:
                 c1, c2 = st.columns(2)
-                c1.metric("Priority", str(summary.get("priority") or "-"))
-                c2.metric("Confidence", str(summary.get("confidence") or "-"))
+                with c1:
+                    ui.kpi_card("Priority", str(summary.get("priority") or "-"))
+                with c2:
+                    ui.kpi_card("Confidence", str(summary.get("confidence") or "-"))
                 st.caption("Regions: " + (", ".join(summary.get("regions") or []) or "-"))
                 st.caption("Topics: " + (", ".join(summary.get("topics") or []) or "-"))
 
+            token = int(status.get("token") or 0)
             b1, b2 = st.columns(2)
-            if b1.button("View in Review", key="ing_status_view_review", width='stretch'):
+            if b1.button("View in Review", key=f"ing_status_view_review_{token}", width='stretch'):
                 try:
                     st.switch_page("pages/02_Review.py")
                 except Exception:
-                    st.info("Open page 02 Review from the sidebar.")
-            if b2.button("Ingest Another", key="ing_status_ingest_another", width='stretch'):
+                    st.info("Open Review from the sidebar.")
+            if b2.button("Ingest Another", key=f"ing_status_ingest_another_{token}", width='stretch'):
                 _clear_ingest_form_state()
                 _set_system_status("ready")
                 st.rerun()
@@ -202,7 +209,7 @@ enforce_navigation_lock("ingest")
 ui.init_page(active_step="Ingest")
 ui.render_page_header(
     title="Ingest",
-    subtitle="Extract structured intelligence from a PDF or pasted text.",
+    subtitle="Upload documents for structured extraction. PDFs and articles are parsed, chunked, and transformed into validated intelligence records.",
     active_step="Ingest",
 )
 render_navigation_lock_notice("ingest")

@@ -32,6 +32,23 @@ def _parse_iso_date(value: str | None) -> date | None:
     except ValueError:
         return None
 
+
+def _to_overview_table(df_rows: pd.DataFrame) -> pd.DataFrame:
+    cols = [
+        "record_id",
+        "title",
+        "source_type",
+        "publish_date",
+        "created_at",
+        "priority",
+        "confidence",
+        "review_status",
+    ]
+    keep = [c for c in cols if c in df_rows.columns]
+    if not keep:
+        return pd.DataFrame()
+    return df_rows[keep].copy()
+
 st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("admin")
 ui.init_page(active_step=None)
@@ -42,7 +59,9 @@ ui.render_page_header(
 )
 ui.render_sidebar_utilities(model_label="gemini")
 
-tab_quality, tab_maintenance, tab_danger = st.tabs(["Quality", "Maintenance", "Danger Zone"])
+tab_quality, tab_maintenance, tab_download, tab_danger = st.tabs(
+    ["Quality", "Maintenance", "Download records", "Danger Zone"]
+)
 
 with tab_quality:
     with ui.card("Quality Operations"):
@@ -85,9 +104,12 @@ with tab_maintenance:
         if records:
             canonical, dups = dedupe_records(records)
             m1, m2, m3 = st.columns(3)
-            m1.metric("Total records", len(records))
-            m2.metric("Canonical", len(canonical))
-            m3.metric("Duplicates", len(dups))
+            with m1:
+                ui.kpi_card("Total records", len(records))
+            with m2:
+                ui.kpi_card("Canonical", len(canonical))
+            with m3:
+                ui.kpi_card("Duplicates", len(dups))
             export_df = pd.json_normalize(canonical)
             st.download_button(
                 "Download canonical records CSV",
@@ -221,6 +243,24 @@ with tab_maintenance:
                     st.rerun()
             else:
                 st.caption("No orphaned brief entries found. Index is clean.")
+
+with tab_download:
+    with ui.card("Records Overview"):
+        records = load_records_cached()
+        if not records:
+            st.caption("No records found.")
+        else:
+            overview_df = _to_overview_table(pd.json_normalize(records))
+            if overview_df.empty:
+                st.caption("No overview fields available.")
+            else:
+                st.dataframe(overview_df, width='stretch', hide_index=True)
+                st.download_button(
+                    "Download overview CSV",
+                    data=overview_df.to_csv(index=False).encode("utf-8"),
+                    file_name="insights_overview.csv",
+                    mime="text/csv",
+                )
 
 with tab_danger:
     with ui.card("Danger Zone"):

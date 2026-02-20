@@ -39,28 +39,38 @@ def _extract_header_publish_date_iso(text: str, max_lines: int = 60) -> Optional
     dmy = re.compile(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\.?\s+(\d{4})\b")
     iso = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
 
+    def _is_fiscal_year_end(year: int, month: int, day: int) -> bool:
+        """Filter out common fiscal year-end dates (Dec 31) that aren't publication dates."""
+        return month == 12 and day == 31
+
     for line in header_lines:
         m_iso = iso.search(line)
         if m_iso:
-            parsed = _to_iso(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
-            if parsed:
-                return parsed
+            year, month, day = int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3))
+            if not _is_fiscal_year_end(year, month, day):
+                parsed = _to_iso(year, month, day)
+                if parsed:
+                    return parsed
 
         m_mdy = mdy.search(line)
         if m_mdy:
             month = _parse_month(m_mdy.group(1))
             if month:
-                parsed = _to_iso(int(m_mdy.group(3)), month, int(m_mdy.group(2)))
-                if parsed:
-                    return parsed
+                year, day = int(m_mdy.group(3)), int(m_mdy.group(2))
+                if not _is_fiscal_year_end(year, month, day):
+                    parsed = _to_iso(year, month, day)
+                    if parsed:
+                        return parsed
 
         m_dmy = dmy.search(line)
         if m_dmy:
             month = _parse_month(m_dmy.group(2))
             if month:
-                parsed = _to_iso(int(m_dmy.group(3)), month, int(m_dmy.group(1)))
-                if parsed:
-                    return parsed
+                year, day = int(m_dmy.group(3)), int(m_dmy.group(1))
+                if not _is_fiscal_year_end(year, month, day):
+                    parsed = _to_iso(year, month, day)
+                    if parsed:
+                        return parsed
 
     return None
 

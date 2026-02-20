@@ -1,4 +1,5 @@
 from pathlib import Path
+from pathlib import Path
 import streamlit as st
 
 from src import ui
@@ -34,11 +35,11 @@ records = load_records_cached()
 with ui.card("Workflow", "Use the left sidebar to navigate pages."):
     st.markdown(
         """
-        - **Ingest**: upload PDF or paste text, extract structured records, and store results.
-        - **Review**: validate records, edit fields, and set approval status.
-        - **Brief**: generate executive briefs from approved, structured records.
-        - **Insights**: monitor trends and analytics from validated data.
-        - **Settings**: run quality checks, maintenance actions, and data exports.
+- **01 Ingest**: upload PDF (single or bulk) or paste text, extract with model routing, save record
+- **02 Review**: filter queue, inspect details, edit JSON, approve/disapprove, exclude from brief
+- **03 Brief**: select approved records, generate deterministic/AI brief, compare saved briefs
+- **04 Insights**: optional analytics and trend monitoring
+- **Admin**: exports and maintenance utilities
 """
     )
 

@@ -78,21 +78,44 @@ def week_start(ts: pd.Series) -> pd.Series:
     return ts.dt.to_period("W-SUN").apply(lambda p: p.start_time)
 
 
-def to_record_table(df_rows: pd.DataFrame) -> pd.DataFrame:
-    cols = [
+def _normalize_filter_tokens(query: str) -> list[str]:
+    normalized = " ".join(str(query or "").lower().replace(",", " ").split())
+    return [tok for tok in normalized.split(" ") if tok]
+
+
+def _insights_filter_blob(row: pd.Series) -> str:
+    parts: list[str] = []
+    scalar_fields = [
         "record_id",
         "title",
         "source_type",
         "publish_date",
-        "created_at",
         "priority",
         "confidence",
         "review_status",
     ]
-    keep = [c for c in cols if c in df_rows.columns]
-    if not keep:
-        return pd.DataFrame()
-    return df_rows[keep].copy()
+    list_fields = [
+        "topics",
+        "macro_themes_detected",
+        "regions_relevant_to_apex_mobility",
+        "country_mentions",
+        "companies_mentioned",
+    ]
+    for key in scalar_fields:
+        value = str(row.get(key) or "").strip()
+        if value:
+            parts.append(value)
+    for key in list_fields:
+        values = safe_list(row.get(key))
+        parts.extend(str(v).strip() for v in values if str(v).strip())
+    return " ".join(parts).lower()
+
+
+def _insights_matches_tokens(row: pd.Series, tokens: list[str]) -> bool:
+    if not tokens:
+        return True
+    blob = _insights_filter_blob(row)
+    return all(token in blob for token in tokens)
 
 
 def _to_int(value, default: int = 0) -> int:
@@ -380,8 +403,8 @@ st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.p
 enforce_navigation_lock("insights")
 ui.init_page(active_step="Insights")
 ui.render_page_header(
-    "04 Insights",
-    subtitle="Trend monitoring for approved intelligence records",
+    "Insights",
+    subtitle="Analytics across your structured intelligence records. All metrics are derived from validated, approved data.",
     active_step="Insights",
 )
 
@@ -394,7 +417,7 @@ if not records:
 
 df = pd.json_normalize(records)
 if df.empty:
-    st.info("No records after filters.")
+    st.info("No records after selection.")
     st.stop()
 
 # Compute effective date once (publish_date only)
@@ -405,29 +428,80 @@ df["event_day"] = publish_dt.dt.normalize()
 today = pd.Timestamp.today().normalize()
 default_from = (today - pd.Timedelta(days=30)).date()
 default_to = today.date()
-
-st.subheader("Date range")
-ui.status_badge(
-    "Approved + publish date only",
-    kind="info",
-    help_text="Insights only includes approved records with publish_date set.",
+all_regions = sorted(
+    {
+        str(x)
+        for vals in df.get("regions_relevant_to_apex_mobility", [])
+        for x in safe_list(vals)
+        if str(x).strip()
+    }
 )
-f1, f2 = st.columns(2)
-with f1:
-    date_from = st.date_input("From", value=default_from)
-with f2:
-    date_to = st.date_input("To", value=default_to)
-st.caption("Showing Approved records with publish dates only.")
+all_topics = sorted(
+    {
+        str(x)
+        for vals in df.get("topics", [])
+        for x in safe_list(vals)
+        if str(x).strip()
+    }
+)
 
+f1, f2, f3, f4, f5 = st.columns([2.0, 1.3, 1.4, 1.0, 1.0])
+with f1:
+    filter_search = st.text_input(
+        "Search records",
+        key="ins_filter_search",
+        placeholder="Search records...",
+        label_visibility="collapsed",
+    )
+with f2:
+    filter_region = st.selectbox(
+        "Region",
+        options=["All Regions"] + all_regions,
+        key="ins_filter_region",
+        label_visibility="collapsed",
+    )
+with f3:
+    filter_topic = st.selectbox(
+        "Topic",
+        options=["All Topics"] + all_topics,
+        key="ins_filter_topic",
+        label_visibility="collapsed",
+    )
+with f4:
+    date_from = st.date_input(
+        "From",
+        value=default_from,
+        key="ins_date_from",
+        label_visibility="collapsed",
+    )
+with f5:
+    date_to = st.date_input(
+        "To",
+        value=default_to,
+        key="ins_date_to",
+        label_visibility="collapsed",
+    )
 mask = pd.Series(True, index=df.index)
 mask = mask & df["publish_date_dt"].notna()
 mask = mask & (df["event_day"] >= pd.Timestamp(date_from)) & (df["event_day"] <= pd.Timestamp(date_to))
 if "review_status" in df:
     mask = mask & df["review_status"].astype(str).isin(["Approved"])
+if filter_region != "All Regions":
+    mask = mask & df.get("regions_relevant_to_apex_mobility", pd.Series(dtype=object)).apply(
+        lambda vals: filter_region in safe_list(vals)
+    )
+if filter_topic != "All Topics":
+    mask = mask & df.get("topics", pd.Series(dtype=object)).apply(
+        lambda vals: filter_topic in safe_list(vals)
+    )
+if str(filter_search).strip():
+    search_tokens = _normalize_filter_tokens(filter_search)
+    if search_tokens:
+        mask = mask & df.apply(lambda row: _insights_matches_tokens(row, search_tokens), axis=1)
 
 fdf = df[mask].copy()
 if fdf.empty:
-    st.warning("No records match current filters.")
+    st.warning("No records match current selection.")
     st.stop()
 
 # â”€â”€ KPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -453,83 +527,30 @@ closure_regions = Counter(str(x) for vals in closure_recent.get("regions_relevan
 closure_top_region = closure_regions.most_common(1)[0][0] if closure_regions else "-"
 closure_top_region_count = closure_regions.most_common(1)[0][1] if closure_regions else 0
 
-st.markdown(
-    """
-<style>
-.ins-snapshot-card {
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.05);
-  padding: 0.75rem 0.85rem;
-}
-.ins-snapshot-title {
-  font-size: 0.75rem;
-  color: #475569;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  margin-bottom: 0.2rem;
-}
-.ins-snapshot-value {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: #1e293b;
-  line-height: 1.2;
-}
-.ins-snapshot-sub {
-  font-size: 0.78rem;
-  color: #64748b;
-  margin-top: 0.2rem;
-}
-</style>
-""",
-    unsafe_allow_html=True,
-)
-
 sx1, sx2, sx3, sx4 = st.columns(4)
 with sx1:
-    st.markdown(
-        (
-            "<div class='ins-snapshot-card'>"
-            "<div class='ins-snapshot-title'>Topic Signals (7d)</div>"
-            f"<div class='ins-snapshot-value'>{recent_topic_total}</div>"
-            f"<div class='ins-snapshot-sub'>Change vs prior week: {_signed_int(topic_signal_delta)}</div>"
-            "</div>"
-        ),
-        unsafe_allow_html=True,
+    ui.kpi_card(
+        "Topic Signals (7d)",
+        recent_topic_total,
+        caption=f"Change vs prior week: {_signed_int(topic_signal_delta)}",
     )
 with sx2:
-    st.markdown(
-        (
-            "<div class='ins-snapshot-card'>"
-            "<div class='ins-snapshot-title'>Active Topics (7d)</div>"
-            f"<div class='ins-snapshot-value'>{active_topics}</div>"
-            "<div class='ins-snapshot-sub'>Distinct active topic clusters this week</div>"
-            "</div>"
-        ),
-        unsafe_allow_html=True,
+    ui.kpi_card(
+        "Active Topics (7d)",
+        active_topics,
+        caption="Distinct active topic clusters this week",
     )
 with sx3:
-    st.markdown(
-        (
-            "<div class='ins-snapshot-card'>"
-            "<div class='ins-snapshot-title'>Closure-System Mentions (7d)</div>"
-            f"<div class='ins-snapshot-value'>{closure_recent_n}</div>"
-            f"<div class='ins-snapshot-sub'>Change vs prior week: {_signed_int(closure_delta)}</div>"
-            "</div>"
-        ),
-        unsafe_allow_html=True,
+    ui.kpi_card(
+        "Closure-System Mentions (7d)",
+        closure_recent_n,
+        caption=f"Change vs prior week: {_signed_int(closure_delta)}",
     )
 with sx4:
-    st.markdown(
-        (
-            "<div class='ins-snapshot-card'>"
-            "<div class='ins-snapshot-title'>Closure Hotspot Region</div>"
-            f"<div class='ins-snapshot-value'>{closure_top_region}</div>"
-            f"<div class='ins-snapshot-sub'>Mentions: {closure_top_region_count}</div>"
-            "</div>"
-        ),
-        unsafe_allow_html=True,
+    ui.kpi_card(
+        "Closure Hotspot Region",
+        closure_top_region,
+        caption=f"Mentions: {closure_top_region_count}",
     )
 
 snapshot_insights = build_executive_snapshot_insights(recent, prior)
@@ -537,9 +558,9 @@ st.markdown("**Key insights**")
 for line in snapshot_insights:
     if ":" in line:
         lead, detail = line.split(":", 1)
-        st.markdown(f"**{lead.strip()}:** {detail.strip()}")
+        st.markdown(f"- **{lead.strip()}:** {detail.strip()}")
     else:
-        st.markdown(line)
+        st.markdown(f"- {line}")
 
 # â”€â”€ Weekly Histogram â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 trend_col1, trend_col2 = st.columns(2)
@@ -623,11 +644,6 @@ with trend_col2:
             )
             rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule().encode(x="x:Q")
             st.altair_chart(chart + rule, width='stretch')
-            st.dataframe(
-                momentum[["topic", "prior", "recent", "delta", "pct_change", "class"]].sort_values("delta", ascending=False),
-                width='stretch',
-                hide_index=True,
-            )
         else:
             st.caption("Not enough topic data for momentum chart.")
     else:
@@ -858,26 +874,30 @@ if qc_runs and len(qc_runs) >= 1:
         return f"{direction} {abs(delta_val):.1f}"
 
     q1, q2, q3, q4 = st.columns(4)
-    q1.metric(
-        "Overall Score",
-        f"{latest.get('weighted_overall_score', '-')}",
-        delta=_delta_text("weighted_overall_score", percent=False),
-    )
-    q2.metric(
-        "Evidence Grounding",
-        f"{latest.get('KPI-R3', 0):.0%}",
-        delta=_delta_text("KPI-R3", percent=True),
-    )
-    q3.metric(
-        "Canonicalization",
-        f"{latest.get('KPI-R4', 0):.0%}",
-        delta=_delta_text("KPI-R4", percent=True),
-    )
-    q4.metric(
-        "Geo Determinism",
-        f"{latest.get('KPI-R5', 0):.0%}",
-        delta=_delta_text("KPI-R5", percent=True),
-    )
+    with q1:
+        ui.kpi_card(
+            "Overall Score",
+            f"{latest.get('weighted_overall_score', '-')}",
+            caption=_delta_text("weighted_overall_score", percent=False),
+        )
+    with q2:
+        ui.kpi_card(
+            "Evidence Grounding",
+            f"{latest.get('KPI-R3', 0):.0%}",
+            caption=_delta_text("KPI-R3", percent=True),
+        )
+    with q3:
+        ui.kpi_card(
+            "Canonicalization",
+            f"{latest.get('KPI-R4', 0):.0%}",
+            caption=_delta_text("KPI-R4", percent=True),
+        )
+    with q4:
+        ui.kpi_card(
+            "Geo Determinism",
+            f"{latest.get('KPI-R5', 0):.0%}",
+            caption=_delta_text("KPI-R5", percent=True),
+        )
 
     bucket = st.radio(
         "Group runs by",
@@ -1023,10 +1043,12 @@ if qc_runs and len(qc_runs) >= 1:
         cur = latest_run.get(key)
         prev = prior_run.get(key)
         if cur is None:
-            col.metric(label, "Not available")
+            with col:
+                ui.kpi_card(label, "Not available")
             return
         delta = _format_delta_change(cur, prev, kind="float")
-        col.metric(label, f"{float(cur):.1f}", delta=delta)
+        with col:
+            ui.kpi_card(label, f"{float(cur):.1f}", caption=delta)
 
     _score_metric(s1, "weighted_record_score", "Record score")
     _score_metric(s2, "weighted_brief_score", "Brief score")
@@ -1068,7 +1090,7 @@ if qc_runs and len(qc_runs) >= 1:
                 f"Record: `{worst_record['record_id']}` | score {worst_record['score']} | "
                 f"{worst_record['high']}H/{worst_record['medium']}M/{worst_record['low']}L"
             )
-            st.caption("Action: inspect in 02 Review and fix finding drivers.")
+            st.caption("Action: inspect in Review and fix finding drivers.")
         else:
             st.caption("No record-level findings in latest record QC run.")
 
@@ -1082,7 +1104,7 @@ if qc_runs and len(qc_runs) >= 1:
             )
             brief_file = f"data/briefs/{brief_breakdown['brief_id']}.md" if brief_breakdown.get("brief_id") else ""
             if brief_file:
-                st.caption(f"Action: regenerate `{brief_file}` in 03 Brief, Saved Brief Browser.")
+                st.caption(f"Action: regenerate `{brief_file}` in Brief, Saved Brief Browser.")
         else:
             st.caption("No brief-level findings in latest brief QC run.")
 
@@ -1250,46 +1272,3 @@ if qc_runs and len(qc_runs) >= 1:
 else:
     st.info("Run `python scripts/run_quality.py` to populate QC details.")
 
-st.subheader("Drilldown Views")
-t_theme, t_region, t_company = st.tabs(["By Theme", "By Region", "By Company"])
-with t_theme:
-    theme_options = sorted({str(x) for vals in fdf.get("macro_themes_detected", []) for x in safe_list(vals) if str(x).strip()})
-    if not theme_options:
-        theme_options = sorted({str(x) for vals in fdf.get("topics", []) for x in safe_list(vals) if str(x).strip()})
-    if theme_options:
-        theme_pick = st.selectbox("Theme", options=theme_options, key="ins_theme_pick")
-        theme_mask = fdf.get("macro_themes_detected", pd.Series(dtype=object)).apply(lambda vals: theme_pick in safe_list(vals))
-        if theme_mask.sum() == 0:
-            theme_mask = fdf.get("topics", pd.Series(dtype=object)).apply(lambda vals: theme_pick in safe_list(vals))
-        theme_df = fdf[theme_mask].copy()
-        st.dataframe(to_record_table(theme_df), width='stretch', hide_index=True)
-    else:
-        st.caption("No theme data available.")
-
-with t_region:
-    region_options = sorted({str(x) for vals in fdf.get("regions_relevant_to_apex_mobility", []) for x in safe_list(vals) if str(x).strip()})
-    if region_options:
-        region_pick = st.selectbox("Region", options=region_options, key="ins_region_pick")
-        region_df = fdf[fdf.get("regions_relevant_to_apex_mobility", pd.Series(dtype=object)).apply(lambda vals: region_pick in safe_list(vals))].copy()
-        st.dataframe(to_record_table(region_df), width='stretch', hide_index=True)
-    else:
-        st.caption("No region data available.")
-
-with t_company:
-    company_rows = explode_list_column(fdf[["record_id", "companies_mentioned"]].copy(), "companies_mentioned")
-    company_options = sorted(company_rows["companies_mentioned"].astype(str).unique().tolist()) if not company_rows.empty else []
-    if company_options:
-        company_pick = st.selectbox("Company", options=company_options, key="ins_company_pick")
-        wanted_ids = set(company_rows.loc[company_rows["companies_mentioned"] == company_pick, "record_id"].astype(str).tolist())
-        company_df = fdf[fdf.get("record_id", pd.Series(dtype=str)).astype(str).isin(wanted_ids)].copy()
-        st.dataframe(to_record_table(company_df), width='stretch', hide_index=True)
-    else:
-        st.caption("No company data available.")
-
-csv = fdf.to_csv(index=False).encode("utf-8")
-st.download_button(
-    "Download filtered records CSV",
-    data=csv,
-    file_name="dashboard_filtered_records.csv",
-    mime="text/csv",
-)

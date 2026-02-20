@@ -74,7 +74,8 @@ Region values are defined in `data/new_country_mapping.csv` and implemented in P
 - Canonical command:
   - `python -m pytest -q`
 
-## Bloomberg Date Semantics
-- Use Bloomberg PDF header timestamp as the source-of-truth date when available.
+## Date Extraction Semantics
+- Publisher-specific PDF header timestamps are used as source-of-truth dates when available (Bloomberg, S&P, Reuters, etc.).
 - Store `publish_date` as date-only (`YYYY-MM-DD`) with no timezone conversion.
 - This avoids PST/UTC rollover flip-flops (for example, Feb 1 PST vs Feb 2 UTC).
+- December 31 dates found in PDF headers are automatically filtered out (fiscal year-end dates, not publication dates).

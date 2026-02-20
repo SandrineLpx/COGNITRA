@@ -115,8 +115,8 @@ st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.p
 enforce_navigation_lock("review")
 ui.init_page(active_step="Review")
 ui.render_page_header(
-    "02 Review",
-    subtitle="Review extracted records, validate details",
+    "Review",
+    subtitle="Validate structured intelligence records before approval. Each record is scored and requires analyst confirmation.",
     active_step="Review",
 )
 render_navigation_lock_notice("review")
@@ -406,6 +406,36 @@ def _macro_theme_diag(rec: Dict[str, Any]) -> List[Dict[str, str]]:
     return rows
 
 
+def _json_editor_hints(errs: List[str]) -> List[str]:
+    hints: List[str] = []
+    if not errs:
+        return hints
+
+    missing = [str(e).split("Missing key:", 1)[1].strip() for e in errs if str(e).startswith("Missing key:")]
+    if missing:
+        hints.append("Missing required keys: " + ", ".join(sorted(set(missing))))
+
+    if any("source_type must be one of" in str(e) for e in errs):
+        hints.append("Invalid `source_type`. Allowed values: " + ", ".join(sorted(ALLOWED_SOURCE_TYPES)))
+
+    if any("publish_date must be YYYY-MM-DD" in str(e) for e in errs):
+        hints.append("`publish_date` must use `YYYY-MM-DD` format (for example `2026-02-20`), empty string, or null.")
+
+    if any("review_status must be one of" in str(e) for e in errs):
+        hints.append("`review_status` must be one of: Pending, Approved, Disapproved.")
+
+    if any("topics contains non-canonical labels" in str(e) for e in errs):
+        hints.append("`topics` has non-canonical labels. Use topic values already present in valid records.")
+
+    if any("regions_mentioned contains invalid labels" in str(e) for e in errs):
+        hints.append("`regions_mentioned` contains unsupported display-region labels.")
+
+    if any("regions_relevant_to_apex_mobility contains invalid labels" in str(e) for e in errs):
+        hints.append("`regions_relevant_to_apex_mobility` contains unsupported footprint-region labels.")
+
+    return hints
+
+
 def _process_one_pdf_reingest(
     pdf_bytes: bytes,
     filename: str,
@@ -559,10 +589,24 @@ for rec in records:
 
 df = pd.DataFrame(rows)
 today = pd.Timestamp.now().normalize()
-default_record_from = (today - pd.Timedelta(days=7)).date()
-default_record_to = today.date()
+created_dates = pd.to_datetime(df["_created_dt"], errors="coerce")
+valid_created_dates = created_dates.dropna()
+publish_dates = pd.to_datetime(df["_publish_dt"], errors="coerce")
+valid_publish_dates = publish_dates.dropna()
+default_record_from = (
+    valid_created_dates.min().date()
+    if not valid_created_dates.empty
+    else (today - pd.Timedelta(days=3650)).date()
+)
+default_record_to = max(
+    today.date(),
+    (valid_created_dates.max().date() if not valid_created_dates.empty else today.date()),
+)
 default_publish_from = (today - pd.Timedelta(days=20)).date()
-default_publish_to = today.date()
+default_publish_to = max(
+    today.date(),
+    (valid_publish_dates.max().date() if not valid_publish_dates.empty else today.date()),
+)
 
 status_vals = ["Pending", "Approved", "Disapproved"]
 pri_vals = ["High", "Medium", "Low"]
@@ -573,13 +617,14 @@ all_themes = sorted({str(x) for v in df.get("macro_themes_detected", []) for x i
 all_topics = sorted({str(x) for v in df.get("topics", []) for x in (v or []) if str(x).strip()})
 
 if st.session_state.pop("review_clear_filters_requested", False):
-    st.session_state["review_sel_status"] = status_vals
-    st.session_state["review_sel_pri"] = pri_vals
     st.session_state["review_query"] = ""
     st.session_state["review_hide_briefed"] = True
+    st.session_state["review_quick_status"] = "All Statuses"
+    st.session_state["review_quick_priority"] = "All Priorities"
+    st.session_state["review_quick_region"] = "All Regions"
+    st.session_state["review_adv_regions"] = []
     st.session_state["review_sel_conf"] = conf_vals
     st.session_state["review_sel_source"] = source_vals
-    st.session_state["review_sel_regions"] = []
     st.session_state["review_sel_themes"] = []
     st.session_state["review_sel_topics"] = []
     st.session_state["review_record_from"] = default_record_from
@@ -588,13 +633,14 @@ if st.session_state.pop("review_clear_filters_requested", False):
     st.session_state["review_publish_from"] = default_publish_from
     st.session_state["review_publish_to"] = default_publish_to
 
-st.session_state.setdefault("review_sel_status", list(status_vals))
-st.session_state.setdefault("review_sel_pri", list(pri_vals))
 st.session_state.setdefault("review_query", "")
 st.session_state.setdefault("review_hide_briefed", True)
+st.session_state.setdefault("review_quick_status", "All Statuses")
+st.session_state.setdefault("review_quick_priority", "All Priorities")
+st.session_state.setdefault("review_quick_region", "All Regions")
+st.session_state.setdefault("review_adv_regions", [])
 st.session_state.setdefault("review_sel_conf", list(conf_vals))
 st.session_state.setdefault("review_sel_source", list(source_vals))
-st.session_state.setdefault("review_sel_regions", [])
 st.session_state.setdefault("review_sel_themes", [])
 st.session_state.setdefault("review_sel_topics", [])
 st.session_state.setdefault("review_record_from", default_record_from)
@@ -603,92 +649,138 @@ st.session_state.setdefault("review_apply_publish_range", False)
 st.session_state.setdefault("review_publish_from", default_publish_from)
 st.session_state.setdefault("review_publish_to", default_publish_to)
 
-with ui.card("Filter bar"):
-    f1, f2, f3, f4, f5 = st.columns([1.1, 1.1, 2.2, 1.1, 0.8])
-    with f1:
-        sel_status = st.multiselect(
-            "Status",
-            status_vals,
-            key="review_sel_status",
+# One-time defaults migration so existing sessions pick up current filter defaults
+# and don't keep stale query/date/region values from prior UI versions.
+if not st.session_state.get("_review_filter_defaults_v3_applied", False):
+    st.session_state["review_query"] = ""
+    st.session_state["review_hide_briefed"] = True
+    st.session_state["review_quick_status"] = "All Statuses"
+    st.session_state["review_quick_priority"] = "All Priorities"
+    st.session_state["review_quick_region"] = "All Regions"
+    st.session_state["review_adv_regions"] = []
+    st.session_state["review_sel_conf"] = list(conf_vals)
+    st.session_state["review_sel_source"] = list(source_vals)
+    st.session_state["review_sel_themes"] = []
+    st.session_state["review_sel_topics"] = []
+    st.session_state["review_record_from"] = default_record_from
+    st.session_state["review_record_to"] = default_record_to
+    st.session_state["review_apply_publish_range"] = False
+    st.session_state["review_publish_from"] = default_publish_from
+    st.session_state["review_publish_to"] = default_publish_to
+    st.session_state["_review_filter_defaults_v3_applied"] = True
+
+quick_status_options = ["All Statuses"] + status_vals
+quick_priority_options = ["All Priorities"] + pri_vals
+quick_region_options = ["All Regions"] + all_regions
+f1, f2, f3, f4 = st.columns([2.2, 1.2, 1.2, 1.4])
+with f1:
+    query = st.text_input(
+        "Search records",
+        key="review_query",
+        placeholder="Search records...",
+        label_visibility="collapsed",
+        help=(
+            "Searches title, source, priority/confidence, status, record ID, "
+            "topics, regions, themes, companies, and brief status."
+        ),
+    )
+with f2:
+    quick_pri = st.selectbox(
+        "Priority",
+        quick_priority_options,
+        key="review_quick_priority",
+        label_visibility="collapsed",
+    )
+with f3:
+    quick_status = st.selectbox(
+        "Status",
+        quick_status_options,
+        key="review_quick_status",
+        label_visibility="collapsed",
+    )
+with f4:
+    quick_region = st.selectbox(
+        "Region",
+        quick_region_options,
+        key="review_quick_region",
+        label_visibility="collapsed",
+    )
+
+with st.expander("Advanced", expanded=False):
+    mf1, mf2, mf3 = st.columns(3)
+    with mf1:
+        sel_conf = st.multiselect(
+            "Confidence",
+            conf_vals,
+            key="review_sel_conf",
         )
-    with f2:
-        sel_pri = st.multiselect(
-            "Priority",
-            pri_vals,
-            key="review_sel_pri",
+        sel_source = st.multiselect(
+            "Source type",
+            source_vals,
+            key="review_sel_source",
         )
-    with f3:
-        query = st.text_input(
-            "Filter search (any filterable value)",
-            key="review_query",
-            placeholder="e.g. approved high germany digital key",
-            help=(
-                "Searches title, source, priority/confidence, status, record ID, "
-                "topics, regions, themes, companies, and brief status."
-            ),
-        )
-    with f4:
         hide_briefed = st.checkbox(
-            "Hide already briefed",
+            "Hide records already included in a brief",
             key="review_hide_briefed",
         )
-    with f5:
-        if st.button("Clear filters", key="review_clear_filters", type="secondary", use_container_width=True):
+    with mf2:
+        adv_regions = st.multiselect(
+            "Regions (multi-select override)",
+            all_regions,
+            key="review_adv_regions",
+        )
+        sel_themes = st.multiselect(
+            "Macro theme",
+            all_themes,
+            key="review_sel_themes",
+        )
+        sel_topics = st.multiselect(
+            "Topic",
+            all_topics,
+            key="review_sel_topics",
+        )
+    with mf3:
+        record_from = st.date_input(
+            "Record added from",
+            key="review_record_from",
+        )
+        record_to = st.date_input(
+            "Record added to",
+            key="review_record_to",
+        )
+        apply_publish_range = st.checkbox(
+            "Use publish date range",
+            key="review_apply_publish_range",
+        )
+        publish_from = st.date_input(
+            "Publish from",
+            disabled=not apply_publish_range,
+            key="review_publish_from",
+        )
+        publish_to = st.date_input(
+            "Publish to",
+            disabled=not apply_publish_range,
+            key="review_publish_to",
+        )
+        if st.button("Clear", key="review_clear_filters", type="secondary", use_container_width=True):
             st.session_state["review_clear_filters_requested"] = True
             st.rerun()
 
-    with st.expander("Advanced filters", expanded=False):
-        mf1, mf2, mf3 = st.columns(3)
-        with mf1:
-            sel_conf = st.multiselect(
-                "Confidence",
-                conf_vals,
-                key="review_sel_conf",
-            )
-            sel_source = st.multiselect(
-                "Source type",
-                source_vals,
-                key="review_sel_source",
-            )
-        with mf2:
-            sel_regions = st.multiselect(
-                "Footprint region",
-                all_regions,
-                key="review_sel_regions",
-            )
-            sel_themes = st.multiselect(
-                "Macro theme",
-                all_themes,
-                key="review_sel_themes",
-            )
-            sel_topics = st.multiselect(
-                "Topic",
-                all_topics,
-                key="review_sel_topics",
-            )
-        with mf3:
-            record_from = st.date_input(
-                "Record added from",
-                key="review_record_from",
-            )
-            record_to = st.date_input(
-                "Record added to",
-                key="review_record_to",
-            )
-            apply_publish_range = st.checkbox(
-                "Use publish date range",
-                key="review_apply_publish_range",
-            )
-            publish_from = st.date_input(
-                "Publish from",
-                disabled=not apply_publish_range,
-                key="review_publish_from",
-            )
-            publish_to = st.date_input(
-                "Publish to",
-                disabled=not apply_publish_range,
-                key="review_publish_to",
-            )
+if quick_status == "All Statuses":
+    sel_status = list(status_vals)
+else:
+    sel_status = [quick_status]
+
+if quick_pri == "All Priorities":
+    sel_pri = list(pri_vals)
+else:
+    sel_pri = [quick_pri]
+
+sel_regions: List[str] = []
+if quick_region != "All Regions":
+    sel_regions = [quick_region]
+if adv_regions:
+    sel_regions = list(adv_regions)
 
 mask = pd.Series(True, index=df.index)
 mask = mask & df["review_status"].isin(sel_status) & df["priority"].isin(sel_pri)
@@ -722,17 +814,16 @@ auto_eligible_count = int(fdf["_auto_approve_eligible"].fillna(False).sum()) if 
 low_conf_pending_count = int(((fdf["review_status"] == "Pending") & (fdf["confidence"] == "Low")).sum()) if not fdf.empty else 0
 
 if fdf.empty:
-    st.warning("No records match current filters.")
+    st.warning("No records match current selection.")
     st.stop()
 
-with ui.card("KPI"):
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("Records", len(fdf))
-    k2.metric("Approved", int((fdf["review_status"] == "Approved").sum()))
-    k3.metric("Pending", int((fdf["review_status"] == "Pending").sum()))
-    k4.metric("Disapproved", int((fdf["review_status"] == "Disapproved").sum()))
-    k5.metric("Duplicates", int(fdf["is_duplicate"].fillna(False).sum()))
-    k6.metric("High Priority", int((fdf["priority"] == "High").sum()))
+k1, k2, k3 = st.columns(3)
+with k1:
+    ui.kpi_card("Pending Review", int((fdf["review_status"] == "Pending").sum()))
+with k2:
+    ui.kpi_card("Approved", int((fdf["review_status"] == "Approved").sum()))
+with k3:
+    ui.kpi_card("Total Records", len(fdf))
 
 
 def _truncate(text: Any, n: int = 96) -> str:
@@ -774,117 +865,82 @@ with queue_col:
         if selected_id not in queue_ids:
             selected_id = queue_ids[0]
 
-        if "review_queue_limit" not in st.session_state:
-            st.session_state["review_queue_limit"] = 25
-        queue_limit = int(st.session_state.get("review_queue_limit", 25))
-        display_queue = queue.head(queue_limit)
+        display_queue = queue
 
-        qh1, qh2 = st.columns([4.2, 1.3])
-        with qh1:
-            st.markdown(f"**Showing {len(fdf)} / {len(df)} records**")
-            st.caption(
-                f"Pending: {pending_count} | Auto-eligible: {auto_eligible_count} | "
-                f"Low-confidence pending: {low_conf_pending_count}"
-            )
-        with qh2:
-            if st.button(
-                f"Approve all pending ({pending_count})",
-                key="review_approve_all_pending",
-                disabled=pending_count == 0,
-                type="secondary",
-            ):
-                pending_ids = set(fdf.loc[fdf["review_status"] == "Pending", "record_id"].tolist())
-                changed = False
-                for rec in records:
-                    if str(rec.get("record_id") or "") in pending_ids:
-                        if normalize_review_status(rec.get("review_status")) != "Approved":
-                            rec["review_status"] = "Approved"
-                            changed = True
-                if changed:
-                    overwrite_records(records)
-                    clear_records_cache()
-                    st.rerun()
+        st.markdown(f"**Showing {len(queue)} records**")
+        st.caption(
+            f"Pending: {pending_count} | Auto-eligible: {auto_eligible_count} | "
+            f"Low-confidence pending: {low_conf_pending_count} | "
+            f"High priority: {int((fdf['priority'] == 'High').sum())} | "
+            f"Marked duplicate: {int(fdf['is_duplicate'].fillna(False).sum())}"
+        )
 
         st.divider()
-        with st.container(height=300, border=False):
+        with st.container(height=260, border=False):
+            hdr_info, hdr_pri, hdr_conf, hdr_status, hdr_action = st.columns([5.4, 1.0, 1.1, 1.1, 0.7])
+            with hdr_info:
+                st.caption("Record Info")
+            with hdr_pri:
+                st.caption("Priority")
+            with hdr_conf:
+                st.caption("Confidence")
+            with hdr_status:
+                st.caption("Status")
+            with hdr_action:
+                st.caption("Review Record")
+
             for _, row in display_queue.iterrows():
                 rid = str(row["record_id"])
                 status = str(row["review_status"])
                 prio = str(row["priority"])
                 conf = str(row["confidence"])
-                footprint = ", ".join(row.get("regions_relevant_to_apex_mobility") or []) or "-"
                 pub = str(row.get("publish_date") or "")
-                created = str(row.get("created_at") or "")[:10]
-                date_label = pub or created or "-"
+                date_label = pub or "-"
                 source = str(row.get("source_type") or "-")
-                dot_color = "#f59e0b"
-                if status == "Approved":
-                    dot_color = "#16a34a"
-                elif status == "Disapproved":
-                    dot_color = "#dc2626"
-                row_status, row_main, row_chips, row_action = st.columns([0.2, 4.8, 2.0, 1.0])
-                with row_status:
+                row_main, row_pri, row_conf, row_status, row_action = st.columns([5.4, 1.0, 1.1, 1.1, 0.7])
+                with row_main:
+                    title = _truncate(row.get("title"), 96) or "Untitled"
+                    title_style = "font-weight:700;" if rid == selected_id else "font-weight:600;"
+                    meta = f"{source} | {date_label} | Priority {prio} | Confidence {conf}"
                     st.markdown(
                         (
-                            "<div style='display:flex;align-items:center;height:2rem;'>"
-                            f"<span style='width:10px;height:10px;border-radius:50%;display:inline-block;background:{dot_color};'></span>"
+                            "<div style='line-height:1.15;margin-bottom:0.15rem;'>"
+                            f"<div style='{title_style}'>{html.escape(title)}</div>"
+                            f"<div style='font-size:0.76rem;color:#64748b;'>{html.escape(meta)}</div>"
                             "</div>"
                         ),
                         unsafe_allow_html=True,
                     )
-                with row_main:
-                    title = _truncate(row.get("title"), 96) or "Untitled"
-                    if rid == selected_id:
-                        st.markdown(
-                            (
-                                "<div style='border-left:4px solid #1e293b;"
-                                "background:#f1f5f9;padding:0.3rem 0.55rem;border-radius:6px;'>"
-                                f"<div style='font-weight:600;color:#0f172a'>{html.escape(title)}</div>"
-                                f"<div style='font-size:0.78rem;color:#475569;margin-top:0.1rem'>"
-                                f"Publish: {html.escape(date_label)} | Source: {html.escape(source)} | "
-                                f"Footprint: {html.escape(_truncate(footprint, 32))}</div>"
-                                "</div>"
-                            ),
-                            unsafe_allow_html=True,
-                        )
-                    else:
-                        st.markdown(title)
-                        st.caption(f"Publish: {date_label} | Source: {source} | Footprint: {_truncate(footprint, 32)}")
-                with row_chips:
-                    chip_specs = [
-                        (f"P:{prio}", _priority_help_text(prio)),
-                        (f"C:{conf}", _confidence_help_text(conf)),
-                    ]
+                with row_pri:
+                    ui.status_badge(
+                        prio,
+                        kind=("danger" if prio == "High" else "warning" if prio == "Medium" else "info"),
+                    )
+                with row_conf:
+                    ui.status_badge(
+                        conf,
+                        kind=("success" if conf == "High" else "danger" if conf == "Low" else "info"),
+                    )
+                with row_status:
+                    badge_kind = "warning"
+                    if status == "Approved":
+                        badge_kind = "success"
+                    elif status == "Disapproved":
+                        badge_kind = "danger"
+                    ui.status_badge(status, kind=badge_kind)
                     if bool(row.get("in_brief")):
-                        chip_specs.append(("Briefed", "Included in at least one saved weekly brief."))
-                    chips_html = " ".join(
-                        (
-                            f"<span title='{html.escape(tip, quote=True)}' "
-                            "style='font-size:0.72rem;border:1px solid #d1d5db;border-radius:999px;padding:1px 6px;'>"
-                            f"{html.escape(label, quote=True)}</span>"
-                        )
-                        for label, tip in chip_specs
-                    )
-                    st.markdown(
-                        f"<div style='text-align:right;white-space:nowrap'>{chips_html}</div>",
-                        unsafe_allow_html=True,
-                    )
+                        st.caption("Briefed")
                 with row_action:
-                    select_label = "Active" if rid == selected_id else "Select"
-                    if st.button(select_label, key=f"select_{rid}", type="secondary"):
+                    if st.button(
+                        "",
+                        key=f"select_{rid}",
+                        type="tertiary",
+                        icon=":material/visibility:",
+                        help="Review record",
+                        width="content",
+                    ):
                         st.session_state["selected_record_id"] = rid
                         st.rerun()
-
-                st.divider()
-
-        if len(queue) > queue_limit:
-            if st.button(
-                f"Load more ({len(queue) - queue_limit})",
-                key="review_queue_load_more",
-                type="secondary",
-            ):
-                st.session_state["review_queue_limit"] = queue_limit + 25
-                st.rerun()
 
         selected_id = str(st.session_state.get("selected_record_id") or selected_id)
         if selected_id not in queue_ids:
@@ -900,20 +956,20 @@ source_pdf_path = str(rec.get("source_pdf_path") or "").strip() if rec else ""
 pdf_path = Path(source_pdf_path).expanduser() if source_pdf_path else None
 pdf_exists = bool(pdf_path and pdf_path.exists())
 
-with detail_col:
-    if rec:
-        navd1, navd2, navd3 = st.columns([1, 1, 5])
-        with navd1:
-            if st.button("Previous", type="secondary", disabled=current_idx == 0, key="review_detail_prev"):
-                st.session_state["selected_record_id"] = queue_ids[current_idx - 1]
-                st.rerun()
-        with navd2:
-            if st.button("Next", type="secondary", disabled=current_idx >= (len(queue_ids) - 1), key="review_detail_next"):
-                st.session_state["selected_record_id"] = queue_ids[current_idx + 1]
-                st.rerun()
-        with navd3:
-            st.caption(f"Queue position: {current_idx + 1} of {len(queue_ids)}")
+if rec:
+    navd1, navd2, navd3 = st.columns([1, 1, 5])
+    with navd1:
+        if st.button("Previous", type="secondary", disabled=current_idx == 0, key="review_detail_prev"):
+            st.session_state["selected_record_id"] = queue_ids[current_idx - 1]
+            st.rerun()
+    with navd2:
+        if st.button("Next", type="secondary", disabled=current_idx >= (len(queue_ids) - 1), key="review_detail_next"):
+            st.session_state["selected_record_id"] = queue_ids[current_idx + 1]
+            st.rerun()
+    with navd3:
+        st.caption(f"Record {current_idx + 1} of {len(queue_ids)}")
 
+with detail_col:
     with ui.card("Record Detail"):
         if not rec:
             st.info("Select a record from the queue.")
@@ -930,7 +986,12 @@ with detail_col:
         edit_mode_key = f"edit_mode_{record_id}"
         raw_json_tools_key = f"raw_json_tools_{record_id}"
 
-        status_value = str(st.session_state.get(status_key, current_status))
+        status_value = str(
+            st.session_state.get(
+                status_key,
+                current_status if current_status in status_options else "Pending",
+            )
+        )
         if status_value not in status_options:
             status_value = current_status if current_status in status_options else "Pending"
         exclude_value = bool(st.session_state.get(exclude_key, bool(rec.get("is_duplicate", False))))
@@ -940,118 +1001,83 @@ with detail_col:
         edit_mode = bool(st.session_state.get(edit_mode_key, False))
         raw_json_tools_enabled = bool(st.session_state.get(raw_json_tools_key, False))
 
-        action_col1, action_col2, action_col3 = st.columns(3)
-        with action_col1:
-            if st.button("Approve", type="primary", key=f"quick_approve_{record_id}", use_container_width=True):
-                changed = False
-                updated = {
-                    "review_status": "Approved",
-                    "reviewed_by": reviewed_by or "analyst",
-                    "notes": notes,
-                    "is_duplicate": bool(exclude_value),
-                }
-                for key, value in updated.items():
-                    if rec.get(key) != value:
-                        rec[key] = value
-                        changed = True
-                if changed:
-                    overwrite_records(records)
-                    clear_records_cache()
-                    st.success("Approved.")
-                    st.rerun()
-                else:
-                    st.info("Already in this state.")
-        with action_col2:
-            if st.button("Disapprove", key=f"quick_disapprove_{record_id}", use_container_width=True):
-                changed = False
-                updated = {
-                    "review_status": "Disapproved",
-                    "reviewed_by": reviewed_by or "analyst",
-                    "notes": notes or "Marked disapproved during review.",
-                    "is_duplicate": bool(exclude_value),
-                }
-                for key, value in updated.items():
-                    if rec.get(key) != value:
-                        rec[key] = value
-                        changed = True
-                if changed:
-                    overwrite_records(records)
-                    clear_records_cache()
-                    st.success("Disapproved.")
-                    st.rerun()
-                else:
-                    st.info("Already in this state.")
-        with action_col3:
-            if st.button("Keep Pending", key=f"needs_edit_{record_id}", use_container_width=True):
-                changed = False
-                updated = {
-                    "review_status": "Pending",
-                    "reviewed_by": reviewed_by or str(rec.get("reviewed_by") or ""),
-                    "notes": notes or str(rec.get("notes") or ""),
-                    "is_duplicate": bool(exclude_value),
-                }
-                for key, value in updated.items():
-                    if rec.get(key) != value:
-                        rec[key] = value
-                        changed = True
-                if changed:
-                    overwrite_records(records)
-                    clear_records_cache()
-                    st.success("Draft saved.")
-                    st.rerun()
-                else:
-                    st.info("No changes to save.")
-
-        st.markdown("---")
-
-        dr1, dr2 = st.columns([4, 1])
-        with dr1:
-            st.markdown(f"### {rec.get('title', 'Untitled')}")
-        with dr2:
+        st.markdown(f"### {rec.get('title', 'Untitled')}")
+        header_badge_cols = st.columns([1.2, 1.2, 1.2, 1.2])
+        with header_badge_cols[0]:
             ui.status_badge(
                 current_status,
                 kind=("success" if current_status == "Approved" else "warning" if current_status == "Pending" else "danger"),
             )
-        
-        badge_col1, badge_col2, badge_col3, badge_col4 = st.columns([1, 1, 1, 1])
-        with badge_col1:
+        with header_badge_cols[1]:
             _prio = str(rec.get("priority") or "-")
             ui.status_badge(
-                f"P: {_prio}",
+                f"Priority: {_prio}",
                 kind=("danger" if _prio == "High" else "warning" if _prio == "Medium" else "info"),
                 help_text=_priority_help_text(_prio),
             )
-        with badge_col2:
+        with header_badge_cols[2]:
             _conf = str(rec.get("confidence") or "-")
             ui.status_badge(
-                f"C: {_conf}",
+                f"Confidence: {_conf}",
                 kind=("success" if _conf == "High" else "danger" if _conf == "Low" else "info"),
                 help_text=_confidence_help_text(_conf),
             )
-        with badge_col3:
+        with header_badge_cols[3]:
             if bool(brief_history.get(record_id)):
                 ui.status_badge("Briefed", kind="info")
-        with badge_col4:
-            pass
 
-        st.caption(
-            f"Source: {str(rec.get('source_type') or '-')} | "
-            f"Pub: {str(rec.get('publish_date') or '-')} | "
-            f"Added: {str(rec.get('created_at') or '-')[:10]}"
-        )
+        decision_status_key = f"decision_status_{record_id}"
+        if decision_status_key not in st.session_state:
+            st.session_state[decision_status_key] = current_status if current_status in status_options else "Pending"
 
-        rr1, rr2 = st.columns([1.6, 2.4])
-        with rr1:
-            st.markdown("**Priority Reason**")
-            st.caption(_priority_reason_sentence(rec))
-        with rr2:
-            st.markdown("**Confidence Drivers**")
-            conf_header_lines = _confidence_driver_lines(rec)
-            if conf_header_lines:
-                for idx, row in enumerate(conf_header_lines[:4], start=1):
-                    st.caption(f"{idx}. {row}")
-            else:
-                st.caption("No confidence detail available.")
+        ds1, ds2 = st.columns([2.2, 1.0])
+        with ds1:
+            selected_status = st.selectbox(
+                "Status",
+                options=status_options,
+                key=decision_status_key,
+            )
+        with ds2:
+            if st.button("Update Status", type="primary", key=f"update_status_{record_id}", use_container_width=True):
+                changed = False
+                updated = {
+                    "review_status": selected_status,
+                    "reviewed_by": (
+                        reviewed_by or "analyst"
+                        if selected_status in ("Approved", "Disapproved")
+                        else (reviewed_by or str(rec.get("reviewed_by") or ""))
+                    ),
+                    "notes": (
+                        notes or "Marked disapproved during review."
+                        if selected_status == "Disapproved"
+                        else (notes if selected_status == "Approved" else (notes or str(rec.get("notes") or "")))
+                    ),
+                    "is_duplicate": bool(exclude_value),
+                }
+                for key, value in updated.items():
+                    if rec.get(key) != value:
+                        rec[key] = value
+                        changed = True
+                if changed:
+                    overwrite_records(records)
+                    clear_records_cache()
+                    st.success(f"Status updated to {selected_status}.")
+                    st.rerun()
+                else:
+                    st.info("No changes to save.")
+
+        context_col1, context_col2 = st.columns(2)
+        with context_col1:
+            st.markdown(
+                f"**Source:** {str(rec.get('source_type') or '-')}  \n"
+                f"**Publish date:** {str(rec.get('publish_date') or '-')}  \n"
+                f"**Added date:** {str(rec.get('created_at') or '-')[:10]}"
+            )
+        with context_col2:
+            st.markdown(
+                f"**Actor type:** {str(rec.get('actor_type') or '-')}  \n"
+                f"**Regions relevant:** {join_list(rec.get('regions_relevant_to_apex_mobility')) or '-'}"
+            )
 
         if _auto_approve_eligible(rec) and current_status == "Pending":
             st.info("Auto-approve eligible", icon=None)
@@ -1138,17 +1164,16 @@ with detail_col:
         with tab_advanced:
             with st.expander("JSON Editor", expanded=False):
                 st.toggle("Edit mode", value=edit_mode, key=edit_mode_key)
-                st.toggle("Enable tools", value=raw_json_tools_enabled, key=raw_json_tools_key)
+                st.toggle("Enable advanced tools", value=raw_json_tools_enabled, key=raw_json_tools_key)
                 rc1, rc2 = st.columns(2)
                 with rc1:
                     st.selectbox(
                         "Review Status",
                         options=status_options,
-                        index=(status_options.index(status_value) if status_value in status_options else 0),
                         key=status_key,
                     )
                     st.checkbox(
-                        "Exclude from brief",
+                        "Mark as duplicate (exclude from briefs)",
                         value=exclude_value,
                         key=exclude_key,
                     )
@@ -1161,11 +1186,15 @@ with detail_col:
                     height=300,
                     key=json_key,
                 )
-                if parse_requested:
-                    if not ok:
-                        st.warning("Validation errors")
-                        for err in errs[:5]:
-                            st.caption(f"- {err}")
+                if edit_mode and parse_requested and not ok:
+                    st.warning("Validation errors")
+                    for err in errs[:5]:
+                        st.caption(f"- {err}")
+                    hints = _json_editor_hints(errs)
+                    if hints:
+                        st.caption("How to fix")
+                        for hint in hints:
+                            st.caption(f"- {hint}")
                 if edit_mode:
                     if st.button("Save edits", type="secondary", disabled=not ok or rec_obj is None, key=f"save_adv_{record_id}", use_container_width=True):
                         changed = False
@@ -1199,10 +1228,11 @@ with detail_col:
                 else:
                     st.caption("No themes detected.")
 
-            with st.expander("Re-ingest & Debug", expanded=False):
+            with st.expander("Re-ingest", expanded=False):
                 st.caption(f"PDF: `{source_pdf_path or 'None'}`")
                 if source_pdf_path and not pdf_exists:
                     st.warning("PDF file missing")
+                st.caption("This overwrites extracted fields only and resets status to Pending.")
 
                 reingest_provider = st.selectbox(
                     "Model",
@@ -1211,7 +1241,7 @@ with detail_col:
                     key=f"reingest_provider_{record_id}",
                 )
                 reingest_confirm = st.checkbox(
-                    "Replace fields + reset to Pending",
+                    "Replace extracted fields and reset status to Pending",
                     value=False,
                     key=f"confirm_reingest_{record_id}",
                 )
@@ -1244,7 +1274,8 @@ with detail_col:
                     if new_rec is None:
                         st.error(status_msg)
                         if new_router_log:
-                            st.json(new_router_log)
+                            with st.expander("Re-ingest failure details", expanded=False):
+                                st.json(new_router_log)
                     else:
                         old_notes = str(rec.get("notes") or "").strip()
                         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1294,14 +1325,15 @@ with detail_col:
                 del_col1, del_col2 = st.columns(2)
                 with del_col1:
                     delete_record_confirm = st.checkbox(
-                        "Delete record",
+                        "Delete record permanently",
                         value=False,
                         key=f"confirm_delete_record_{record_id}",
                     )
-                    if delete_record_confirm and st.button(
-                        "Delete record",
+                    if st.button(
+                        "Delete record permanently",
                         type="secondary",
                         key=f"delete_record_{record_id}",
+                        disabled=(not delete_record_confirm),
                         use_container_width=True,
                     ):
                         delete_record_pdf_too = True
@@ -1326,15 +1358,15 @@ with detail_col:
 
                 with del_col2:
                     delete_pdf_confirm = st.checkbox(
-                        "Delete PDF only",
+                        "Delete attached PDF only",
                         value=False,
                         key=f"confirm_delete_pdf_{record_id}",
                     )
-                    if delete_pdf_confirm and st.button(
-                        "Delete PDF",
+                    if st.button(
+                        "Delete attached PDF only",
                         type="secondary",
                         key=f"delete_pdf_only_{record_id}",
-                        disabled=(not source_pdf_path),
+                        disabled=(not source_pdf_path or not delete_pdf_confirm),
                         use_container_width=True,
                     ):
                         deleted_file = False
@@ -1360,7 +1392,7 @@ with detail_col:
                             st.info("No PDF found.")
 
 with pdf_col:
-    with ui.card("Original PDF"):
+    with ui.card("Source PDF"):
         if not rec:
             st.info("Select a record from the queue.")
         elif pdf_exists and pdf_path is not None:
@@ -1378,7 +1410,7 @@ with pdf_col:
             except Exception:
                 st.caption("PDF exists but could not be read.")
         elif source_pdf_path:
-            st.caption(f"Original PDF path: `{source_pdf_path}`")
-            st.warning("Original PDF file is missing.")
+            st.caption(f"Source PDF path: `{source_pdf_path}`")
+            st.warning("Source PDF file is missing.")
         else:
-            st.caption("No original PDF attached.")
+            st.caption("No source PDF attached.")
