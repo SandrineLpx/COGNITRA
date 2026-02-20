@@ -11,12 +11,6 @@ st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.p
 enforce_navigation_lock("home")
 ui.init_page(active_step=None)
 
-ui.render_page_header(
-    "Cognitra",
-    subtitle="Automotive market intelligence workspace",
-    active_step=None,
-)
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -59,83 +53,81 @@ high_pri_count = sum(1 for r in canonical if r.get("priority") == "High")
 last_ingest = _format_last_ingest(records)
 
 # ---------------------------------------------------------------------------
-# 1. Problem hook
+# 1. Hero block
 # ---------------------------------------------------------------------------
 
 st.markdown(
-    "<p style='font-size:1.05rem; color:#64748B; margin-bottom:1.5rem;'>"
-    "Automotive intelligence teams subscribe to Bloomberg, S&P Global, and Automotive News "
-    "— then miss signals because volume exceeds processing capacity. "
-    "Cognitra converts unstructured PDFs into evidence-backed intelligence records and "
-    "executive-ready briefs, automatically."
+    "<h1 style='margin:0; font-size:2.2rem; font-weight:700; color:#0F172A; line-height:1.2;'>"
+    "Most intelligence is never shared."
+    "</h1>"
+    "<p style='margin:0.3rem 0 0.5rem; font-size:1.25rem; font-weight:400; color:#64748B;'>"
+    "Because there's too much of it."
+    "</p>"
+    "<p style='margin:0 0 0.25rem; font-size:0.9rem; color:#64748B;'>"
+    "Cognitra structures information into validated records before it allows synthesis."
+    "</p>"
+    "<div class='cg-divider'></div>",
+    unsafe_allow_html=True,
+)
+
+# ---------------------------------------------------------------------------
+# 2. Differentiator statement
+# ---------------------------------------------------------------------------
+
+st.markdown(
+    "<p style='text-align:center; font-size:0.95rem; font-style:italic; "
+    "color:#64748B; margin:0.75rem 0 1.25rem;'>"
+    "This is not a summarization tool. It is a controlled intelligence architecture."
     "</p>",
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# 2. Live KPI row
+# 3. Live metrics row
 # ---------------------------------------------------------------------------
 
 k1, k2, k3, k4 = st.columns(4)
 with k1:
-    ui.kpi_card("Intelligence Records", len(canonical), caption="Canonical, non-duplicate")
+    ui.kpi_card("Validated Records", len(canonical), caption="Structured and approved")
 with k2:
-    ui.kpi_card("Awaiting Review", pending_count, caption="Pending analyst approval")
+    ui.kpi_card("Pending Governance", pending_count, caption="Awaiting analyst sign-off")
 with k3:
-    ui.kpi_card("High-Priority Signals", high_pri_count, caption="Surfaced for executive briefing")
+    ui.kpi_card("Surfaced Signals", high_pri_count, caption="Escalated by deterministic rules")
 with k4:
-    ui.kpi_card("Last Ingest", last_ingest, caption="Most recent article processed")
+    ui.kpi_card("Latest Structured Ingest", last_ingest, caption="Last document structured")
 
 # ---------------------------------------------------------------------------
-# 3. Workflow guide
+# 4. Architecture strip
 # ---------------------------------------------------------------------------
 
-_STEPS = [
-    ("Ingest", "Upload PDFs, extract structured records via Gemini LLM"),
-    ("Review", "Validate, edit, and approve records before briefing"),
-    ("Brief", "AI-synthesized weekly executive briefs in one click"),
-    ("Insights", "Track topic momentum, company signals, and quality trends"),
-    ("Admin", "Export data, run quality checks, manage maintenance"),
+_PIPELINE = [
+    ("Extract", "Strict JSON schema — factual fields only"),
+    ("Score", "Priority \u00b7 Confidence \u00b7 Macro-themes — deterministic rules"),
+    ("Approve", "Analyst review — human gate before any synthesis"),
+    ("Render", "From validated records only — never from raw PDFs"),
 ]
 
-with ui.card("How it works", "Use the left sidebar to navigate to any step."):
-    cols = st.columns(len(_STEPS))
-    for col, (step, desc) in zip(cols, _STEPS):
+with ui.card("STRUCTURE BEFORE SYNTHESIS", "Use the left sidebar to navigate to any step."):
+    cols = st.columns(len(_PIPELINE))
+    for col, (step, desc) in zip(cols, _PIPELINE):
         with col:
             st.markdown(f"**{step}**")
             st.caption(desc)
 
 # ---------------------------------------------------------------------------
-# 4. Design philosophy
+# 5. Controlled AI usage
 # ---------------------------------------------------------------------------
 
-_PILLARS = [
-    (
-        "One LLM call per document",
-        "Extraction only. Deduplication, priority classification, confidence scoring, "
-        "and macro theme detection are deterministic Python — auditable and cost-predictable.",
-    ),
-    (
-        "Evidence-backed records",
-        "Every record carries 2–4 verifiable bullets traceable to source text. "
-        "No summaries, no hallucinations dressed up as facts.",
-    ),
-    (
-        "Human-in-the-loop gate",
-        "No record reaches an executive brief without analyst review. "
-        "Auto-approve heuristics handle clean extractions; weak ones stay Pending.",
-    ),
-]
-
-with ui.card("Minimal AI — by design"):
-    p1, p2, p3 = st.columns(3)
-    for col, (title, desc) in zip([p1, p2, p3], _PILLARS):
-        with col:
-            st.markdown(f"**{title}**")
-            st.caption(desc)
+with ui.card("Controlled AI Usage"):
+    st.markdown(
+        "- One model call per document\n"
+        "- Deterministic postprocessing\n"
+        "- No synthesis from raw PDFs\n"
+        "- Human review before reporting"
+    )
 
 # ---------------------------------------------------------------------------
-# 5. CSV drift warning (operational — keep at bottom)
+# 6. CSV drift warning (operational — keep at bottom)
 # ---------------------------------------------------------------------------
 
 _csv_warnings = _cached_csv_warnings(_path_signature(Path("data/new_country_mapping.csv")))
