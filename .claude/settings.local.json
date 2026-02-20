@@ -27,7 +27,15 @@
       "Bash(cmd /c \"\"\"C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.venv\\\\Scripts\\\\python.exe\"\" -m pytest \"\"C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.claude\\\\worktrees\\\\nice-tharp\\\\tests\\\\test_scenarios.py\"\" -v -k SingleRecord 2>&1\")",
       "Bash(powershell -Command:*)",
       "Bash(gh repo view:*)",
-      "Bash(gh pr list:*)"
+      "Bash(gh pr list:*)",
+      "Bash(python3:*)",
+      "Bash(dir:*)",
+      "Bash(.venvScriptsactivate.bat)",
+      "Bash(.venvScriptspython.exe -m pytest:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m pytest tests/test_scenarios.py -v --tb=short)",
+      "Bash(powershell -NoProfile -Command:*)",
+      "Bash(powershell.exe -NoProfile -Command \"& ''C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.venv\\\\Scripts\\\\python.exe'' -m pytest ''C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.claude\\\\worktrees\\\\nice-tharp\\\\tests\\\\test_scenarios.py'' -v --tb=short 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"& ''C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.venv\\\\Scripts\\\\python.exe'' -m pytest ''C:\\\\Users\\\\sandr\\\\OneDrive\\\\11_MSIS\\\\549B - AI Machine Learning\\\\COGNITRA\\\\.claude\\\\worktrees\\\\nice-tharp\\\\tests\\\\'' -v --tb=short 2>&1\")"
     ]
   }
 }
