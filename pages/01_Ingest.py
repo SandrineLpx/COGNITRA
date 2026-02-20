@@ -1102,7 +1102,7 @@ if bulk_results:
 
 brief_md = st.session_state.get("ingest_last_brief_md")
 if brief_md:
-    with ui.card("Rendered Intelligence Brief"):
+    with st.expander("Rendered Intelligence Brief", expanded=False):
         st.code(brief_md, language="markdown")
 
 debug_payload = st.session_state.get("ingest_last_debug")

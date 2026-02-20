@@ -420,10 +420,13 @@ if df.empty:
     st.info("No records after selection.")
     st.stop()
 
-# Compute effective date once (publish_date only)
+# Compute date columns for both publish_date and created_at
 publish_dt = pd.to_datetime(df.get("publish_date"), errors="coerce", utc=True).dt.tz_convert(None)
 df["publish_date_dt"] = publish_dt
 df["event_day"] = publish_dt.dt.normalize()
+
+created_dt = pd.to_datetime(df.get("created_at"), errors="coerce", utc=True).dt.tz_convert(None)
+df["created_date_dt"] = created_dt.dt.normalize()
 
 today = pd.Timestamp.today().normalize()
 default_from = (today - pd.Timedelta(days=7)).date()
@@ -445,7 +448,7 @@ all_topics = sorted(
     }
 )
 
-f1, f2, f3, f4, f5 = st.columns([2.0, 1.3, 1.4, 1.0, 1.0])
+f1, f2, f3, f4, f5 = st.columns([2.0, 1.3, 1.4, 1.0, 1.6])
 with f1:
     filter_search = st.text_input(
         "Search records",
@@ -468,22 +471,33 @@ with f3:
         label_visibility="collapsed",
     )
 with f4:
-    date_from = st.date_input(
-        "From",
-        value=default_from,
-        key="ins_date_from",
+    date_basis = st.selectbox(
+        "Date basis",
+        options=["Published date", "Upload date"],
+        key="ins_date_basis",
         label_visibility="collapsed",
     )
 with f5:
-    date_to = st.date_input(
-        "To",
-        value=default_to,
-        key="ins_date_to",
+    date_range = st.date_input(
+        "Date range",
+        value=(default_from, default_to),
+        key="ins_date_range",
         label_visibility="collapsed",
     )
+    # Handle both single date and range inputs
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        date_from, date_to = date_range
+    else:
+        date_from = date_to = date_range
 mask = pd.Series(True, index=df.index)
-mask = mask & df["publish_date_dt"].notna()
-mask = mask & (df["event_day"] >= pd.Timestamp(date_from)) & (df["event_day"] <= pd.Timestamp(date_to))
+# Select date column based on basis
+if date_basis == "Upload date":
+    date_column = df["created_date_dt"]
+    mask = mask & date_column.notna()
+else:
+    date_column = df["event_day"]
+    mask = mask & df["publish_date_dt"].notna()
+mask = mask & (date_column >= pd.Timestamp(date_from)) & (date_column <= pd.Timestamp(date_to))
 if "review_status" in df:
     mask = mask & df["review_status"].astype(str).isin(["Approved"])
 if filter_region != "All Regions":

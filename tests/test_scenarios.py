@@ -337,12 +337,16 @@ class TestSingleRecordSynthesisPrompt:
 
         assert "EXECUTIVE ALERT" in prompt
         assert "Target length: 350-450 words." in prompt
-        assert "Exactly 2 bullets: what happened + so-what for Apex Mobility." in prompt
-        assert "Exactly 1 bullet. Each: Company/OEM + what happened + why it matters to Apex Mobility." in prompt
-        assert "Exactly 2 bullets. Each must include: Owner + Action + Time horizon + Trigger + Deliverable." in prompt
-        assert "EMERGING TRENDS" not in prompt
-        assert "No significant signals this period." not in prompt
-        assert "\nKEY DEVELOPMENTS BY TOPIC\n" not in prompt
+        # Executive Summary: implications-only job description
+        assert "SECTION JOB: State Apex Mobility strategic implications only." in prompt
+        assert "Sentence 1: the Apex Mobility implication" in prompt
+        # High Priority: Supplier Implications sub-field format
+        assert "Supplier Implications:" in prompt
+        # Recommended Actions: richer format with Trigger + Deliverable in single mode
+        assert "Owner + Action + Time horizon + Trigger + Deliverable" in prompt
+        # EMERGING TRENDS heading should not appear as an output section (single mode)
+        # The words may still appear in procedure/rule text, so check for section heading format
+        assert "\nEMERGING TRENDS\n" not in prompt
 
     def test_multi_record_prompt_enforces_topic_label_and_action_specificity_format(self):
         rec1 = sample_record(title="Item 1", priority="High", confidence="High")

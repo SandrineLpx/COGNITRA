@@ -840,8 +840,9 @@ default_publish_to = max([today, *publish_dates]) if publish_dates else today
 
 def _reset_brief_filters() -> None:
     st.session_state["wb_hide_shared"] = True
-    st.session_state["wb_days"] = int(default_days)
     st.session_state["wb_basis"] = "Record added date (created_at)"
+    st.session_state["wb_date_from"] = default_record_from
+    st.session_state["wb_date_to"] = default_record_to
     st.session_state["wb_include_excluded"] = False
     st.session_state["wb_share_ready"] = False
     st.session_state["wb_use_publish_range"] = False
@@ -878,7 +879,6 @@ with tab_saved:
 
 with tab_build:
     st.subheader("Selection Workspace")
-    days = int(st.session_state.get("wb_days", int(default_days)))
     basis_label = str(st.session_state.get("wb_basis", "Record added date (created_at)"))
     hide_already_shared = bool(st.session_state.get("wb_hide_shared", True))
 
@@ -901,9 +901,12 @@ with tab_build:
     web_check_enabled = False
     model_override = ""
 
-    week_range = f"Last {int(days)} days by {date_basis_field}"
+    # Get date range from session state (set in filter section)
+    filter_date_from = st.session_state.get("wb_date_from", default_record_from)
+    filter_date_to = st.session_state.get("wb_date_to", default_record_to)
+    week_range = f"{filter_date_from} to {filter_date_to} by {date_basis_field}"
+    
     candidates_seed = select_weekly_candidates(records, days=36500, include_excluded=include_excluded)
-    cutoff = date.today() - timedelta(days=int(days))
 
     missing_basis_dates = 0
     time_window_candidates: List[Dict[str, Any]] = []
@@ -912,7 +915,7 @@ with tab_build:
         if not rd:
             missing_basis_dates += 1
             continue
-        if rd >= cutoff:
+        if filter_date_from <= rd <= filter_date_to:
             time_window_candidates.append(rec)
 
     brief_history = load_brief_history()
@@ -967,21 +970,31 @@ with tab_build:
                 key="wb_quick_source",
                 label_visibility="collapsed",
             )
-        c1, c2 = st.columns([1.4, 1.8])
+        c1, c2 = st.columns([1.2, 1.8])
         with c1:
-            days = st.number_input("Days back", min_value=3, max_value=90, step=1, key="wb_days")
-            hide_already_shared = st.checkbox(
-                "Hide records already included in saved briefs",
-                value=True,
-                key="wb_hide_shared",
-            )
-        with c2:
             basis_label = st.selectbox(
-                "Time basis",
+                "Date basis",
                 options=["Published date (publish_date)", "Record added date (created_at)"],
                 index=1,
                 key="wb_basis",
             )
+        with c2:
+            date_range = st.date_input(
+                "Date range",
+                value=(st.session_state.get("wb_date_from", default_record_from), st.session_state.get("wb_date_to", default_record_to)),
+                key="wb_date_range",
+                label_visibility="collapsed",
+            )
+            # Handle both single date and range inputs
+            if isinstance(date_range, tuple) and len(date_range) == 2:
+                filter_date_from, filter_date_to = date_range
+            else:
+                filter_date_from = filter_date_to = date_range
+        hide_already_shared = st.checkbox(
+            "Hide records already included in saved briefs",
+            value=True,
+            key="wb_hide_shared",
+        )
 
     if quick_region != "All Regions" and not region_filter:
         region_filter = [quick_region]
