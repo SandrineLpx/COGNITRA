@@ -361,14 +361,15 @@ class TestSingleRecordSynthesisPrompt:
         rec = sample_record(title="Single item", priority="High", confidence="High")
         prompt = _build_synthesis_prompt([rec], "Feb 5-12, 2026")
 
-        assert "EXECUTIVE ALERT" in prompt
+        assert "AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF" in prompt
         assert "Target length: 350-450 words." in prompt
         # Executive Summary: implications-only job description
         assert "SECTION JOB: State Apex Mobility strategic implications only." in prompt
-        assert "Exactly 2 bullets. Each bullet: maximum 3 sentences." in prompt
+        assert "Sentence 1: the Apex Mobility implication" in prompt
         # High Priority: Supplier Implications sub-field format
         assert "Supplier Implications:" in prompt
-        assert "Exactly 2 bullets. Each must include: Owner + Action + Time horizon." in prompt
+        # Recommended Actions: richer format with Trigger + Deliverable in single mode
+        assert "Owner + Action + Time horizon + Trigger + Deliverable" in prompt
         # EMERGING TRENDS heading should not appear as an output section (single mode)
         # The words may still appear in procedure/rule text, so check for section heading format
         assert "\nEMERGING TRENDS\n" not in prompt
