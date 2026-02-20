@@ -426,7 +426,7 @@ df["publish_date_dt"] = publish_dt
 df["event_day"] = publish_dt.dt.normalize()
 
 today = pd.Timestamp.today().normalize()
-default_from = (today - pd.Timedelta(days=30)).date()
+default_from = (today - pd.Timedelta(days=7)).date()
 default_to = today.date()
 all_regions = sorted(
     {
@@ -530,19 +530,19 @@ closure_top_region_count = closure_regions.most_common(1)[0][1] if closure_regio
 sx1, sx2, sx3, sx4 = st.columns(4)
 with sx1:
     ui.kpi_card(
-        "Topic Signals (7d)",
+        "Topic Signals",
         recent_topic_total,
         caption=f"Change vs prior week: {_signed_int(topic_signal_delta)}",
     )
 with sx2:
     ui.kpi_card(
-        "Active Topics (7d)",
+        "Active Topics",
         active_topics,
         caption="Distinct active topic clusters this week",
     )
 with sx3:
     ui.kpi_card(
-        "Closure-System Mentions (7d)",
+        "Closure-System Mentions",
         closure_recent_n,
         caption=f"Change vs prior week: {_signed_int(closure_delta)}",
     )
@@ -609,6 +609,9 @@ company_counts_df = (
     .head(7)
     if not company_long.empty else pd.DataFrame(columns=["company", "records"])
 )
+if not company_counts_df.empty:
+    company_counts_df = company_counts_df.copy()
+    company_counts_df["rank"] = list(range(1, len(company_counts_df) + 1))
 
 t1, t2 = st.columns(2, gap="large")
 with t1:
@@ -703,6 +706,7 @@ with st.expander("Record insights", expanded=False):
                     tooltip=["event_week:T", "source_type:N", "count:Q"],
                 )
                 .properties(height=280)
+                .interactive()
             )
             st.altair_chart(chart, width='stretch')
         else:
@@ -758,7 +762,7 @@ with st.expander("Record insights", expanded=False):
                     .properties(height=max(260, len(momentum) * 30))
                 )
                 rule = alt.Chart(pd.DataFrame({"x": [0]})).mark_rule().encode(x="x:Q")
-                st.altair_chart(chart + rule, width='stretch')
+                st.altair_chart((chart + rule).interactive(), width='stretch')
             else:
                 st.caption("Not enough topic data for momentum chart.")
         else:
@@ -886,9 +890,9 @@ with st.expander("Record insights", expanded=False):
                         text=alt.Text("value:Q", format=value_fmt),
                         color=alt.condition(f"datum.value > {label_threshold}", alt.value("white"), alt.value("#0f172a")),
                     )
-                    st.altair_chart(heat + labels, width='stretch')
+                    st.altair_chart((heat + labels).interactive(), width='stretch')
                 else:
-                    st.altair_chart(heat, width='stretch')
+                    st.altair_chart(heat.interactive(), width='stretch')
             else:
                 st.caption("No region-topic pairs for matrix.")
         else:
@@ -1062,7 +1066,7 @@ with st.expander("Quality related", expanded=False):
                     .encode(y="Score:Q")
                 )
 
-                st.altair_chart(lines + good_rule + warning_rule, width='stretch')
+                st.altair_chart((lines + good_rule + warning_rule).interactive(), width='stretch')
         else:
             st.caption("Need at least 2 QC runs to show trend chart.")
     else:
