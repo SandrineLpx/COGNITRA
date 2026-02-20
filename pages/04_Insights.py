@@ -484,9 +484,15 @@ with f5:
         key="ins_date_range",
         label_visibility="collapsed",
     )
-    # Handle both single date and range inputs
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        date_from, date_to = date_range
+    # Handle incomplete date range selection
+    if isinstance(date_range, tuple):
+        if len(date_range) == 2:
+            date_from, date_to = date_range
+        elif len(date_range) == 1:
+            st.warning("⚠️ Please select both start and end dates for the range.")
+            date_from = date_to = date_range[0]
+        else:
+            date_from = date_to = default_from
     else:
         date_from = date_to = date_range
 mask = pd.Series(True, index=df.index)

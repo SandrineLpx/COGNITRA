@@ -386,8 +386,6 @@ def render_sidebar_utilities(
     with st.sidebar:
         st.markdown('<div class="cg-sidebar-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="cg-util-label">Utilities</div>', unsafe_allow_html=True)
-        with st.expander("Model (routing)", expanded=False):
-            st.caption(str(model_label or "auto"))
         with st.expander("API quota", expanded=False):
             st.caption(f"Tracking date: {reset_date()}")
             if not usage:
@@ -399,6 +397,8 @@ def render_sidebar_utilities(
                 rem = int(info.get("remaining", 0))
                 pct = used / max(quota, 1)
                 st.progress(min(pct, 1.0), text=f"{short}: {used}/{quota} ({rem} left)")
+        with st.expander("Model (routing)", expanded=False):
+            st.caption(str(model_label or "auto"))
         with st.expander("Overrides applied", expanded=False):
             _render_override_items(overrides or {})
 

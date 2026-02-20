@@ -290,10 +290,16 @@ def _extract_brief_lines_by_section(text: str) -> List[Tuple[str, str]]:
 def _validate_brief_text_for_qc(brief_text: str, valid_ids: set[str]) -> List[str]:
     errors: List[str] = []
     has_rec_labels = bool(_REC_REF_RE.search(brief_text or ""))
+    exec_bullets: List[str] = []
     for section, line in _extract_brief_lines_by_section(brief_text):
         text = line.strip()
         if not text:
             continue
+        if section == "EXECUTIVE SUMMARY":
+            if not _is_bullet_line(text):
+                errors.append(f"EXECUTIVE SUMMARY must be bullets only (remove prose line): {text[:120]}")
+                continue
+            exec_bullets.append(text)
         refs = _rec_refs(text)
         if refs:
             invalid = [r for r in refs if valid_ids and r not in valid_ids]
@@ -304,6 +310,17 @@ def _validate_brief_text_for_qc(brief_text: str, valid_ids: set[str]) -> List[st
             if _is_structural_topic_label_bullet(text, section):
                 continue
             errors.append(f"Uncited bullet claim in {section}: {text[:120]}")
+    if exec_bullets:
+        apex_openers = 0
+        for line in exec_bullets:
+            cleaned = re.sub(r"^\s*[-*â€¢]\s*", "", str(line or "")).strip()
+            cleaned = cleaned.replace("*", "").replace("_", "").replace("`", "").strip()
+            if cleaned.lower().startswith("apex mobility"):
+                apex_openers += 1
+        if apex_openers > 1:
+            errors.append(
+                "EXECUTIVE SUMMARY opener repetition: no more than one bullet may start with 'Apex Mobility'."
+            )
     return errors
 
 
@@ -358,7 +375,37 @@ def _choose_brief_mode(n: int) -> Dict[str, Any]:
     # NOTE: include_topics removed — KEY DEVELOPMENTS BY TOPIC section eliminated.
 
 
+def _normalize_week_range_for_prompt(week_range: str) -> str:
+    s = str(week_range or "").strip()
+    if not s:
+        end = date.today()
+        start = end - timedelta(days=30)
+        return f"{start} to {end} (Publish date)"
+
+    if " to " in s and re.search(r"\d{4}-\d{2}-\d{2}", s):
+        return s
+
+    m = re.match(r"^last\s+(\d+)\s+days(?:\s+by\s+([a-z_ ]+))?$", s, flags=re.IGNORECASE)
+    if not m:
+        return s
+
+    days = max(1, int(m.group(1)))
+    end = date.today()
+    start = end - timedelta(days=days)
+
+    basis_raw = str(m.group(2) or "").strip().lower()
+    if basis_raw in {"created_at", "upload date", "upload_date", "created"}:
+        basis_label = "Upload date"
+    elif basis_raw in {"publish_date", "publish date", "published", "publication date"}:
+        basis_label = "Publish date"
+    else:
+        basis_label = ""
+
+    return f"{start} to {end}" + (f" ({basis_label})" if basis_label else "")
+
+
 def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
+    period_label = _normalize_week_range_for_prompt(week_range)
     mode = _choose_brief_mode(len(records))
     is_single = mode["name"] == "single"
     focused_regions = _focused_footprint_regions(records, max_items=8)
@@ -375,13 +422,19 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         else "Draft a weekly executive brief."
     )
 
-    # ── EXECUTIVE SUMMARY: implications only, no raw OEM facts ──────────────
+    # ── EXECUTIVE SUMMARY: portfolio outlook only, no raw OEM facts ─────────
     exec_section = (
-        "SECTION JOB: State Apex Mobility strategic implications only. "
+        "SECTION JOB: State Apex Mobility portfolio-level strategic outlook only. "
         "Do NOT restate OEM event descriptions — the reader gets those from High Priority Developments. "
         "Lead every bullet with the business consequence for Apex Mobility, not the triggering event.\n"
+        "- Output bullets only in this section. Do NOT include any introductory prose paragraph.\n"
+        "- Audience context: readers are Apex Mobility leadership. Avoid repetitive sentence starts with "
+        "'Apex Mobility...'; vary bullet openers while keeping Apex implications explicit.\n"
+        "- Do NOT include item-level supplier implications here; those belong only in the "
+        "'Supplier Implications' sub-field under High Priority Developments.\n"
         "- Exactly 2 bullets. Each bullet: maximum 3 sentences structured as:\n"
-        "  * Sentence 1: the Apex Mobility implication (name the specific risk or opportunity).\n"
+        "  * Sentence 1: the implication (name the specific risk or opportunity; do not default to "
+        "starting with 'Apex Mobility').\n"
         "  * Sentence 2: supporting evidence — you MAY name the OEM, but frame it as evidence "
         "for the implication, not as a description of what the OEM did.\n"
         "    CORRECT: 'Apex Mobility faces pricing pressure on Stellantis ICE programs given the "
@@ -396,9 +449,14 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "- End each bullet with (REC:<id>).\n\n"
         if is_single
         else (
-            "SECTION JOB: State Apex Mobility strategic implications only. "
+            "SECTION JOB: State Apex Mobility portfolio-level strategic outlook only. "
             "Do NOT restate OEM event descriptions — the reader gets those from High Priority Developments. "
             "Lead every bullet with the business consequence for Apex Mobility, not the triggering event.\n"
+            "- Output bullets only in this section. Do NOT include any introductory prose paragraph.\n"
+            "- Audience context: readers are Apex Mobility leadership. Avoid repetitive sentence starts with "
+            "'Apex Mobility...'; vary bullet openers while keeping Apex implications explicit.\n"
+            "- Do NOT include item-level supplier implications here; those belong only in the "
+            "'Supplier Implications' sub-field under High Priority Developments.\n"
             f"- {mode['exec_bullets']} bullets maximum. Each bullet synthesizes a cross-record theme "
             "through the Apex Mobility lens:\n"
             "  * Closure systems demand / technology shifts\n"
@@ -407,7 +465,8 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
             "  * Pricing pressure and supplier margin impact\n"
             "  * Supply chain disruptions affecting door-module BOM\n"
             "- Each bullet: maximum 3 sentences structured as:\n"
-            "  * Sentence 1: the Apex Mobility implication (lead with consequence, not event).\n"
+            "  * Sentence 1: the implication (lead with consequence, not event; do not default to "
+            "starting with 'Apex Mobility').\n"
             "  * Sentence 2: supporting evidence — you MAY name the OEM, but frame it as evidence "
             "for the implication, not as a description of what the OEM did.\n"
             "    CORRECT: 'Apex Mobility faces pricing pressure on Stellantis ICE programs given the "
@@ -455,8 +514,9 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "  * [OEM/Company] — [What happened, 1-2 sentences, include exact numbers if available]. (REC:<id>)\n"
         "    Supplier Implications: [1 sentence: what this means specifically for Apex Mobility — "
         "closure systems volume, pricing, program timing, footprint, or technology content.]\n"
-        "  NOTE: All Apex Mobility supplier implications belong ONLY in the 'Supplier Implications' "
-        "sub-field. Do NOT repeat supplier implications in the Executive Summary or Emerging Trends.\n"
+        "  NOTE: Item-level Apex Mobility supplier implications belong ONLY in the 'Supplier Implications' "
+        "sub-field. Executive Summary is for portfolio-level outlook only; do NOT repeat item-level "
+        "supplier implications there or in Emerging Trends.\n"
         "  Medium-priority records: include only as a sub-bullet under the most relevant High Priority "
         "item if they add unique detail. Do not create standalone bullets for medium-priority items.\n"
     )
@@ -539,7 +599,7 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "You are a competitive intelligence analyst for Apex Mobility, a global automotive "
         "closure systems supplier (door latches, strikers, handles, smart entry, cinch "
         f"systems, window regulators). {intro}\n\n"
-        f"Period: {week_range}\n"
+        f"Period: {period_label}\n"
         f"Records provided: {len(records)}\n"
         f"Target length: {mode['max_words']} words.\n\n"
         "SYNTHESIS PROCEDURE (follow in order, do not skip)\n"
@@ -565,8 +625,8 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "7. SECTION DISCIPLINE: each section has a distinct, non-overlapping job (see instructions per section below). "
         "A fact or implication must appear in exactly ONE section:\n"
         "   - OEM event facts → HIGH PRIORITY DEVELOPMENTS body\n"
-        "   - Apex Mobility supplier implications → 'Supplier Implications' sub-field of each High Priority item\n"
-        "   - Strategic outlook for Apex Mobility → EXECUTIVE SUMMARY\n"
+        "   - Item-level Apex Mobility supplier implications → 'Supplier Implications' sub-field of each High Priority item\n"
+        "   - Portfolio-level strategic outlook for Apex Mobility → EXECUTIVE SUMMARY\n"
         "   - Forward projections → EMERGING TRENDS\n"
         "   - Regional specifics → FOOTPRINT REGION SIGNALS (only if not already in High Priority body)\n"
         "8. ROUTE MEDIUM-PRIORITY RECORDS: records with priority=Medium may only appear as "
@@ -591,7 +651,7 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         "- If 5+ records: Executive Summary 4-5 bullets and include theme clustering.\n\n"
         "OUTPUT STRUCTURE (use these exact headings)\n\n"
         f"{title_heading}\n"
-        f"Period: {week_range}\n"
+        f"Period: {period_label}\n"
         "Prepared by: Cognitra AI\n\n"
         "EXECUTIVE SUMMARY\n"
         + exec_section
@@ -626,6 +686,9 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
         + "'This necessitates', 'This underscores', 'This highlights', 'This suggests', or 'This reflects' "
         + "as a standalone clause opener following a comma or period. Use subject-verb constructions "
         + "(e.g., 'Apex Mobility faces...', 'Procurement should expect...', 'The shift implies...').\n"
+        + "- EXECUTIVE SUMMARY STYLE VARIETY: do not start more than one Executive Summary bullet with "
+        + "'Apex Mobility'. Vary sentence openers (e.g., 'North America programs...', 'Supplier margins...', "
+        + "'Door-module demand...') while preserving Apex-specific implications.\n"
         + "- NO SECTION REPETITION: each fact or implication appears in exactly one section. See step 7.\n"
         + "- FOOTPRINT QUALITY FLOOR: region entries must pass the three-part test. See step 9 CHECK C.\n"
         + "- TRENDS SPECIFICITY: every Emerging Trend bullet must contain at least one proper noun "

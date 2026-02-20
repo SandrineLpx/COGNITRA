@@ -3,6 +3,9 @@ import pandas as pd
 import re
 from collections import Counter
 from datetime import datetime
+from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urlparse
+from urllib.request import Request, urlopen
 from src import ui
 from src.storage import new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
 from src.pdf_extract import extract_text_robust, extract_pdf_publish_date_hint
@@ -29,6 +32,7 @@ _RULE_LABELS = {
     "priority_changed_by_rules": "Priority changed by rules",
     "computed_confidence": "Confidence recomputed",
 }
+_MAX_SOURCE_PDF_BYTES = 50 * 1024 * 1024
 
 
 def _friendly_rule_name(rule: str) -> str:
@@ -69,6 +73,74 @@ def _title_guess_from_filename(filename: str) -> str:
     name = re.sub(r"[_\-]+", " ", name)
     name = re.sub(r"\s+", " ", name).strip()
     return name
+
+
+def _filename_from_content_disposition(value: str) -> str:
+    cd = str(value or "").strip()
+    if not cd:
+        return ""
+    m_star = re.search(r"filename\*=UTF-8''([^;]+)", cd, flags=re.IGNORECASE)
+    if m_star:
+        return unquote(str(m_star.group(1) or "").strip().strip('"'))
+    m_basic = re.search(r'filename="?([^";]+)"?', cd, flags=re.IGNORECASE)
+    if m_basic:
+        return str(m_basic.group(1) or "").strip()
+    return ""
+
+
+def _filename_from_url(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    candidate = unquote((parsed.path.rsplit("/", 1)[-1] if parsed.path else "")).strip()
+    if not candidate:
+        return ""
+    return candidate
+
+
+def _download_pdf_from_url(url: str) -> tuple[bytes | None, str | None, str]:
+    target = str(url or "").strip()
+    if not target:
+        return None, None, "No URL provided."
+    parsed = urlparse(target)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        return None, None, "URL must start with http:// or https://."
+
+    req = Request(
+        target,
+        headers={
+            "User-Agent": "Cognitra/1.0",
+            "Accept": "application/pdf,*/*;q=0.8",
+        },
+    )
+    try:
+        with urlopen(req, timeout=20) as resp:
+            content_type = str(resp.headers.get("Content-Type") or "").lower()
+            content_disposition = str(resp.headers.get("Content-Disposition") or "")
+            content_len_raw = str(resp.headers.get("Content-Length") or "").strip()
+            if content_len_raw.isdigit() and int(content_len_raw) > _MAX_SOURCE_PDF_BYTES:
+                return None, None, "Source PDF exceeds 50 MB."
+
+            data = resp.read(_MAX_SOURCE_PDF_BYTES + 1)
+            if len(data) > _MAX_SOURCE_PDF_BYTES:
+                return None, None, "Source PDF exceeds 50 MB."
+
+            looks_like_pdf = (
+                data.startswith(b"%PDF-")
+                or "application/pdf" in content_type
+                or parsed.path.lower().endswith(".pdf")
+            )
+            if not looks_like_pdf:
+                return None, None, "URL did not return a PDF."
+
+            file_name = _filename_from_content_disposition(content_disposition) or _filename_from_url(target) or "source.pdf"
+            if not file_name.lower().endswith(".pdf"):
+                file_name = f"{file_name}.pdf"
+            return data, file_name, "Attached source PDF from URL."
+    except HTTPError as exc:
+        return None, None, f"Could not download URL PDF (HTTP {exc.code})."
+    except URLError:
+        return None, None, "Could not download URL PDF (network error)."
+    except Exception:
+        return None, None, "Could not download URL PDF."
 
 
 _SYSTEM_STATUS_STEPS = [
@@ -214,10 +286,7 @@ ui.render_page_header(
 )
 render_navigation_lock_notice("ingest")
 
-with st.sidebar:
-    with st.expander("Model selector", expanded=False):
-        provider = st.selectbox("Model", ["auto", "gemini", "claude", "chatgpt"], index=0, key="ing_model")
-        st.caption("Strict routing: fallback only on schema failure.")
+provider = "auto"
 
 ui.render_sidebar_utilities(
     model_label=provider,
@@ -244,11 +313,11 @@ left_col, right_col = st.columns([1.8, 1.0], gap="large")
 
 with left_col:
     with ui.card("Upload Source"):
-        tab_pdf, tab_text = st.tabs(["Upload PDF", "Paste text"])
+        tab_pdf, tab_text = st.tabs(["PDF files", "Paste text"])
 
         with tab_pdf:
             uploaded_files = st.file_uploader(
-                "Upload PDFs",
+                "Select PDF files",
                 type=["pdf"],
                 accept_multiple_files=True,
                 key="ing_upload_files",
@@ -276,9 +345,9 @@ with left_col:
             active_mode = "paste_text"
         st.session_state["ingest_active_mode"] = active_mode
 
-        cta_label = "Generate Intelligence Record"
+        cta_label = "Extract Intelligence Record"
         if active_mode == "upload_pdf" and is_bulk:
-            cta_label = "Generate Intelligence Records"
+            cta_label = "Extract Intelligence Records"
         run_clicked = st.button(cta_label, type="primary", width='stretch', key="ing_primary_cta")
 
 with right_col:
@@ -1043,7 +1112,21 @@ if run_clicked:
                 _set_system_status("running", step="save", message="Saving record")
                 _render_system_status(status_slot)
                 record_id = new_record_id()
-                rec, save_status = _finalize_record(rec, router_log, record_id, None, records)
+                url_pdf_path = None
+                url_pdf_note = ""
+                source_url_for_pdf = str(rec.get("original_url") or original_url_input or "").strip()
+                if source_url_for_pdf:
+                    url_pdf_bytes, url_pdf_name, url_pdf_note = _download_pdf_from_url(source_url_for_pdf)
+                    if url_pdf_bytes:
+                        try:
+                            url_pdf_path = save_pdf_bytes(record_id, url_pdf_bytes, url_pdf_name or "source.pdf")
+                        except Exception:
+                            url_pdf_path = None
+                            url_pdf_note = "Could not save downloaded URL PDF."
+
+                rec, save_status = _finalize_record(rec, router_log, record_id, url_pdf_path, records)
+                if url_pdf_path:
+                    save_status = f"{save_status} (source PDF attached from URL)"
                 overwrite_records(records + [rec])
                 clear_records_cache()
 
@@ -1057,6 +1140,7 @@ if run_clicked:
                     "context_pack": selected.get("context_pack") if show_selected_chunks_paste else "",
                     "record": rec,
                     "router_log": router_log,
+                    "source_url_pdf_note": url_pdf_note,
                     "validation_errors": validate_record(rec)[1],
                 }
                 _set_system_status(

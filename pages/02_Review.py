@@ -593,11 +593,7 @@ created_dates = pd.to_datetime(df["_created_dt"], errors="coerce")
 valid_created_dates = created_dates.dropna()
 publish_dates = pd.to_datetime(df["_publish_dt"], errors="coerce")
 valid_publish_dates = publish_dates.dropna()
-default_record_from = (
-    valid_created_dates.min().date()
-    if not valid_created_dates.empty
-    else (today - pd.Timedelta(days=3650)).date()
-)
+default_record_from = (today - pd.Timedelta(days=7)).date()
 default_record_to = max(
     today.date(),
     (valid_created_dates.max().date() if not valid_created_dates.empty else today.date()),
@@ -619,12 +615,13 @@ all_topics = sorted({str(x) for v in df.get("topics", []) for x in (v or []) if 
 if st.session_state.pop("review_clear_filters_requested", False):
     st.session_state["review_query"] = ""
     st.session_state["review_hide_briefed"] = True
-    st.session_state["review_quick_status"] = "All Statuses"
-    st.session_state["review_quick_priority"] = "All Priorities"
     st.session_state["review_quick_region"] = "All Regions"
+    st.session_state["review_quick_topic"] = "All Topics"
+    st.session_state["review_adv_status"] = "All Statuses"
+    st.session_state["review_adv_priority"] = "All Priorities"
+    st.session_state["review_adv_conf"] = "All Confidence Levels"
+    st.session_state["review_adv_source"] = "All Sources"
     st.session_state["review_adv_regions"] = []
-    st.session_state["review_sel_conf"] = conf_vals
-    st.session_state["review_sel_source"] = source_vals
     st.session_state["review_sel_themes"] = []
     st.session_state["review_sel_topics"] = []
     st.session_state["review_record_from"] = default_record_from
@@ -635,12 +632,13 @@ if st.session_state.pop("review_clear_filters_requested", False):
 
 st.session_state.setdefault("review_query", "")
 st.session_state.setdefault("review_hide_briefed", True)
-st.session_state.setdefault("review_quick_status", "All Statuses")
-st.session_state.setdefault("review_quick_priority", "All Priorities")
 st.session_state.setdefault("review_quick_region", "All Regions")
+st.session_state.setdefault("review_quick_topic", "All Topics")
+st.session_state.setdefault("review_adv_status", "All Statuses")
+st.session_state.setdefault("review_adv_priority", "All Priorities")
+st.session_state.setdefault("review_adv_conf", "All Confidence Levels")
+st.session_state.setdefault("review_adv_source", "All Sources")
 st.session_state.setdefault("review_adv_regions", [])
-st.session_state.setdefault("review_sel_conf", list(conf_vals))
-st.session_state.setdefault("review_sel_source", list(source_vals))
 st.session_state.setdefault("review_sel_themes", [])
 st.session_state.setdefault("review_sel_topics", [])
 st.session_state.setdefault("review_record_from", default_record_from)
@@ -651,15 +649,16 @@ st.session_state.setdefault("review_publish_to", default_publish_to)
 
 # One-time defaults migration so existing sessions pick up current filter defaults
 # and don't keep stale query/date/region values from prior UI versions.
-if not st.session_state.get("_review_filter_defaults_v3_applied", False):
+if not st.session_state.get("_review_filter_defaults_v4_applied", False):
     st.session_state["review_query"] = ""
     st.session_state["review_hide_briefed"] = True
-    st.session_state["review_quick_status"] = "All Statuses"
-    st.session_state["review_quick_priority"] = "All Priorities"
     st.session_state["review_quick_region"] = "All Regions"
+    st.session_state["review_quick_topic"] = "All Topics"
+    st.session_state["review_adv_status"] = "All Statuses"
+    st.session_state["review_adv_priority"] = "All Priorities"
+    st.session_state["review_adv_conf"] = "All Confidence Levels"
+    st.session_state["review_adv_source"] = "All Sources"
     st.session_state["review_adv_regions"] = []
-    st.session_state["review_sel_conf"] = list(conf_vals)
-    st.session_state["review_sel_source"] = list(source_vals)
     st.session_state["review_sel_themes"] = []
     st.session_state["review_sel_topics"] = []
     st.session_state["review_record_from"] = default_record_from
@@ -667,12 +666,11 @@ if not st.session_state.get("_review_filter_defaults_v3_applied", False):
     st.session_state["review_apply_publish_range"] = False
     st.session_state["review_publish_from"] = default_publish_from
     st.session_state["review_publish_to"] = default_publish_to
-    st.session_state["_review_filter_defaults_v3_applied"] = True
+    st.session_state["_review_filter_defaults_v4_applied"] = True
 
-quick_status_options = ["All Statuses"] + status_vals
-quick_priority_options = ["All Priorities"] + pri_vals
 quick_region_options = ["All Regions"] + all_regions
-f1, f2, f3, f4 = st.columns([2.2, 1.2, 1.2, 1.4])
+quick_topic_options = ["All Topics"] + all_topics
+f1, f2, f3, f4, f5 = st.columns([2.2, 1.3, 1.4, 1.0, 1.6])
 with f1:
     query = st.text_input(
         "Search records",
@@ -685,39 +683,67 @@ with f1:
         ),
     )
 with f2:
-    quick_pri = st.selectbox(
-        "Priority",
-        quick_priority_options,
-        key="review_quick_priority",
-        label_visibility="collapsed",
-    )
-with f3:
-    quick_status = st.selectbox(
-        "Status",
-        quick_status_options,
-        key="review_quick_status",
-        label_visibility="collapsed",
-    )
-with f4:
     quick_region = st.selectbox(
         "Region",
         quick_region_options,
         key="review_quick_region",
         label_visibility="collapsed",
     )
+with f3:
+    quick_topic = st.selectbox(
+        "Topic",
+        quick_topic_options,
+        key="review_quick_topic",
+        label_visibility="collapsed",
+    )
+with f4:
+    date_basis = st.selectbox(
+        "Date basis",
+        options=["Published date", "Upload date"],
+        key="review_date_basis",
+        label_visibility="collapsed",
+    )
+with f5:
+    date_range = st.date_input(
+        "Date range",
+        value=(default_record_from, default_record_to),
+        key="review_date_range",
+        label_visibility="collapsed",
+    )
+    # Handle incomplete date range selection
+    if isinstance(date_range, tuple):
+        if len(date_range) == 2:
+            filter_date_from, filter_date_to = date_range
+        elif len(date_range) == 1:
+            st.warning("⚠️ Please select both start and end dates for the range.")
+            filter_date_from = filter_date_to = date_range[0]
+        else:
+            filter_date_from = filter_date_to = default_record_from
+    else:
+        filter_date_from = filter_date_to = date_range
 
 with st.expander("Advanced", expanded=False):
-    mf1, mf2, mf3 = st.columns(3)
+    mf1, mf2 = st.columns(2)
     with mf1:
-        sel_conf = st.multiselect(
-            "Confidence",
-            conf_vals,
-            key="review_sel_conf",
+        adv_status = st.selectbox(
+            "Status",
+            options=["All Statuses"] + status_vals,
+            key="review_adv_status",
         )
-        sel_source = st.multiselect(
+        adv_priority = st.selectbox(
+            "Priority",
+            options=["All Priorities"] + pri_vals,
+            key="review_adv_priority",
+        )
+        adv_conf = st.selectbox(
+            "Confidence",
+            options=["All Confidence Levels"] + conf_vals,
+            key="review_adv_conf",
+        )
+        adv_source = st.selectbox(
             "Source type",
-            source_vals,
-            key="review_sel_source",
+            options=["All Sources"] + source_vals,
+            key="review_adv_source",
         )
         hide_briefed = st.checkbox(
             "Hide records already included in a brief",
@@ -739,42 +765,30 @@ with st.expander("Advanced", expanded=False):
             all_topics,
             key="review_sel_topics",
         )
-    with mf3:
-        record_from = st.date_input(
-            "Record added from",
-            key="review_record_from",
-        )
-        record_to = st.date_input(
-            "Record added to",
-            key="review_record_to",
-        )
-        apply_publish_range = st.checkbox(
-            "Use publish date range",
-            key="review_apply_publish_range",
-        )
-        publish_from = st.date_input(
-            "Publish from",
-            disabled=not apply_publish_range,
-            key="review_publish_from",
-        )
-        publish_to = st.date_input(
-            "Publish to",
-            disabled=not apply_publish_range,
-            key="review_publish_to",
-        )
-        if st.button("Clear", key="review_clear_filters", type="secondary", use_container_width=True):
-            st.session_state["review_clear_filters_requested"] = True
-            st.rerun()
+    
+    if st.button("Clear", key="review_clear_filters", type="secondary", use_container_width=True):
+        st.session_state["review_clear_filters_requested"] = True
+        st.rerun()
 
-if quick_status == "All Statuses":
+if adv_status == "All Statuses":
     sel_status = list(status_vals)
 else:
-    sel_status = [quick_status]
+    sel_status = [adv_status]
 
-if quick_pri == "All Priorities":
+if adv_priority == "All Priorities":
     sel_pri = list(pri_vals)
 else:
-    sel_pri = [quick_pri]
+    sel_pri = [adv_priority]
+
+if adv_conf == "All Confidence Levels":
+    sel_conf = list(conf_vals)
+else:
+    sel_conf = [adv_conf]
+
+if adv_source == "All Sources" or not source_vals:
+    sel_source: List[str] = []
+else:
+    sel_source = [adv_source]
 
 sel_regions: List[str] = []
 if quick_region != "All Regions":
@@ -784,13 +798,17 @@ if adv_regions:
 
 mask = pd.Series(True, index=df.index)
 mask = mask & df["review_status"].isin(sel_status) & df["priority"].isin(sel_pri)
-if sel_conf:
-    mask = mask & df["confidence"].isin(sel_conf)
+mask = mask & df["confidence"].isin(sel_conf)
 if sel_source:
     mask = mask & df["source_type"].isin(sel_source)
-mask = mask & (df["_created_dt"].dt.date >= record_from) & (df["_created_dt"].dt.date <= record_to)
-if apply_publish_range:
-    mask = mask & (df["_publish_dt"].dt.date >= publish_from) & (df["_publish_dt"].dt.date <= publish_to)
+
+# Apply date range filter based on selected basis
+if date_basis == "Upload date":
+    date_column = df["_created_dt"]
+else:
+    date_column = df["_publish_dt"]
+mask = mask & (date_column.dt.date >= filter_date_from) & (date_column.dt.date <= filter_date_to)
+
 if hide_briefed:
     mask = mask & (~df["in_brief"].fillna(False))
 if query.strip():
@@ -803,8 +821,11 @@ if sel_regions:
 if sel_themes:
     theme_set = set(sel_themes)
     mask = mask & df["macro_themes_detected"].apply(lambda vals: bool(theme_set & set(vals or [])))
-if sel_topics:
-    topic_set = set(sel_topics)
+effective_topics = list(sel_topics or [])
+if quick_topic != "All Topics":
+    effective_topics = [quick_topic]
+if effective_topics:
+    topic_set = set(effective_topics)
     mask = mask & df["topics"].apply(lambda vals: bool(topic_set & set(vals or [])))
 
 fdf = df[mask].copy().sort_values(by="_sort_dt", ascending=False, na_position="last")
@@ -816,14 +837,6 @@ low_conf_pending_count = int(((fdf["review_status"] == "Pending") & (fdf["confid
 if fdf.empty:
     st.warning("No records match current selection.")
     st.stop()
-
-k1, k2, k3 = st.columns(3)
-with k1:
-    ui.kpi_card("Pending Review", int((fdf["review_status"] == "Pending").sum()))
-with k2:
-    ui.kpi_card("Approved", int((fdf["review_status"] == "Approved").sum()))
-with k3:
-    ui.kpi_card("Total Records", len(fdf))
 
 
 def _truncate(text: Any, n: int = 96) -> str:
@@ -867,16 +880,15 @@ with queue_col:
 
         display_queue = queue
 
-        st.markdown(f"**Showing {len(queue)} records**")
-        st.caption(
-            f"Pending: {pending_count} | Auto-eligible: {auto_eligible_count} | "
+        st.markdown(
+            f"**Pending: {pending_count} | Auto-eligible: {auto_eligible_count} | "
             f"Low-confidence pending: {low_conf_pending_count} | "
             f"High priority: {int((fdf['priority'] == 'High').sum())} | "
-            f"Marked duplicate: {int(fdf['is_duplicate'].fillna(False).sum())}"
+            f"Marked duplicate: {int(fdf['is_duplicate'].fillna(False).sum())}**"
         )
 
-        st.divider()
-        with st.container(height=260, border=False):
+        st.markdown("<div style='height:0.2rem'></div>", unsafe_allow_html=True)
+        with st.container(border=False):
             hdr_info, hdr_pri, hdr_conf, hdr_status, hdr_action = st.columns([5.4, 1.0, 1.1, 1.1, 0.7])
             with hdr_info:
                 st.caption("Record Info")
@@ -1395,22 +1407,32 @@ with pdf_col:
     with ui.card("Source PDF"):
         if not rec:
             st.info("Select a record from the queue.")
-        elif pdf_exists and pdf_path is not None:
-            _render_pdf_embed(pdf_path, height=980)
-            try:
-                with pdf_path.open("rb") as handle:
-                    st.download_button(
-                        "Download",
-                        data=handle.read(),
-                        file_name=pdf_path.name,
-                        mime="application/pdf",
-                        key=f"download_original_pdf_panel_{record_id}",
-                        help="Download PDF",
-                    )
-            except Exception:
-                st.caption("PDF exists but could not be read.")
-        elif source_pdf_path:
-            st.caption(f"Source PDF path: `{source_pdf_path}`")
-            st.warning("Source PDF file is missing.")
         else:
-            st.caption("No source PDF attached.")
+            source_url = str(rec.get("original_url") or "").strip()
+            if source_url:
+                st.link_button(
+                    "Open source URL",
+                    source_url,
+                    type="tertiary",
+                    use_container_width=True,
+                )
+
+            if pdf_exists and pdf_path is not None:
+                _render_pdf_embed(pdf_path, height=980)
+                try:
+                    with pdf_path.open("rb") as handle:
+                        st.download_button(
+                            "Download",
+                            data=handle.read(),
+                            file_name=pdf_path.name,
+                            mime="application/pdf",
+                            key=f"download_original_pdf_panel_{record_id}",
+                            help="Download PDF",
+                        )
+                except Exception:
+                    st.caption("PDF exists but could not be read.")
+            elif source_pdf_path:
+                st.caption(f"Source PDF path: `{source_pdf_path}`")
+                st.warning("Source PDF file is missing.")
+            else:
+                st.caption("No source PDF attached.")

@@ -113,11 +113,11 @@ k1, k2, k3, k4 = st.columns(4)
 with k1:
     ui.kpi_card("Validated Records", len(canonical), caption="Structured \u00b7 Scored \u00b7 Approved")
 with k2:
-    ui.kpi_card("Pending Governance", pending_count, caption="Human gate pending")
+    ui.kpi_card("Pending Review", pending_count, caption="Awaiting analyst review")
 with k3:
-    ui.kpi_card("Surfaced Signals", high_pri_count, caption="Elevated by rule-based scoring")
+    ui.kpi_card("Surfaced Signals", high_pri_count, caption="Raised by clear scoring rules")
 with k4:
-    ui.kpi_card("Latest Structured Ingest", last_ingest, caption="Last document structured")
+    ui.kpi_card("Latest Structured Ingest", last_ingest, caption="Most recent record date")
 
 # ---------------------------------------------------------------------------
 # 5. Architecture strip
@@ -126,24 +126,26 @@ with k4:
 st.markdown(
     "<p style='font-size:0.8rem; font-weight:600; color:#64748B; "
     "letter-spacing:0.06em; text-transform:uppercase; margin:1rem 0 0.25rem;'>"
-    "How Cognitra Works (Controlled Pipeline)"
+    "How Cognitra Works"
     "</p>",
     unsafe_allow_html=True,
 )
 
 _PIPELINE = [
-    ("Extract", "Strict JSON schema — factual fields only"),
-    ("Score", "Priority \u00b7 Confidence \u00b7 Macro-themes — deterministic rules"),
-    ("Approve", "Analyst review — human gate before any synthesis"),
-    ("Render", "From validated records only — never from raw PDFs"),
+    ("Structure", "Convert documents into structured records"),
+    ("Prioritize", "Apply clear scoring rules"),
+    ("Review", "Analysts confirm record status"),
+    ("Brief", "Generate briefs from approved records only"),
 ]
 
-with ui.card("STRUCTURE BEFORE SYNTHESIS"):
+with ui.card("Pipeline Overview"):
     cols = st.columns(len(_PIPELINE))
     for col, (step, desc) in zip(cols, _PIPELINE):
         with col:
             st.markdown(f"**{step}**")
             st.caption(desc)
+
+st.caption("Priority and confidence are computed automatically; analysts make the final approval decision.")
 
 # ---------------------------------------------------------------------------
 # 6. Controlled AI usage
