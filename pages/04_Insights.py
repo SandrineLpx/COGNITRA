@@ -3,7 +3,7 @@ import pandas as pd
 import altair as alt
 import re
 from collections import Counter
-from src import ui
+import src.ui as ui
 from src.quality import BRIEF_QC_LOG, QUALITY_RUNS_LOG, RECORD_QC_LOG, _read_jsonl as read_quality_jsonl
 from src.ui_helpers import enforce_navigation_lock, load_records_cached, safe_list
 
@@ -420,13 +420,10 @@ if df.empty:
     st.info("No records after selection.")
     st.stop()
 
-# Compute date columns for both publish_date and created_at
+# Compute date columns for publish_date (Insights uses published date only)
 publish_dt = pd.to_datetime(df.get("publish_date"), errors="coerce", utc=True).dt.tz_convert(None)
 df["publish_date_dt"] = publish_dt
 df["event_day"] = publish_dt.dt.normalize()
-
-created_dt = pd.to_datetime(df.get("created_at"), errors="coerce", utc=True).dt.tz_convert(None)
-df["created_date_dt"] = created_dt.dt.normalize()
 
 today = pd.Timestamp.today().normalize()
 default_from = (today - pd.Timedelta(days=7)).date()
@@ -471,12 +468,7 @@ with f3:
         label_visibility="collapsed",
     )
 with f4:
-    date_basis = st.selectbox(
-        "Date basis",
-        options=["Published date", "Upload date"],
-        key="ins_date_basis",
-        label_visibility="collapsed",
-    )
+    st.caption("Published date")
 with f5:
     date_range = st.date_input(
         "Date range",
@@ -496,13 +488,8 @@ with f5:
     else:
         date_from = date_to = date_range
 mask = pd.Series(True, index=df.index)
-# Select date column based on basis
-if date_basis == "Upload date":
-    date_column = df["created_date_dt"]
-    mask = mask & date_column.notna()
-else:
-    date_column = df["event_day"]
-    mask = mask & df["publish_date_dt"].notna()
+date_column = df["event_day"]
+mask = mask & df["publish_date_dt"].notna()
 mask = mask & (date_column >= pd.Timestamp(date_from)) & (date_column <= pd.Timestamp(date_to))
 if "review_status" in df:
     mask = mask & df["review_status"].astype(str).isin(["Approved"])

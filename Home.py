@@ -3,7 +3,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src import ui
+import src.ui as ui
 from src.postprocess import validate_csv_consistency
 from src.ui_helpers import enforce_navigation_lock, load_records_cached
 
@@ -52,90 +52,50 @@ pending_count = sum(1 for r in canonical if r.get("review_status") == "Pending")
 high_pri_count = sum(1 for r in canonical if r.get("priority") == "High")
 last_ingest = _format_last_ingest(records)
 
-# ---------------------------------------------------------------------------
-# 1. Hero block
-# ---------------------------------------------------------------------------
 
+# HERO
 st.markdown(
     "<h1 style='margin:0; font-size:2.2rem; font-weight:700; color:#0F172A; line-height:1.2;'>"
-    "Most intelligence is never shared."
+    "Most intelligence never reaches decision-makers."
     "</h1>"
     "<p style='margin:0.3rem 0 0.5rem; font-size:1.25rem; font-weight:400; color:#64748B;'>"
-    "Because volume exceeds processing capacity."
+    "Because teams can’t process the volume."
     "</p>"
     "<p style='margin:0 0 0.25rem; font-size:0.9rem; color:#64748B;'>"
     "Cognitra turns documents into validated records — then synthesizes."
-    "</p>"
-    "<div class='cg-divider'></div>",
-    unsafe_allow_html=True,
-)
-
-# ---------------------------------------------------------------------------
-# 2. Differentiator statement
-# ---------------------------------------------------------------------------
-
-st.markdown(
-    "<p style='text-align:center; font-size:1.05rem; font-weight:600; "
-    "color:#0F172A; margin:0.75rem 0 0.2rem;'>"
-    "Not a summarization tool."
-    "</p>"
-    "<p style='text-align:center; font-size:1.05rem; font-weight:600; "
-    "color:#0F172A; margin:0 0 1.1rem;'>"
-    "A governed intelligence pipeline."
     "</p>",
     unsafe_allow_html=True,
 )
+st.markdown("<div style='height:0.95rem;'></div>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# 3. Start here CTA
-# ---------------------------------------------------------------------------
 
+# DIFFERENTIATION
 st.markdown(
-    "<p style='font-size:0.85rem; color:#64748B; margin:0 0 0.4rem;'>Start here:</p>",
+    "<p style='text-align:center; font-size:1.05rem; font-weight:600; color:#0F172A; margin:0;'>"
+    "Not a summarization tool."
+    "</p>"
+    "<p style='text-align:center; font-size:1.05rem; font-weight:600; color:#0F172A; margin:0.12rem 0 0;'>"
+    "A governed intelligence system."
+    "</p>",
     unsafe_allow_html=True,
 )
-b1, b2, b3, _ = st.columns([1, 1, 1, 3])
-with b1:
-    if st.button("Ingest a PDF", use_container_width=True):
-        st.switch_page("pages/01_Ingest.py")
-with b2:
-    if st.button("Review queue", use_container_width=True):
-        st.switch_page("pages/02_Review.py")
-with b3:
-    if st.button("Generate weekly brief", use_container_width=True):
-        st.switch_page("pages/03_Brief.py")
+st.markdown("<div style='height:1.0rem;'></div>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# 4. Live metrics row
-# ---------------------------------------------------------------------------
 
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    ui.kpi_card("Validated Records", len(canonical), caption="Structured \u00b7 Scored \u00b7 Approved")
-with k2:
-    ui.kpi_card("Pending Review", pending_count, caption="Awaiting analyst review")
-with k3:
-    ui.kpi_card("Surfaced Signals", high_pri_count, caption="Raised by clear scoring rules")
-with k4:
-    ui.kpi_card("Latest Structured Ingest", last_ingest, caption="Most recent record date")
-
-# ---------------------------------------------------------------------------
-# 5. Architecture strip
-# ---------------------------------------------------------------------------
-
+# PIPELINE
 st.markdown(
     "<p style='font-size:0.8rem; font-weight:600; color:#64748B; "
-    "letter-spacing:0.06em; text-transform:uppercase; margin:1rem 0 0.25rem;'>"
+    "letter-spacing:0.06em; text-transform:uppercase; margin:0 0 0.2rem;'>"
     "How Cognitra Works"
     "</p>",
     unsafe_allow_html=True,
 )
 
 _PIPELINE = [
-    ("Structure", "Convert documents into structured records"),
-    ("Prioritize", "Apply clear scoring rules"),
-    ("Review", "Analysts confirm record status"),
-    ("Brief", "Generate briefs from approved records only"),
+    ("Extract", "Strict JSON schema - factual fields only"),
+    ("Score", "Priority · Confidence · Macro-themes (deterministic)"),
+    ("Approve", "Analyst review - human gate"),
+    ("Render", "From approved records only - never from raw PDFs"),
 ]
 
 with ui.card("Pipeline Overview"):
@@ -145,12 +105,66 @@ with ui.card("Pipeline Overview"):
             st.markdown(f"**{step}**")
             st.caption(desc)
 
-st.caption("Priority and confidence are computed automatically; analysts make the final approval decision.")
+st.markdown("<div style='height:0.9rem;'></div>", unsafe_allow_html=True)
 
-# ---------------------------------------------------------------------------
-# 6. Controlled AI usage
-# ---------------------------------------------------------------------------
 
+# CTA (PRIMARY START)
+st.markdown(
+    "<p style='font-size:0.85rem; color:#64748B; margin:0 0 0.45rem;'>Start here:</p>",
+    unsafe_allow_html=True,
+)
+
+b1, b2, b3, _ = st.columns([1, 1, 1, 3])
+with b1:
+    if st.button("Ingest a PDF", type="primary", use_container_width=True):
+        st.switch_page("pages/01_Ingest.py")
+with b2:
+    if st.button("Review queue", type="secondary", use_container_width=True):
+        st.switch_page("pages/02_Review.py")
+with b3:
+    if st.button("Generate weekly brief", type="secondary", use_container_width=True):
+        st.switch_page("pages/03_Brief.py")
+
+st.markdown("<div style='height:0.55rem;'></div>", unsafe_allow_html=True)
+
+
+# KPI (STATUS)
+st.markdown(
+    """
+<style>
+.home-kpi-muted .cg-kpi-card {
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+.home-kpi-muted .cg-kpi-label {
+  font-size: 0.72rem !important;
+  color: #64748b !important;
+  letter-spacing: 0.05em !important;
+}
+.home-kpi-muted .cg-kpi-value {
+  font-weight: 600 !important;
+  color: #1e293b !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+st.markdown("<div class='home-kpi-muted'>", unsafe_allow_html=True)
+
+k1, k2, k3, k4 = st.columns(4)
+with k1:
+    ui.kpi_card("VALIDATED RECORDS", len(canonical), caption="Structured · Scored · Approved")
+with k2:
+    ui.kpi_card("PENDING GOVERNANCE", pending_count, caption="Human gate pending")
+with k3:
+    ui.kpi_card("SURFACED SIGNALS", high_pri_count, caption="Elevated by rule-based scoring")
+with k4:
+    ui.kpi_card("LATEST STRUCTURED INGEST", last_ingest, caption="Last document structured")
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+
+# CONTROLLED AI USAGE
 with ui.card("Controlled AI Usage"):
     st.markdown(
         "- One model call per document\n"
@@ -165,10 +179,6 @@ with ui.card("Controlled AI Usage"):
         unsafe_allow_html=True,
     )
 
-# ---------------------------------------------------------------------------
-# 7. Page footer
-# ---------------------------------------------------------------------------
-
 st.markdown(
     "<p style='text-align:center; font-size:0.8rem; color:#94A3B8; margin:1.5rem 0 0.5rem;'>"
     "Briefs are rendered from approved records — never from raw documents."
@@ -176,8 +186,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+
 # ---------------------------------------------------------------------------
-# 8. CSV drift warning (operational — keep at bottom)
+# CSV drift warning (operational — keep at bottom)
 # ---------------------------------------------------------------------------
 
 _csv_warnings = _cached_csv_warnings(_path_signature(Path("data/new_country_mapping.csv")))

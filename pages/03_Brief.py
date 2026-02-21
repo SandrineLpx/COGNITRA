@@ -13,7 +13,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-from src import ui
+import src.ui as ui
 from src.briefing import (
     select_weekly_candidates,
     synthesize_weekly_brief_llm,
@@ -1129,18 +1129,18 @@ today = date.today()
 created_dates = [d for d in (_parse_created_at(r.get("created_at")) for r in records) if d]
 publish_dates = [d for d in (_parse_publish_date(r.get("publish_date")) for r in records) if d]
 default_record_from = today - timedelta(days=7)
-default_record_to = max([today, *created_dates]) if created_dates else today
-default_publish_from = today - timedelta(days=20)
+default_record_to = today
+default_publish_from = today - timedelta(days=7)
 default_publish_to = max([today, *publish_dates]) if publish_dates else today
 
 
 def _reset_brief_filters() -> None:
     st.session_state["wb_hide_shared"] = True
-    st.session_state["wb_basis"] = "Publish date"
-    st.session_state["wb_basis_prev"] = "Publish date"
-    st.session_state["wb_date_range"] = (default_publish_from, default_publish_to)
-    st.session_state["wb_date_from"] = default_publish_from
-    st.session_state["wb_date_to"] = default_publish_to
+    st.session_state["wb_basis"] = "Upload date"
+    st.session_state["wb_basis_prev"] = "Upload date"
+    st.session_state["wb_date_range"] = (default_record_from, default_record_to)
+    st.session_state["wb_date_from"] = default_record_from
+    st.session_state["wb_date_to"] = default_record_to
     st.session_state["wb_include_excluded"] = False
     st.session_state["wb_share_ready"] = False
     st.session_state["wb_use_publish_range"] = False
@@ -1162,9 +1162,9 @@ if st.session_state.pop("wb_clear_filters_requested", False):
     _reset_brief_filters()
 
 # One-time reset to avoid stale filter carry-over hiding fresh records.
-if not st.session_state.get("_brief_filter_defaults_v4_applied", False):
+if not st.session_state.get("_brief_filter_defaults_v6_applied", False):
     _reset_brief_filters()
-    st.session_state["_brief_filter_defaults_v4_applied"] = True
+    st.session_state["_brief_filter_defaults_v6_applied"] = True
 
 # Ensure hide-shared starts enabled by default for existing sessions.
 if not st.session_state.get("_brief_hide_shared_default_v1_applied", False):
@@ -1188,10 +1188,10 @@ with tab_build:
     provider = "gemini"
     web_check_enabled = False
 
-    basis_options = ["Publish date", "Upload date"]
-    basis_label = str(st.session_state.get("wb_basis") or "Publish date")
+    basis_options = ["Upload date", "Publish date"]
+    basis_label = str(st.session_state.get("wb_basis") or "Upload date")
     if basis_label not in basis_options:
-        basis_label = "Publish date"
+        basis_label = "Upload date"
         st.session_state["wb_basis"] = basis_label
     date_basis_field = "created_at" if basis_label == "Upload date" else "publish_date"
 
@@ -1422,7 +1422,7 @@ with tab_build:
     generate_clicked = st.button("Generate AI Brief", type="primary", disabled=not selected_records)
 
     if generate_clicked:
-        _synthesize_and_store(
+        generated = _synthesize_and_store(
             state_prefix="weekly_ai_brief",
             selected_records=selected_records,
             selected_ids=selected_ids,
@@ -1430,6 +1430,18 @@ with tab_build:
             provider=provider,
             web_check_enabled=web_check_enabled,
         )
+        if generated:
+            try:
+                auto_path = _save_brief(
+                    str(st.session_state.get("weekly_ai_brief_text") or ""),
+                    str(st.session_state.get("weekly_ai_brief_week_range") or brief_week_range),
+                    list(st.session_state.get("weekly_ai_brief_selected_ids") or selected_ids),
+                    st.session_state.get("weekly_ai_brief_usage") or {},
+                )
+                st.session_state["weekly_ai_brief_last_autosave_path"] = str(auto_path)
+                st.success(f"Auto-saved: {auto_path}")
+            except Exception as exc:
+                st.error(f"Generated, but auto-save failed: {exc}")
 
     saved_text = st.session_state.get("weekly_ai_brief_text")
     saved_usage = st.session_state.get("weekly_ai_brief_usage", {}) if saved_text else {}
@@ -1445,6 +1457,9 @@ with tab_build:
 
     st.subheader("AI Brief")
     if saved_text:
+        auto_saved_path = str(st.session_state.get("weekly_ai_brief_last_autosave_path") or "").strip()
+        if auto_saved_path:
+            st.caption(f"Auto-saved to `{auto_saved_path}`")
         _render_brief_collapsible(saved_text, record_lookup=records_by_id)
         st.caption(
             f"Model: {saved_usage.get('model', 'unknown')} | "
@@ -1456,7 +1471,7 @@ with tab_build:
         )
         a1, a2 = st.columns(2)
         with a1:
-            if st.button("Save brief", type="primary"):
+            if st.button("Save another copy", type="secondary"):
                 path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
                 st.success(f"Saved: {path}")
         with a2:

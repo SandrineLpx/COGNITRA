@@ -163,3 +163,76 @@ def extract_text_robust(pdf_bytes: bytes, min_chars: int = 500) -> Tuple[str, st
         pass
 
     return text, "pymupdf"
+
+
+def _short_exception(exc: Exception, max_len: int = 180) -> str:
+    line = (str(exc) or exc.__class__.__name__).strip().splitlines()[0]
+    if len(line) <= max_len:
+        return line
+    return line[: max_len - 3].rstrip() + "..."
+
+
+def explain_no_text_extraction(pdf_bytes: bytes) -> str:
+    """Return a deterministic reason when PDF text extraction yields an empty string."""
+    size_bytes = len(pdf_bytes or b"")
+    if size_bytes == 0:
+        return "The file is empty (0 bytes)."
+
+    pymupdf_chars = 0
+    pymupdf_pages = 0
+    pymupdf_error: Optional[str] = None
+    encrypted = False
+
+    try:
+        import fitz  # pymupdf
+
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        try:
+            pymupdf_pages = len(doc)
+            encrypted = bool(getattr(doc, "needs_pass", False))
+            if not encrypted:
+                text = "\n".join(page.get_text("text") or "" for page in doc)
+                pymupdf_chars = len(text.strip())
+        finally:
+            doc.close()
+    except Exception as exc:
+        pymupdf_error = _short_exception(exc)
+
+    pdfplumber_chars = 0
+    pdfplumber_pages = 0
+    pdfplumber_error: Optional[str] = None
+    try:
+        import io
+        import pdfplumber
+
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+            pdfplumber_pages = len(pdf.pages)
+            parts = [(p.extract_text() or "") for p in pdf.pages]
+            pdfplumber_chars = len("\n".join(parts).strip())
+    except Exception as exc:
+        pdfplumber_error = _short_exception(exc)
+
+    if encrypted:
+        return "The PDF is password-protected/encrypted, so text extraction is blocked."
+
+    if pymupdf_error and pdfplumber_error:
+        return (
+            "Both PDF extractors failed to parse this file "
+            f"(PyMuPDF: {pymupdf_error}; pdfplumber: {pdfplumber_error})."
+        )
+
+    best_chars = max(pymupdf_chars, pdfplumber_chars)
+    best_pages = max(pymupdf_pages, pdfplumber_pages)
+
+    if best_chars == 0:
+        if best_pages > 0:
+            return (
+                f"No selectable text layer was found across {best_pages} page(s); "
+                "this is likely a scanned/image-only PDF."
+            )
+        return "No selectable text layer was found."
+
+    return (
+        "Only whitespace text was extracted "
+        f"(PyMuPDF={pymupdf_chars} chars, pdfplumber={pdfplumber_chars} chars)."
+    )

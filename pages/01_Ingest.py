@@ -6,9 +6,13 @@ from datetime import datetime
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
-from src import ui
+import src.ui as ui
 from src.storage import new_record_id, overwrite_records, save_pdf_bytes, utc_now_iso
-from src.pdf_extract import extract_text_robust, extract_pdf_publish_date_hint
+from src.pdf_extract import (
+    extract_text_robust,
+    extract_pdf_publish_date_hint,
+    explain_no_text_extraction,
+)
 from src.context_pack import select_context_chunks
 from src.render_brief import render_intelligence_brief
 from src.model_router import route_and_extract, extract_single_pass, choose_extraction_strategy
@@ -19,6 +23,7 @@ from src.dedupe import find_exact_title_duplicate, find_similar_title_records, s
 from src.ui_helpers import (
     clear_records_cache,
     enforce_navigation_lock,
+    load_brief_history,
     load_records_cached,
     render_navigation_lock_notice,
     set_navigation_lock,
@@ -276,6 +281,47 @@ def _render_system_status(slot=None) -> None:
                 st.rerun()
 
 
+def _render_not_briefed_queue(frame_height: int = 220) -> None:
+    records = load_records_cached()
+    brief_history = load_brief_history()
+
+    # Focus on canonical uploaded records that are not yet included in any saved brief.
+    queued = []
+    for rec in records:
+        if rec.get("is_duplicate"):
+            continue
+        rid = str(rec.get("record_id") or "").strip()
+        if not rid:
+            continue
+        if brief_history.get(rid):
+            continue
+        queued.append(rec)
+
+    queued.sort(key=lambda r: str(r.get("created_at") or ""), reverse=True)
+
+    with ui.card("Record Queue (Not Briefed)"):
+        st.caption(f"{len(queued)} uploaded record(s) not yet included in a saved brief.")
+        if not queued:
+            st.caption("Queue is clear.")
+            return
+
+        rows = []
+        for rec in queued:
+            rows.append(
+                {
+                    "date": str(rec.get("created_at") or "")[:10] or "-",
+                    "title": str(rec.get("title") or "Untitled"),
+                }
+            )
+        st.dataframe(
+            pd.DataFrame(rows),
+            width='stretch',
+            hide_index=True,
+            height=frame_height,
+        )
+        st.caption("Scroll to view older queued records.")
+
+
 st.set_page_config(page_title="Cognitra", page_icon="assets/logo/cognitra-icon.png", layout="wide")
 enforce_navigation_lock("ingest")
 ui.init_page(active_step="Ingest")
@@ -353,6 +399,7 @@ with left_col:
 with right_col:
     status_slot = st.empty()
     _render_system_status(status_slot)
+    _render_not_briefed_queue()
 
 
 def _is_valid_iso_date(value):
@@ -586,7 +633,8 @@ def _process_one_pdf(pdf_bytes, filename, records, provider_choice,
 
     extracted_text, method = extract_text_robust(pdf_bytes)
     if not extracted_text.strip():
-        return None, None, "Failed: no text extracted"
+        reason = explain_no_text_extraction(pdf_bytes)
+        return None, None, f"Failed: no text extracted. {reason}"
     publish_date_hint, publish_date_hint_source = extract_pdf_publish_date_hint(pdf_bytes, extracted_text)
 
     cleaned = clean_and_chunk(extracted_text)
@@ -877,7 +925,8 @@ if run_clicked:
             _render_system_status(status_slot)
             extracted_text, method = extract_text_robust(pdf_bytes)
             if not extracted_text.strip():
-                error_msg = "No text was extracted from this PDF."
+                reason = explain_no_text_extraction(pdf_bytes)
+                error_msg = f"No text was extracted from this PDF. {reason}"
 
             cleaned_text = ""
             cleaned_meta = {}

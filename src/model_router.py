@@ -17,7 +17,8 @@ from src.schema_validate import validate_record
 from src.postprocess import postprocess_record
 from src.storage import utc_now_iso
 
-AUTO_ORDER = ["gemini", "claude", "chatgpt"]
+# Auto-routing only includes providers implemented in this app.
+AUTO_ORDER = ["gemini"]
 _NOISE_HIGH_RATIO = 0.18
 _NOISE_HIGH_LINES = 250
 _NOISE_HIGH_PATTERNS = {"ocr", "table", "header", "footer", "page"}

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
-from src import ui
+import src.ui as ui
 from src.context_pack import select_context_chunks
 from src.model_router import choose_extraction_strategy, extract_single_pass, route_and_extract
 from src.pdf_extract import extract_pdf_publish_date_hint, extract_text_robust
@@ -19,7 +19,7 @@ from src.postprocess import postprocess_record
 from src.render_brief import render_intelligence_brief
 from src.schema_validate import ALLOWED_SOURCE_TYPES, validate_record
 from src.text_clean_chunk import clean_and_chunk
-from src.storage import overwrite_records
+from src.storage import PDF_DIR, overwrite_records
 from src.ui_helpers import (
     best_record_link,
     clear_records_cache,
@@ -155,6 +155,30 @@ def _render_pdf_embed(pdf_path: Optional[Path], height: int = 620) -> None:
         )
     except Exception:
         st.caption("PDF exists but could not be rendered.")
+
+
+def _resolve_record_pdf_path(rec: Optional[Dict[str, Any]]) -> tuple[str, Optional[Path], str]:
+    """Resolve attached PDF path from record field, then fallback by record_id in data/pdfs."""
+    if not isinstance(rec, dict):
+        return "", None, "none"
+
+    raw = str(rec.get("source_pdf_path") or "").strip()
+    if raw:
+        direct = Path(raw).expanduser()
+        if direct.exists():
+            return raw, direct, "record_path"
+        # Fallback: keep filename, resolve under canonical PDF_DIR.
+        by_name = PDF_DIR / direct.name
+        if by_name.exists():
+            return raw, by_name, "path_filename_fallback"
+
+    rid = str(rec.get("record_id") or "").strip()
+    if rid:
+        matches = sorted(PDF_DIR.glob(f"{rid}__*.pdf"), key=lambda p: (p.stat().st_mtime, p.name), reverse=True)
+        if matches:
+            return raw, matches[0], "record_id_fallback"
+
+    return raw, None, "none"
 
 
 def _postprocess_with_checks(
@@ -598,7 +622,7 @@ default_record_to = max(
     today.date(),
     (valid_created_dates.max().date() if not valid_created_dates.empty else today.date()),
 )
-default_publish_from = (today - pd.Timedelta(days=20)).date()
+default_publish_from = (today - pd.Timedelta(days=7)).date()
 default_publish_to = max(
     today.date(),
     (valid_publish_dates.max().date() if not valid_publish_dates.empty else today.date()),
@@ -629,6 +653,7 @@ if st.session_state.pop("review_clear_filters_requested", False):
     st.session_state["review_apply_publish_range"] = False
     st.session_state["review_publish_from"] = default_publish_from
     st.session_state["review_publish_to"] = default_publish_to
+    st.session_state["review_date_basis"] = "Upload date"
 
 st.session_state.setdefault("review_query", "")
 st.session_state.setdefault("review_hide_briefed", True)
@@ -646,10 +671,11 @@ st.session_state.setdefault("review_record_to", default_record_to)
 st.session_state.setdefault("review_apply_publish_range", False)
 st.session_state.setdefault("review_publish_from", default_publish_from)
 st.session_state.setdefault("review_publish_to", default_publish_to)
+st.session_state.setdefault("review_date_basis", "Upload date")
 
 # One-time defaults migration so existing sessions pick up current filter defaults
 # and don't keep stale query/date/region values from prior UI versions.
-if not st.session_state.get("_review_filter_defaults_v4_applied", False):
+if not st.session_state.get("_review_filter_defaults_v6_applied", False):
     st.session_state["review_query"] = ""
     st.session_state["review_hide_briefed"] = True
     st.session_state["review_quick_region"] = "All Regions"
@@ -666,7 +692,8 @@ if not st.session_state.get("_review_filter_defaults_v4_applied", False):
     st.session_state["review_apply_publish_range"] = False
     st.session_state["review_publish_from"] = default_publish_from
     st.session_state["review_publish_to"] = default_publish_to
-    st.session_state["_review_filter_defaults_v4_applied"] = True
+    st.session_state["review_date_basis"] = "Upload date"
+    st.session_state["_review_filter_defaults_v6_applied"] = True
 
 quick_region_options = ["All Regions"] + all_regions
 quick_topic_options = ["All Topics"] + all_topics
@@ -964,8 +991,7 @@ with queue_col:
 records_by_id: Dict[str, Dict[str, Any]] = {str(r.get("record_id") or ""): r for r in records}
 record_id = str(st.session_state.get("selected_record_id") or "")
 rec = records_by_id.get(record_id)
-source_pdf_path = str(rec.get("source_pdf_path") or "").strip() if rec else ""
-pdf_path = Path(source_pdf_path).expanduser() if source_pdf_path else None
+source_pdf_path, pdf_path, pdf_path_source = _resolve_record_pdf_path(rec)
 pdf_exists = bool(pdf_path and pdf_path.exists())
 
 if rec:
@@ -1241,9 +1267,11 @@ with detail_col:
                     st.caption("No themes detected.")
 
             with st.expander("Re-ingest", expanded=False):
-                st.caption(f"PDF: `{source_pdf_path or 'None'}`")
+                st.caption(f"PDF: `{str(pdf_path) if pdf_exists and pdf_path is not None else (source_pdf_path or 'None')}`")
                 if source_pdf_path and not pdf_exists:
                     st.warning("PDF file missing")
+                elif pdf_exists and pdf_path_source == "record_id_fallback":
+                    st.caption("PDF resolved from `data/pdfs` by record ID.")
                 st.caption("This overwrites extracted fields only and resets status to Pending.")
 
                 reingest_provider = st.selectbox(
@@ -1378,7 +1406,7 @@ with detail_col:
                         "Delete attached PDF only",
                         type="secondary",
                         key=f"delete_pdf_only_{record_id}",
-                        disabled=(not source_pdf_path or not delete_pdf_confirm),
+                        disabled=(not pdf_exists or not delete_pdf_confirm),
                         use_container_width=True,
                     ):
                         deleted_file = False

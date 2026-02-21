@@ -51,6 +51,7 @@ _OVERREACH_RE = re.compile(
 )
 _REC_REF_RE = re.compile(r"\bREC\s*[:#]\s*([A-Za-z0-9_-]+)\b", re.IGNORECASE)
 _TITLE_HEAD_RE = re.compile(r"^\s*#*\s*([A-Z][A-Z0-9 &/\-()]+)\s*$")
+_SUMMARY_HEAD_RE = re.compile(r"<summary>\s*([^<]+?)\s*</summary>", re.IGNORECASE)
 _WEEK_RANGE_RE = re.compile(r"\blast\s+(\d+)\s+days\b", re.IGNORECASE)
 
 _CLAIM_HEADINGS = {
@@ -508,13 +509,28 @@ def _extract_brief_sections(text: str) -> Tuple[Dict[str, str], List[Tuple[str, 
     sections[current] = []
     for raw in (text or "").splitlines():
         line = raw.rstrip("\n")
-        m = _TITLE_HEAD_RE.match(line.strip())
+        stripped = line.strip()
+        m = _TITLE_HEAD_RE.match(stripped)
         if m:
             cand = m.group(1).strip().upper()
             if cand in _KNOWN_HEADINGS:
                 current = cand
                 sections.setdefault(current, [])
                 continue
+        # Also support saved brief format that wraps sections in HTML details/summary tags.
+        sm = _SUMMARY_HEAD_RE.search(stripped)
+        if sm:
+            cand = re.sub(r"\s+", " ", sm.group(1)).strip().upper()
+            if cand in _KNOWN_HEADINGS:
+                current = cand
+                sections.setdefault(current, [])
+                tail = stripped[sm.end():].strip()
+                if tail:
+                    sections.setdefault(current, []).append(tail)
+                    lined.append((current, tail))
+                continue
+        if re.fullmatch(r"</?details>\s*", stripped, re.IGNORECASE):
+            continue
         sections.setdefault(current, []).append(line)
         lined.append((current, line))
     return {k: "\n".join(v).strip() for k, v in sections.items()}, lined

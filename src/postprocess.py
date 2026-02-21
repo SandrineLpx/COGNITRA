@@ -1004,6 +1004,9 @@ def postprocess_record(
         FOOTPRINT_TO_DISPLAY.get(r, r) for r in merged
     )
     display = [r for r in display if r in DISPLAY_REGIONS]
+    if len(display) > 15:
+        display = display[:15]
+        _append_audit_entry(rec, "_region_validation_flags", "regions_mentioned_truncated_to_15")
 
     _apply_field_policy(
         rec,

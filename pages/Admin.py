@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src import ui
+import src.ui as ui
 from src.constants import FOOTPRINT_REGIONS
 from src.dedupe import dedupe_records
 from src.quality import (
@@ -17,6 +17,96 @@ from src.quality import (
 )
 from src.storage import RECORDS_PATH, overwrite_records
 from src.ui_helpers import clear_brief_history_cache, clear_records_cache, enforce_navigation_lock, load_records_cached
+
+DEMO_SEED_DIR = Path("data") / "demo_seed"
+DEMO_BASELINE_RECORDS = DEMO_SEED_DIR / "records_baseline.jsonl"
+DEMO_BASELINE_META = DEMO_SEED_DIR / "records_baseline.meta.json"
+
+
+def _read_jsonl_rows(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
+def _write_jsonl_rows(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+    path.write_text((payload + "\n") if payload else "", encoding="utf-8")
+
+
+def _save_demo_baseline(records: list[dict]) -> tuple[bool, str]:
+    try:
+        _write_jsonl_rows(DEMO_BASELINE_RECORDS, list(records))
+        DEMO_BASELINE_META.parent.mkdir(parents=True, exist_ok=True)
+        DEMO_BASELINE_META.write_text(
+            json.dumps(
+                {
+                    "saved_at": datetime.now().replace(microsecond=0).isoformat(),
+                    "record_count": len(records),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return True, f"Saved baseline with {len(records)} record(s)."
+    except Exception as exc:
+        return False, f"Could not save baseline: {exc}"
+
+
+def _clear_all_saved_briefs() -> tuple[int, int]:
+    briefs_dir = Path("data") / "briefs"
+    removed_md = 0
+    removed_sidecars = 0
+    if briefs_dir.exists():
+        for md in briefs_dir.glob("brief_*.md"):
+            try:
+                md.unlink()
+                removed_md += 1
+            except OSError:
+                pass
+        for sidecar in briefs_dir.glob("brief_*.meta.json"):
+            try:
+                sidecar.unlink()
+                removed_sidecars += 1
+            except OSError:
+                pass
+        index = briefs_dir / "index.jsonl"
+        if index.exists():
+            try:
+                index.write_text("", encoding="utf-8")
+            except OSError:
+                pass
+    clear_brief_history_cache()
+    return removed_md, removed_sidecars
+
+
+def _reset_to_demo_baseline() -> tuple[bool, str]:
+    baseline_rows = _read_jsonl_rows(DEMO_BASELINE_RECORDS)
+    if not baseline_rows:
+        return False, "No demo baseline found. Save a baseline first."
+    try:
+        overwrite_records(baseline_rows)
+        clear_records_cache()
+        return (
+            True,
+            f"Reset complete: restored {len(baseline_rows)} baseline record(s). "
+            "Saved briefs were not changed.",
+        )
+    except Exception as exc:
+        return False, f"Reset failed: {exc}"
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -178,6 +268,85 @@ with tab_maintenance:
                         st.info("No changes needed.")
             else:
                 st.caption("All region values are already normalized.")
+
+        with st.expander("Cache controls", expanded=False):
+            st.caption(
+                "Clear Streamlit cached data/resources and in-app record/brief history caches "
+                "before a demo run."
+            )
+            confirm_cache_clear = st.checkbox(
+                "Confirm cache clear",
+                value=False,
+                key="admin_confirm_cache_clear",
+            )
+            if st.button(
+                "Clear app cache",
+                type="secondary",
+                width='stretch',
+                disabled=not confirm_cache_clear,
+            ):
+                try:
+                    st.cache_data.clear()
+                except Exception:
+                    pass
+                try:
+                    st.cache_resource.clear()
+                except Exception:
+                    pass
+                clear_records_cache()
+                clear_brief_history_cache()
+                st.success("Cache cleared.")
+                st.rerun()
+
+        with st.expander("Demo baseline reset", expanded=False):
+            baseline_meta = {}
+            if DEMO_BASELINE_META.exists():
+                try:
+                    obj = json.loads(DEMO_BASELINE_META.read_text(encoding="utf-8"))
+                    if isinstance(obj, dict):
+                        baseline_meta = obj
+                except Exception:
+                    baseline_meta = {}
+
+            baseline_rows = _read_jsonl_rows(DEMO_BASELINE_RECORDS)
+            if baseline_rows:
+                st.caption(
+                    f"Baseline ready: {len(baseline_rows)} record(s) | "
+                    f"saved_at={baseline_meta.get('saved_at', '-')}"
+                )
+            else:
+                st.caption("No baseline saved yet.")
+
+            st.caption(
+                "Use this to lock your demo start state (e.g., 5 records queued and not briefed), "
+                "then reset to it before each run."
+            )
+            st.caption("Reset restores records only and keeps Saved Briefs.")
+
+            d1, d2 = st.columns(2)
+            with d1:
+                if st.button("Save current records as demo baseline", type="secondary", width='stretch'):
+                    ok, msg = _save_demo_baseline(records)
+                    (st.success if ok else st.error)(msg)
+                    if ok:
+                        st.rerun()
+
+            with d2:
+                confirm_demo_reset = st.checkbox(
+                    "Confirm reset to baseline records",
+                    value=False,
+                    key="admin_confirm_demo_baseline_reset",
+                )
+                if st.button(
+                    "Reset records to demo baseline",
+                    type="primary",
+                    width='stretch',
+                    disabled=not confirm_demo_reset,
+                ):
+                    ok, msg = _reset_to_demo_baseline()
+                    (st.success if ok else st.error)(msg)
+                    if ok:
+                        st.rerun()
 
         with st.expander("Purge deleted briefs", expanded=False):
             BRIEFS_DIR = Path("data") / "briefs"
