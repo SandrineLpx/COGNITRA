@@ -179,7 +179,7 @@ def _replace_rec_citations_with_sources(text: str, record_lookup: Optional[Dict[
             tooltip_multiline = _wrap_tooltip_lines(tooltip)
             tags.append(
                 f'<span class="brief-source" data-tooltip="{escape(tooltip_multiline, quote=True)}" '
-                f'title="{escape(tooltip_multiline, quote=True)}" tabindex="0">{escape(label)}</span>'
+                f'tabindex="0">{escape(label)}</span>'
             )
         return "(" + ", ".join(tags) + ")"
 
