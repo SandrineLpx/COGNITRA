@@ -222,7 +222,7 @@ UNCERTAINTY_WORDS = (
     r"reconsider|reviewing|speculation)\b"
 )
 
-# Topics that trigger mandatory CONFLICTS & UNCERTAINTY in the weekly brief.
+# Topics that trigger mandatory CONFLICTS & UNCERTAINTY in the executive brief.
 UNCERTAINTY_TOPICS = {
     "OEM Strategy & Powertrain Shifts",
     "Financial & Business Performance",

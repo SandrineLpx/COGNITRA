@@ -8,7 +8,7 @@ Key companies tracked for automotive closure systems market intelligence. Primar
 
 ---
 ## Our Company
-- **Apex Mobility AG (Apex Mobility)** - German, latches and closure systems
+- **Apex Mobility** - Latches and closure systems
 
 ## Direct Competitors (Closure Systems Tier-1 Suppliers)
 

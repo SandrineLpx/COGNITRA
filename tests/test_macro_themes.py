@@ -580,7 +580,7 @@ class TestMercedesBloombergRegression:
             title="Mercedes unveils CLA EV",
             source_type="Bloomberg",
             publish_date="2026-01-29",  # Event date incorrectly extracted by LLM
-            publish_date_confidence="High",
+            publish_date_confidence="Low",  # Low confidence allows header override
             keywords=["mercedes", "ev", "launch", "software", "voice controls"],
         )
         source_text = (

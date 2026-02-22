@@ -4,9 +4,11 @@ import base64
 from collections import Counter
 from datetime import datetime, timezone
 import html
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -42,6 +44,8 @@ _RULE_LABELS = {
     "priority_changed_by_rules": "Priority changed by rules",
     "computed_confidence": "Confidence recomputed",
 }
+_PT_TZ = ZoneInfo("America/Los_Angeles")
+_HAS_STREAMLIT_PDF = bool(importlib.util.find_spec("streamlit_pdf"))
 
 def _friendly_rule_name(rule: str) -> str:
     key = str(rule or "")
@@ -140,21 +144,43 @@ def _render_pdf_embed(pdf_path: Optional[Path], height: int = 620) -> None:
     if not pdf_path:
         st.caption("No original PDF attached.")
         return
+
     try:
         pdf_bytes = pdf_path.read_bytes()
-        if not pdf_bytes:
-            st.caption("Original PDF is empty.")
+    except Exception as exc:
+        st.caption(f"PDF exists but could not be read: {exc}")
+        return
+
+    if not pdf_bytes:
+        st.caption("Original PDF is empty.")
+        return
+
+    native_error = ""
+    try:
+        # Native Streamlit PDF viewer (requires streamlit-pdf extra package).
+        if _HAS_STREAMLIT_PDF:
+            st.pdf(pdf_bytes, height=int(height))
             return
+    except Exception as exc:
+        native_error = str(exc)
+
+    # Fallback: browser iframe data URI.
+    try:
         pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
         st.markdown(
             (
-                f'<embed src="data:application/pdf;base64,{pdf_b64}" '
-                f'type="application/pdf" width="100%" height="{int(height)}px" />'
+                f'<iframe src="data:application/pdf;base64,{pdf_b64}" '
+                f'width="100%" height="{int(height)}px" style="border:0;"></iframe>'
             ),
             unsafe_allow_html=True,
         )
-    except Exception:
-        st.caption("PDF exists but could not be rendered.")
+        if not _HAS_STREAMLIT_PDF:
+            st.caption("Using fallback viewer (install `streamlit[pdf]` for native PDF rendering).")
+        elif native_error:
+            st.caption("Using fallback viewer (native renderer unavailable for this file).")
+        return
+    except Exception as exc:
+        st.caption(f"PDF exists but could not be rendered. {exc}")
 
 
 def _resolve_record_pdf_path(rec: Optional[Dict[str, Any]]) -> tuple[str, Optional[Path], str]:
@@ -360,6 +386,19 @@ def _parse_iso_date(value: Any) -> Optional[datetime]:
         return datetime.fromisoformat(s)
     except Exception:
         return None
+
+
+def _created_date_pt_label(value: Any) -> str:
+    dt = _parse_iso_date(value)
+    if dt is None:
+        return "-"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        dt = dt.astimezone(_PT_TZ)
+    except Exception:
+        pass
+    return dt.strftime("%Y-%m-%d")
 
 
 def _auto_approve_eligible(rec: Dict[str, Any]) -> bool:
@@ -582,7 +621,12 @@ if not records:
 rows = []
 brief_history = load_brief_history()
 for rec in records:
-    created_dt = pd.to_datetime(rec.get("created_at"), errors="coerce")
+    created_dt_raw = pd.to_datetime(rec.get("created_at"), errors="coerce", utc=True)
+    created_dt = (
+        created_dt_raw.tz_convert(_PT_TZ).tz_localize(None)
+        if pd.notna(created_dt_raw)
+        else pd.NaT
+    )
     publish_dt = pd.to_datetime(rec.get("publish_date"), errors="coerce")
     rec_id = str(rec.get("record_id") or "")
     latest_shared = latest_brief_entry_for_record(brief_history, rec_id)
@@ -858,7 +902,6 @@ if effective_topics:
 fdf = df[mask].copy().sort_values(by="_sort_dt", ascending=False, na_position="last")
 
 pending_count = int((fdf["review_status"] == "Pending").sum()) if not fdf.empty else 0
-auto_eligible_count = int(fdf["_auto_approve_eligible"].fillna(False).sum()) if not fdf.empty else 0
 low_conf_pending_count = int(((fdf["review_status"] == "Pending") & (fdf["confidence"] == "Low")).sum()) if not fdf.empty else 0
 
 if fdf.empty:
@@ -908,7 +951,7 @@ with queue_col:
         display_queue = queue
 
         st.markdown(
-            f"**Pending: {pending_count} | Auto-eligible: {auto_eligible_count} | "
+            f"**Pending: {pending_count} | "
             f"Low-confidence pending: {low_conf_pending_count} | "
             f"High priority: {int((fdf['priority'] == 'High').sum())} | "
             f"Marked duplicate: {int(fdf['is_duplicate'].fillna(False).sum())}**"
@@ -1068,14 +1111,13 @@ with detail_col:
         if decision_status_key not in st.session_state:
             st.session_state[decision_status_key] = current_status if current_status in status_options else "Pending"
 
-        ds1, ds2 = st.columns([2.2, 1.0])
-        with ds1:
+        decision_left, _decision_spacer = st.columns([1.35, 2.65])
+        with decision_left:
             selected_status = st.selectbox(
                 "Status",
                 options=status_options,
                 key=decision_status_key,
             )
-        with ds2:
             if st.button("Update Status", type="primary", key=f"update_status_{record_id}", use_container_width=True):
                 changed = False
                 updated = {
@@ -1109,16 +1151,13 @@ with detail_col:
             st.markdown(
                 f"**Source:** {str(rec.get('source_type') or '-')}  \n"
                 f"**Publish date:** {str(rec.get('publish_date') or '-')}  \n"
-                f"**Added date:** {str(rec.get('created_at') or '-')[:10]}"
+                f"**Added date:** {_created_date_pt_label(rec.get('created_at'))}"
             )
         with context_col2:
             st.markdown(
                 f"**Actor type:** {str(rec.get('actor_type') or '-')}  \n"
                 f"**Regions relevant:** {join_list(rec.get('regions_relevant_to_apex_mobility')) or '-'}"
             )
-
-        if _auto_approve_eligible(rec) and current_status == "Pending":
-            st.info("Auto-approve eligible", icon=None)
 
         rec_obj = None
         ok = False

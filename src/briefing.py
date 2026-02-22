@@ -80,7 +80,7 @@ def render_weekly_brief_md(records: List[Dict], week_range: str) -> str:
     other = [r for r in records if not is_share_ready(r)]
 
     lines: List[str] = []
-    lines.append("WEEKLY INTELLIGENCE BRIEF\n")
+    lines.append("EXECUTIVE INTELLIGENCE BRIEF\n")
     lines.append(f"Week: {week_range}\n\n")
 
     if share_ready:
@@ -106,14 +106,14 @@ def render_weekly_brief_md(records: List[Dict], week_range: str) -> str:
 
 def render_exec_email(records: List[Dict], week_range: str) -> Tuple[str, str]:
     if not records:
-        subject = f"Weekly Intelligence Brief ({week_range})"
+        subject = f"Executive Intelligence Brief ({week_range})"
         body = "No items selected for this week."
         return subject, body
 
     share_ready = [r for r in records if is_share_ready(r)]
     other = [r for r in records if not is_share_ready(r)]
 
-    subject = f"Weekly Intelligence Brief ({week_range})"
+    subject = f"Executive Intelligence Brief ({week_range})"
     lines: List[str] = []
     lines.append("Hello team,\n\n")
     if share_ready:
@@ -139,7 +139,7 @@ def render_exec_email(records: List[Dict], week_range: str) -> Tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# LLM-synthesized weekly executive brief
+# LLM-synthesized executive brief
 # ---------------------------------------------------------------------------
 
 _STRIP_FIELDS = {
@@ -153,6 +153,7 @@ _MAX_RECORDS_FOR_SYNTHESIS = 20
 _UNCERTAINTY_WORDS = re.compile(UNCERTAINTY_WORDS, re.IGNORECASE)
 _REC_REF_RE = re.compile(r"\bREC\s*[:#]\s*([A-Za-z0-9_-]+)\b", re.IGNORECASE)
 _TITLE_HEAD_RE = re.compile(r"^\s*#*\s*([A-Z][A-Z0-9 &/\-()]+)\s*$")
+_DETAILS_SUMMARY_ANY_RE = re.compile(r"<summary>\s*(.*?)\s*</summary>", re.IGNORECASE)
 _CLAIM_HEADINGS = {
     "EXECUTIVE SUMMARY",
     "HIGH PRIORITY DEVELOPMENTS",
@@ -271,17 +272,34 @@ def _is_structural_topic_label_bullet(line: str, section: str) -> bool:
     return bool(candidate) and candidate in _CANON_TOPICS_LOWER
 
 
+def _normalize_heading_candidate(raw_line: str) -> str:
+    line = str(raw_line or "").strip()
+    if not line:
+        return ""
+    m = _DETAILS_SUMMARY_ANY_RE.search(line)
+    if m:
+        line = str(m.group(1) or "").strip()
+    line = re.sub(r"^\s*#+\s*", "", line).strip()
+    line = line.replace("**", "").replace("__", "").strip()
+    line = re.sub(r"[:：]\s*$", "", line).strip()
+    upper = line.upper()
+    return upper if upper in _KNOWN_HEADINGS else ""
+
+
 def _extract_brief_lines_by_section(text: str) -> List[Tuple[str, str]]:
     lined: List[Tuple[str, str]] = []
     current = ""
     for raw in (text or "").splitlines():
         line = raw.rstrip()
-        m = _TITLE_HEAD_RE.match(line.strip())
-        if m:
-            heading = m.group(1).strip()
-            if heading in _KNOWN_HEADINGS:
-                current = heading
-                continue
+        heading = _normalize_heading_candidate(line)
+        if not heading:
+            m = _TITLE_HEAD_RE.match(line.strip())
+            if m:
+                cand = m.group(1).strip()
+                heading = cand if cand in _KNOWN_HEADINGS else ""
+        if heading:
+            current = heading
+            continue
         if current:
             lined.append((current, line))
     return lined
@@ -291,11 +309,13 @@ def _validate_brief_text_for_qc(brief_text: str, valid_ids: set[str]) -> List[st
     errors: List[str] = []
     has_rec_labels = bool(_REC_REF_RE.search(brief_text or ""))
     exec_bullets: List[str] = []
+    saw_exec_section = False
     for section, line in _extract_brief_lines_by_section(brief_text):
         text = line.strip()
         if not text:
             continue
         if section == "EXECUTIVE SUMMARY":
+            saw_exec_section = True
             if not _is_bullet_line(text):
                 errors.append(f"EXECUTIVE SUMMARY must be bullets only (remove prose line): {text[:120]}")
                 continue
@@ -321,6 +341,8 @@ def _validate_brief_text_for_qc(brief_text: str, valid_ids: set[str]) -> List[st
             errors.append(
                 "EXECUTIVE SUMMARY opener repetition: no more than one bullet may start with 'Apex Mobility'."
             )
+    if saw_exec_section and not exec_bullets:
+        errors.append("EXECUTIVE SUMMARY must contain bullet points.")
     return errors
 
 
@@ -419,7 +441,7 @@ def _build_synthesis_prompt(records: List[Dict], week_range: str) -> str:
     intro = (
         "Draft a single-record executive alert with high signal density."
         if is_single
-        else "Draft a weekly executive brief."
+        else "Draft an executive brief."
     )
 
     # ── EXECUTIVE SUMMARY: portfolio outlook only, no raw OEM facts ─────────
@@ -707,7 +729,7 @@ def synthesize_weekly_brief_llm(
     web_check: bool = False,
     model_override: Optional[str] = None,
 ) -> Tuple[str, Dict[str, Any]]:
-    """Generate an LLM-synthesized weekly executive brief from approved records.
+    """Generate an LLM-synthesized executive brief from approved records.
 
     Returns (brief_text, usage_dict).
     """

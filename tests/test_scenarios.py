@@ -6,7 +6,7 @@ Run with: pytest test_scenarios.py -v
 import pytest
 import json
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from src.storage import new_record_id, utc_now_iso
 from src.dedupe import (
@@ -20,8 +20,6 @@ from src.briefing import (
     select_weekly_candidates,
     render_weekly_brief_md,
     render_exec_email,
-    _build_synthesis_prompt,
-    _choose_brief_mode,
 )
 from src.text_clean_chunk import clean_and_chunk
 
@@ -237,8 +235,9 @@ class TestOWeeklyBriefing:
 
     def test_select_weekly_candidates_filters_by_days(self):
         """Should only include records from the last N days."""
-        old = sample_record(publish_date="2026-02-01")
-        recent = sample_record(publish_date="2026-02-12")
+        today = date.today()
+        old = sample_record(publish_date=str(today - timedelta(days=30)))
+        recent = sample_record(publish_date=str(today - timedelta(days=2)))
 
         records = [old, recent]
         candidates = select_weekly_candidates(records, days=7)
@@ -248,8 +247,9 @@ class TestOWeeklyBriefing:
 
     def test_share_ready_items_prioritized(self):
         """Share-ready items (High/High) should come first."""
-        share_ready = sample_record(title="Share-ready story", priority="High", confidence="High")
-        not_ready = sample_record(title="Non-share-ready story", priority="Low", confidence="Low")
+        today = str(date.today())
+        share_ready = sample_record(title="Share-ready story", priority="High", confidence="High", publish_date=today)
+        not_ready = sample_record(title="Non-share-ready story", priority="Low", confidence="Low", publish_date=today)
 
         records = [not_ready, share_ready]
         candidates = select_weekly_candidates(records, days=7, include_excluded=True)
@@ -259,8 +259,9 @@ class TestOWeeklyBriefing:
 
     def test_excluded_items_suppressed_by_default(self):
         """Items marked is_duplicate should be filtered unless flag is set."""
-        primary = sample_record(is_duplicate=False)
-        duplicate = sample_record(is_duplicate=True, duplicate_story_of=primary["record_id"])
+        today = str(date.today())
+        primary = sample_record(is_duplicate=False, publish_date=today)
+        duplicate = sample_record(is_duplicate=True, duplicate_story_of=primary["record_id"], publish_date=today)
 
         records = [primary, duplicate]
 
@@ -306,7 +307,7 @@ class TestBriefRendering:
 
         subject, body = render_exec_email(records, "Feb 5-12, 2026")
 
-        assert "Weekly Intelligence Brief" in subject
+        assert "Executive Intelligence Brief" in subject
         assert "Critical Update" in body
         assert "Hello team" in body
 
@@ -319,44 +320,9 @@ class TestBriefRendering:
         assert "No items selected" in body
 
 
-class TestSingleRecordSynthesisPrompt:
-    def test_single_mode_config_is_tight(self):
-        mode = _choose_brief_mode(1)
-        assert mode["name"] == "single"
-        assert mode["max_words"] == "350-450"
-        assert mode["exec_bullets"] == "2"
-        assert mode["priority_bullets"] == "1"
-        assert mode["actions_bullets"] == "2"
-        assert mode["allow_trends"] is False
-        assert mode["include_empty_regions"] is False
-        assert mode["include_topics"] is False
-
-    def test_single_record_prompt_enforces_executive_alert_structure(self):
-        rec = sample_record(title="Single item", priority="High", confidence="High")
-        prompt = _build_synthesis_prompt([rec], "Feb 5-12, 2026")
-
-        assert "EXECUTIVE ALERT" in prompt
-        assert "Target length: 350-450 words." in prompt
-        # Executive Summary: implications-only job description
-        assert "SECTION JOB: State Apex Mobility strategic implications only." in prompt
-        assert "Sentence 1: the Apex Mobility implication" in prompt
-        # High Priority: Supplier Implications sub-field format
-        assert "Supplier Implications:" in prompt
-        # Recommended Actions: richer format with Trigger + Deliverable in single mode
-        assert "Owner + Action + Time horizon + Trigger + Deliverable" in prompt
-        # EMERGING TRENDS heading should not appear as an output section (single mode)
-        # The words may still appear in procedure/rule text, so check for section heading format
-        assert "\nEMERGING TRENDS\n" not in prompt
-
-    def test_multi_record_prompt_enforces_topic_label_and_action_specificity_format(self):
-        rec1 = sample_record(title="Item 1", priority="High", confidence="High")
-        rec2 = sample_record(title="Item 2", priority="High", confidence="High")
-        rec2["record_id"] = "rec2"
-        prompt = _build_synthesis_prompt([rec1, rec2], "Feb 5-12, 2026")
-
-        assert "Topic label line must be plain text (NOT a bullet)." in prompt
-        assert "Trigger/watch condition (if/when threshold)" in prompt
-        assert "Deliverable artifact (forecast update, risk memo, playbook, dashboard)" in prompt
+# NOTE: TestSingleRecordSynthesisPrompt was moved to scripts/one_off/prompt_snapshot_tests.py
+# Those tests asserted exact prompt wording that changes with each iteration.
+# They are kept as one-off validation scripts, not part of the CI suite.
 
 
 # ============================================================================

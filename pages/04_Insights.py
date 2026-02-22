@@ -181,7 +181,7 @@ def build_executive_snapshot_insights(
     prior: pd.DataFrame,
 ) -> list[str]:
     if recent.empty:
-        return ["Coverage: No records in the last 7 days for the current filter window."]
+        return ["Coverage: No records in the latest filtered window."]
 
     insights: list[str] = []
 
@@ -190,10 +190,10 @@ def build_executive_snapshot_insights(
     if recent_topics:
         top_topics = recent_topics.most_common(2)
         topic_headline = ", ".join(f"{name} ({count})" for name, count in top_topics)
-        insights.append(f"Market Shift: Top topic signals this week are {topic_headline}.")
+        insights.append(f"Market Shift: Top topic signals in the latest filtered window are {topic_headline}.")
         rising_topic, topic_delta = _counter_max_delta(recent_topics, prior_topics)
         if rising_topic and topic_delta > 0:
-            insights.append(f"Momentum Signal: Fastest-rising topic is {rising_topic} ({_signed_int(topic_delta)} mention(s) vs prior week).")
+            insights.append(f"Momentum Signal: Fastest-rising topic is {rising_topic} ({_signed_int(topic_delta)} mention(s) vs prior window).")
 
     closure_recent = recent[recent.apply(_record_has_closure_signal, axis=1)].copy()
     closure_prior = prior[prior.apply(_record_has_closure_signal, axis=1)].copy()
@@ -201,7 +201,7 @@ def build_executive_snapshot_insights(
     closure_prior_n = len(closure_prior)
     if closure_recent_n > 0:
         insights.append(
-            f"Closure Signal: Closure-system mentions appear in {closure_recent_n} record(s) ({_signed_int(closure_recent_n - closure_prior_n)} vs prior week)."
+            f"Closure Signal: Closure-system mentions appear in {closure_recent_n} record(s) ({_signed_int(closure_recent_n - closure_prior_n)} vs prior window)."
         )
         closure_regions = Counter(
             str(x)
@@ -214,7 +214,7 @@ def build_executive_snapshot_insights(
         else:
             insights.append("Regional Focus: Closure-system mentions are present, but no footprint region signal was detected.")
     else:
-        insights.append("Closure Signal: No closure-system mention detected in the recent 7-day window.")
+        insights.append("Closure Signal: No closure-system mention detected in the latest filtered window.")
 
     return insights[:5]
 
@@ -420,14 +420,40 @@ if df.empty:
     st.info("No records after selection.")
     st.stop()
 
-# Compute date columns for publish_date (Insights uses published date only)
+# Compute date columns for both date bases used in filters.
 publish_dt = pd.to_datetime(df.get("publish_date"), errors="coerce", utc=True).dt.tz_convert(None)
+upload_dt = pd.to_datetime(df.get("created_at"), errors="coerce", utc=True).dt.tz_convert(None)
 df["publish_date_dt"] = publish_dt
-df["event_day"] = publish_dt.dt.normalize()
+df["upload_date_dt"] = upload_dt
+df["publish_day"] = publish_dt.dt.normalize()
+df["upload_day"] = upload_dt.dt.normalize()
 
 today = pd.Timestamp.today().normalize()
-default_from = (today - pd.Timedelta(days=7)).date()
-default_to = today.date()
+valid_publish_dates = df["publish_day"].dropna()
+valid_upload_dates = df["upload_day"].dropna()
+default_publish_from = valid_publish_dates.min().date() if not valid_publish_dates.empty else (today - pd.Timedelta(days=7)).date()
+default_publish_to = valid_publish_dates.max().date() if not valid_publish_dates.empty else today.date()
+default_upload_from = valid_upload_dates.min().date() if not valid_upload_dates.empty else (today - pd.Timedelta(days=7)).date()
+default_upload_to = valid_upload_dates.max().date() if not valid_upload_dates.empty else today.date()
+
+INS_FILTER_DEFAULTS_VERSION = "v2_full_range"
+if st.session_state.get("_ins_filter_defaults_version") != INS_FILTER_DEFAULTS_VERSION:
+    st.session_state["ins_date_basis"] = "Published date"
+    st.session_state["ins_date_basis_prev"] = "Published date"
+    st.session_state["ins_date_range"] = (default_publish_from, default_publish_to)
+    st.session_state["_ins_filter_defaults_version"] = INS_FILTER_DEFAULTS_VERSION
+date_basis_options = ["Published date", "Upload date"]
+basis_label = str(st.session_state.get("ins_date_basis") or "Published date")
+if basis_label not in date_basis_options:
+    basis_label = "Published date"
+    st.session_state["ins_date_basis"] = basis_label
+
+basis_default_from = default_publish_from if basis_label == "Published date" else default_upload_from
+basis_default_to = default_publish_to if basis_label == "Published date" else default_upload_to
+
+if str(st.session_state.get("ins_date_basis_prev") or "") != basis_label:
+    st.session_state["ins_date_range"] = (basis_default_from, basis_default_to)
+st.session_state["ins_date_basis_prev"] = basis_label
 all_regions = sorted(
     {
         str(x)
@@ -468,11 +494,18 @@ with f3:
         label_visibility="collapsed",
     )
 with f4:
-    st.caption("Published date")
+    basis_label = st.selectbox(
+        "Date basis",
+        options=date_basis_options,
+        key="ins_date_basis",
+        label_visibility="collapsed",
+    )
+    basis_default_from = default_publish_from if basis_label == "Published date" else default_upload_from
+    basis_default_to = default_publish_to if basis_label == "Published date" else default_upload_to
 with f5:
     date_range = st.date_input(
         "Date range",
-        value=(default_from, default_to),
+        value=(basis_default_from, basis_default_to),
         key="ins_date_range",
         label_visibility="collapsed",
     )
@@ -481,15 +514,20 @@ with f5:
         if len(date_range) == 2:
             date_from, date_to = date_range
         elif len(date_range) == 1:
-            st.warning("⚠️ Please select both start and end dates for the range.")
+            st.warning("Please select both start and end dates for the range.")
             date_from = date_to = date_range[0]
         else:
-            date_from = date_to = default_from
+            date_from = basis_default_from
+            date_to = basis_default_to
     else:
         date_from = date_to = date_range
+    if date_from > date_to:
+        date_from, date_to = date_to, date_from
 mask = pd.Series(True, index=df.index)
-date_column = df["event_day"]
-mask = mask & df["publish_date_dt"].notna()
+date_dt_col = "publish_date_dt" if basis_label == "Published date" else "upload_date_dt"
+date_day_col = "publish_day" if basis_label == "Published date" else "upload_day"
+date_column = df[date_day_col]
+mask = mask & df[date_dt_col].notna()
 mask = mask & (date_column >= pd.Timestamp(date_from)) & (date_column <= pd.Timestamp(date_to))
 if "review_status" in df:
     mask = mask & df["review_status"].astype(str).isin(["Approved"])
@@ -507,17 +545,20 @@ if str(filter_search).strip():
         mask = mask & df.apply(lambda row: _insights_matches_tokens(row, search_tokens), axis=1)
 
 fdf = df[mask].copy()
+fdf["event_day"] = fdf[date_day_col]
 if fdf.empty:
     st.warning("No records match current selection.")
     st.stop()
 
 # â”€â”€ KPI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 st.subheader("Executive Snapshot")
-ref_today = pd.Timestamp.today().normalize()
-recent_cutoff = ref_today - pd.Timedelta(days=7)
-prior_cutoff = ref_today - pd.Timedelta(days=14)
-recent = fdf[fdf["event_day"] >= recent_cutoff].copy()
-prior = fdf[(fdf["event_day"] >= prior_cutoff) & (fdf["event_day"] < recent_cutoff)].copy()
+# Anchor snapshot windows to the selected filter end-date, not wall-clock today.
+snapshot_anchor = pd.Timestamp(date_to)
+recent_start = snapshot_anchor - pd.Timedelta(days=6)
+prior_start = recent_start - pd.Timedelta(days=7)
+prior_end = recent_start - pd.Timedelta(days=1)
+recent = fdf[(fdf["event_day"] >= recent_start) & (fdf["event_day"] <= snapshot_anchor)].copy()
+prior = fdf[(fdf["event_day"] >= prior_start) & (fdf["event_day"] <= prior_end)].copy()
 recent_topics = Counter(str(x) for vals in recent.get("topics", []) for x in safe_list(vals))
 prior_topics = Counter(str(x) for vals in prior.get("topics", []) for x in safe_list(vals))
 recent_topic_total = sum(recent_topics.values())
@@ -539,19 +580,19 @@ with sx1:
     ui.kpi_card(
         "Topic Signals",
         recent_topic_total,
-        caption=f"Change vs prior week: {_signed_int(topic_signal_delta)}",
+        caption=f"Change vs prior window: {_signed_int(topic_signal_delta)}",
     )
 with sx2:
     ui.kpi_card(
         "Active Topics",
         active_topics,
-        caption="Distinct active topic clusters this week",
+        caption="Distinct active topic clusters in latest window",
     )
 with sx3:
     ui.kpi_card(
         "Closure-System Mentions",
         closure_recent_n,
-        caption=f"Change vs prior week: {_signed_int(closure_delta)}",
+        caption=f"Change vs prior window: {_signed_int(closure_delta)}",
     )
 with sx4:
     ui.kpi_card(
@@ -570,7 +611,16 @@ for line in snapshot_insights:
         st.markdown(f"- {line}")
 
 # Requested top 3 charts
-st.subheader("Top charts")
+st.subheader("Coverage charts")
+show_all_categories = st.checkbox(
+    "Show all categories",
+    value=False,
+    key="ins_show_all_categories",
+    help="When enabled, charts include every category in the current filter window.",
+)
+topic_limit = None if show_all_categories else 8
+region_limit = None if show_all_categories else 6
+company_limit = None if show_all_categories else 7
 
 topic_long = explode_list_column(fdf[["record_id", "topics"]].copy(), "topics")
 if not topic_long.empty:
@@ -581,9 +631,10 @@ topic_counts_df = (
     .agg(records=("record_id", "nunique"))
     .sort_values("records", ascending=False)
     .rename(columns={"topics": "topic"})
-    .head(8)
     if not topic_long.empty else pd.DataFrame(columns=["topic", "records"])
 )
+if topic_limit:
+    topic_counts_df = topic_counts_df.head(topic_limit)
 
 region_long = explode_list_column(
     fdf[["record_id", "regions_relevant_to_apex_mobility"]].copy(),
@@ -597,9 +648,10 @@ region_counts_df = (
     .agg(records=("record_id", "nunique"))
     .sort_values("records", ascending=False)
     .rename(columns={"regions_relevant_to_apex_mobility": "region"})
-    .head(6)
     if not region_long.empty else pd.DataFrame(columns=["region", "records"])
 )
+if region_limit:
+    region_counts_df = region_counts_df.head(region_limit)
 if not region_counts_df.empty:
     region_total = max(float(region_counts_df["records"].sum()), 1.0)
     region_counts_df["pct"] = (region_counts_df["records"] / region_total * 100.0).round(1)
@@ -613,9 +665,10 @@ company_counts_df = (
     company_long.groupby("company", as_index=False)
     .agg(records=("record_id", "nunique"))
     .sort_values("records", ascending=False)
-    .head(7)
     if not company_long.empty else pd.DataFrame(columns=["company", "records"])
 )
+if company_limit:
+    company_counts_df = company_counts_df.head(company_limit)
 if not company_counts_df.empty:
     company_counts_df = company_counts_df.copy()
     company_counts_df["rank"] = list(range(1, len(company_counts_df) + 1))
@@ -1334,4 +1387,3 @@ with st.expander("Quality related", expanded=False):
                 st.caption("No brief-level QC runs available.")
     else:
         st.info("Run `python scripts/run_quality.py` to populate QC details.")
-    

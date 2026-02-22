@@ -11,7 +11,7 @@ Keep aliases minimal (0–2). Add an alias only if it commonly appears in source
 
 ## Our company
 
-- Apex Mobility AG (Apex Mobility)
+- Apex Mobility
 
 ---
 

@@ -7,6 +7,7 @@ from difflib import unified_diff
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import re
 
@@ -20,6 +21,7 @@ from src.briefing import (
 )
 from src.ui_helpers import (
     clear_brief_history_cache,
+    clear_records_cache,
     enforce_navigation_lock,
     load_brief_history,
     load_records_cached,
@@ -67,6 +69,8 @@ _DETAILS_SUMMARY_RE = re.compile(r"^\s*<summary>\s*(.*?)\s*</summary>\s*$", re.I
 _DETAILS_SUMMARY_ANY_RE = re.compile(r"<summary>\s*(.*?)\s*</summary>", re.IGNORECASE)
 _REC_ID_RE = re.compile(r"\bREC\s*[:#]\s*([A-Za-z0-9_-]+)\b", re.IGNORECASE)
 _REC_CITATION_PAREN_RE = re.compile(r"\(([^)]*\bREC\s*[:#][^)]+)\)", re.IGNORECASE)
+_BRIEF_FILE_TS_RE = re.compile(r"brief_(\d{8})_(\d{6})", re.IGNORECASE)
+_PT_TZ = ZoneInfo("America/Los_Angeles")
 
 
 def _split_brief_sections(text: str) -> List[Tuple[str, str]]:
@@ -187,8 +191,6 @@ def _replace_rec_citations_with_sources(text: str, record_lookup: Optional[Dict[
 
 
 def _ensure_brief_source_css() -> None:
-    if st.session_state.get("_brief_source_css_injected"):
-        return
     st.markdown(
         """
 <style>
@@ -228,7 +230,6 @@ def _ensure_brief_source_css() -> None:
 """,
         unsafe_allow_html=True,
     )
-    st.session_state["_brief_source_css_injected"] = True
 
 
 def _render_brief(text: str, record_lookup: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
@@ -357,6 +358,14 @@ ui.render_page_header(
     active_step="Brief",
 )
 ui.render_sidebar_utilities(model_label="gemini")
+
+# Force fresh data when entering the Brief page.
+clear_brief_history_cache()
+clear_records_cache()
+
+flash_msg = str(st.session_state.pop("wb_flash_message", "") or "").strip()
+if flash_msg:
+    st.success(flash_msg)
 
 BRIEFS_DIR = Path("data") / "briefs"
 BRIEF_INDEX = BRIEFS_DIR / "index.jsonl"
@@ -678,7 +687,11 @@ def _parse_created_at(value: Any) -> Optional[date]:
     if s.endswith("Z"):
         s = s[:-1] + "+00:00"
     try:
-        return datetime.fromisoformat(s).date()
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.astimezone(_PT_TZ)
+        return dt.date()
     except Exception:
         return None
 
@@ -774,12 +787,42 @@ def _friendly_datetime(value: Any) -> str:
         dt = datetime.fromisoformat(s)
     except Exception:
         return s
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
     try:
-        if dt.tzinfo is not None:
-            dt = dt.astimezone()
+        dt = dt.astimezone(_PT_TZ)
     except Exception:
         pass
     return dt.strftime("%b %d, %Y %I:%M %p")
+
+
+def _brief_generated_sort_key(row: Dict[str, Any]) -> Tuple[str, str]:
+    """Stable ordering key for BRIEF-00X codes based on generated time."""
+    created_at = str(row.get("created_at") or "").strip()
+    created_iso = _safe_iso(created_at)
+    if created_iso:
+        return created_iso, str(row.get("file_name") or "")
+
+    file_name = str(row.get("file_name") or "")
+    m = _BRIEF_FILE_TS_RE.search(file_name)
+    if m:
+        date_part = str(m.group(1))
+        time_part = str(m.group(2))
+        try:
+            dt = datetime.strptime(f"{date_part}{time_part}", "%Y%m%d%H%M%S")
+            return dt.replace(tzinfo=timezone.utc).isoformat(), file_name
+        except Exception:
+            pass
+    return "", file_name
+
+
+def _brief_family_key(row: Dict[str, Any]) -> str:
+    file_name = str(row.get("file_name") or "")
+    family = str(row.get("brief_family_id") or "").strip()
+    if family:
+        return family
+    inferred_family, _ = _brief_family_and_version_from_name(file_name)
+    return inferred_family
 
 
 def _saved_brief_rows(records_by_id: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -847,8 +890,18 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
         st.info("No saved brief found yet.")
         return
 
-    for i, row in enumerate(saved_rows):
-        row["brief_code"] = f"BRIEF-{len(saved_rows) - i:03d}"
+    ordered_for_codes = sorted(saved_rows, key=_brief_generated_sort_key)
+    brief_code_by_family: Dict[str, str] = {}
+    for row in ordered_for_codes:
+        family = _brief_family_key(row)
+        if not family:
+            continue
+        if family not in brief_code_by_family:
+            brief_code_by_family[family] = f"BRIEF-{(len(brief_code_by_family) + 1):03d}"
+
+    for row in saved_rows:
+        family = _brief_family_key(row)
+        row["brief_code"] = brief_code_by_family.get(family, "BRIEF-000")
         status_raw = str(row.get("status") or _infer_brief_status(str(row.get("file_name") or ""))).strip().lower()
         if status_raw not in {"final", "superseded", "draft"}:
             status_raw = _infer_brief_status(str(row.get("file_name") or ""))
@@ -863,13 +916,12 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
             label_visibility="collapsed",
         )
     with sf2:
-        if "wb_saved_status_filter_initialized" not in st.session_state:
+        status_options = ["All Statuses", "Final", "Superseded", "Draft"]
+        if str(st.session_state.get("wb_saved_status_filter") or "") not in status_options:
             st.session_state["wb_saved_status_filter"] = "Final"
-            st.session_state["wb_saved_status_filter_initialized"] = True
         status_filter = st.selectbox(
             "Status",
-            options=["All Statuses", "Final", "Superseded", "Draft"],
-            index=1,
+            options=status_options,
             key="wb_saved_status_filter",
             label_visibility="collapsed",
         )
@@ -1333,7 +1385,6 @@ with tab_build:
 
     if not candidates:
         st.warning("No candidates found for this period.")
-        st.stop()
 
     approved_non_excluded = [
         r for r in candidates if normalize_review_status(r.get("review_status")) == "Approved" and not bool(r.get("is_duplicate", False))
@@ -1419,7 +1470,13 @@ with tab_build:
     st.divider()
     st.markdown("## Executive-Ready Output")
 
-    generate_clicked = st.button("Generate AI Brief", type="primary", disabled=not selected_records)
+    can_generate = bool(selected_records)
+    generate_clicked = st.button(
+        "Generate Brief",
+        type="primary",
+        width='stretch',
+        disabled=not can_generate,
+    )
 
     if generate_clicked:
         generated = _synthesize_and_store(
@@ -1439,7 +1496,8 @@ with tab_build:
                     st.session_state.get("weekly_ai_brief_usage") or {},
                 )
                 st.session_state["weekly_ai_brief_last_autosave_path"] = str(auto_path)
-                st.success(f"Auto-saved: {auto_path}")
+                st.session_state["wb_flash_message"] = f"Auto-saved: {auto_path}"
+                st.rerun()
             except Exception as exc:
                 st.error(f"Generated, but auto-save failed: {exc}")
 
@@ -1455,7 +1513,7 @@ with tab_build:
         st.caption(f"Quick preview for {week_range}")
         st.markdown(quick_preview_text)
 
-    st.subheader("AI Brief")
+    st.subheader("Brief")
     if saved_text:
         auto_saved_path = str(st.session_state.get("weekly_ai_brief_last_autosave_path") or "").strip()
         if auto_saved_path:
@@ -1473,16 +1531,17 @@ with tab_build:
         with a1:
             if st.button("Save another copy", type="secondary"):
                 path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
-                st.success(f"Saved: {path}")
+                st.session_state["wb_flash_message"] = f"Saved: {path}"
+                st.rerun()
         with a2:
             download_text = _to_saved_collapsible_markdown(saved_text)
             st.download_button(
                 "Download brief",
                 data=download_text.encode("utf-8"),
-                file_name=f"weekly_brief_{saved_week_range.replace(' ', '_')}.md",
+                file_name=f"executive_brief_{saved_week_range.replace(' ', '_')}.md",
                 mime="text/markdown",
             )
         with st.expander("Copy / Export (raw text)", expanded=False):
             st.text_area("Copy-friendly version", value=saved_text, height=280)
     else:
-        st.info("Generate the AI brief to compare it with the deterministic preview.")
+        st.info("Generate the brief to compare it with the deterministic preview.")

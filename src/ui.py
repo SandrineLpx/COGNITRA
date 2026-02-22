@@ -3,7 +3,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 from html import escape
 from pathlib import Path
-from typing import Dict, Iterator, Optional
+from datetime import date, datetime
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import streamlit as st
 
@@ -338,10 +339,139 @@ def render_workflow_bar(active_step: str) -> None:
     st.markdown("".join(parts), unsafe_allow_html=True)
 
 
+def _format_date_range(value: Any) -> str:
+    if isinstance(value, (tuple, list)):
+        vals = [str(v).strip() for v in value if str(v).strip()]
+        if len(vals) >= 2:
+            return f"{vals[0]} to {vals[1]}"
+        if len(vals) == 1:
+            return vals[0]
+        return ""
+    if isinstance(value, (date, datetime)):
+        return str(value.date() if isinstance(value, datetime) else value)
+    text = str(value or "").strip()
+    return text
+
+
+def _format_list_value(value: Any, max_items: int = 4) -> str:
+    if not isinstance(value, (list, tuple, set)):
+        text = str(value or "").strip()
+        return text
+    items = [str(v).strip() for v in value if str(v).strip()]
+    if not items:
+        return ""
+    if len(items) > max_items:
+        extra = len(items) - max_items
+        return f"{', '.join(items[:max_items])} (+{extra})"
+    return ", ".join(items)
+
+
+def _active_filters_for_step(active_step: Optional[str]) -> List[Tuple[str, str]]:
+    step = str(active_step or "").strip().lower()
+    ss = st.session_state
+    out: List[Tuple[str, str]] = []
+
+    if step == "review":
+        query = str(ss.get("review_query") or "").strip()
+        if query:
+            out.append(("Search", query))
+        region = str(ss.get("review_quick_region") or "").strip()
+        if region and region != "All Regions":
+            out.append(("Region", region))
+        topic = str(ss.get("review_quick_topic") or "").strip()
+        if topic and topic != "All Topics":
+            out.append(("Topic", topic))
+        basis = str(ss.get("review_date_basis") or "").strip()
+        if basis:
+            out.append(("Date basis", basis))
+        rng = _format_date_range(ss.get("review_date_range"))
+        if rng:
+            out.append(("Date range", rng))
+        status = str(ss.get("review_adv_status") or "").strip()
+        if status and status != "All Statuses":
+            out.append(("Status", status))
+        priority = str(ss.get("review_adv_priority") or "").strip()
+        if priority and priority != "All Priorities":
+            out.append(("Priority", priority))
+        conf = str(ss.get("review_adv_conf") or "").strip()
+        if conf and conf != "All Confidence Levels":
+            out.append(("Confidence", conf))
+        source = str(ss.get("review_adv_source") or "").strip()
+        if source and source != "All Sources":
+            out.append(("Source", source))
+        adv_regions = _format_list_value(ss.get("review_adv_regions"))
+        if adv_regions:
+            out.append(("Adv regions", adv_regions))
+        themes = _format_list_value(ss.get("review_sel_themes"))
+        if themes:
+            out.append(("Themes", themes))
+        adv_topics = _format_list_value(ss.get("review_sel_topics"))
+        if adv_topics:
+            out.append(("Adv topics", adv_topics))
+        hide_briefed = ss.get("review_hide_briefed")
+        if isinstance(hide_briefed, bool):
+            out.append(("Hide briefed", "Yes" if hide_briefed else "No"))
+        return out
+
+    if step == "brief":
+        query = str(ss.get("wb_filter_search") or "").strip()
+        if query:
+            out.append(("Search", query))
+        region = str(ss.get("wb_quick_region") or "").strip()
+        if region and region != "All Regions":
+            out.append(("Region", region))
+        topic = str(ss.get("wb_quick_topic") or "").strip()
+        if topic and topic != "All Topics":
+            out.append(("Topic", topic))
+        basis = str(ss.get("wb_basis") or "").strip()
+        if basis:
+            out.append(("Date basis", basis))
+        rng = _format_date_range(ss.get("wb_date_range"))
+        if rng:
+            out.append(("Date range", rng))
+        hide_shared = ss.get("wb_hide_shared")
+        if isinstance(hide_shared, bool):
+            out.append(("Hide shared", "Yes" if hide_shared else "No"))
+        return out
+
+    if step == "insights":
+        query = str(ss.get("ins_filter_search") or "").strip()
+        if query:
+            out.append(("Search", query))
+        region = str(ss.get("ins_filter_region") or "").strip()
+        if region and region != "All Regions":
+            out.append(("Region", region))
+        topic = str(ss.get("ins_filter_topic") or "").strip()
+        if topic and topic != "All Topics":
+            out.append(("Topic", topic))
+        basis = str(ss.get("ins_date_basis") or "").strip()
+        if basis:
+            out.append(("Date basis", basis))
+        rng = _format_date_range(ss.get("ins_date_range"))
+        if rng:
+            out.append(("Date range", rng))
+        show_all = ss.get("ins_show_all_categories")
+        if isinstance(show_all, bool):
+            out.append(("All categories", "Yes" if show_all else "No"))
+        return out
+
+    return out
+
+
+def render_active_filters(active_step: Optional[str] = None) -> None:
+    items = _active_filters_for_step(active_step)
+    if not items:
+        st.caption("Active filters: none")
+        return
+    text = " | ".join(f"{k}: {v}" for k, v in items)
+    st.caption(f"Active filters: {text}")
+
+
 def render_page_header(title: str, subtitle: Optional[str] = None, active_step: Optional[str] = None) -> None:
     st.markdown(f'<h1 class="cg-page-title">{title}</h1>', unsafe_allow_html=True)
     if subtitle:
         st.markdown(f'<div class="cg-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+    render_active_filters(active_step=active_step)
     st.markdown('<div class="cg-divider"></div>', unsafe_allow_html=True)
 
 

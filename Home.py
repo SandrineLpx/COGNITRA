@@ -63,6 +63,10 @@ st.markdown(
     "</p>"
     "<p style='margin:0 0 0.25rem; font-size:0.9rem; color:#64748B;'>"
     "Cognitra turns documents into validated records — then synthesizes."
+    "</p>"
+    "<p style='margin:0.4rem 0 0; font-size:0.82rem; color:#94A3B8;'>"
+    "Currently deployed for <strong style='color:#64748B;'>Apex Mobility</strong> "
+    "(automotive closure systems) — designed to extend to any industry."
     "</p>",
     unsafe_allow_html=True,
 )
@@ -108,26 +112,6 @@ with ui.card("Pipeline Overview"):
 st.markdown("<div style='height:0.9rem;'></div>", unsafe_allow_html=True)
 
 
-# CTA (PRIMARY START)
-st.markdown(
-    "<p style='font-size:0.85rem; color:#64748B; margin:0 0 0.45rem;'>Start here:</p>",
-    unsafe_allow_html=True,
-)
-
-b1, b2, b3, _ = st.columns([1, 1, 1, 3])
-with b1:
-    if st.button("Ingest a PDF", type="primary", use_container_width=True):
-        st.switch_page("pages/01_Ingest.py")
-with b2:
-    if st.button("Review queue", type="secondary", use_container_width=True):
-        st.switch_page("pages/02_Review.py")
-with b3:
-    if st.button("Generate weekly brief", type="secondary", use_container_width=True):
-        st.switch_page("pages/03_Brief.py")
-
-st.markdown("<div style='height:0.55rem;'></div>", unsafe_allow_html=True)
-
-
 # KPI (STATUS)
 st.markdown(
     """
@@ -163,25 +147,38 @@ with k4:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
+st.markdown("<div style='height:0.7rem;'></div>", unsafe_allow_html=True)
 
-# CONTROLLED AI USAGE
-with ui.card("Controlled AI Usage"):
-    st.markdown(
-        "- One model call per document\n"
-        "- Deterministic postprocessing\n"
-        "- No synthesis from raw PDFs\n"
-        "- Human review before reporting"
-    )
-    st.markdown(
-        "<p style='font-size:0.8rem; color:#64748B; margin-top:0.6rem;'>"
-        "Cost-aware: one extraction call per document. Deterministic rendering thereafter."
-        "</p>",
-        unsafe_allow_html=True,
-    )
 
+# CTA (PRIMARY START)
+b1, b2, b3, _ = st.columns([1, 1, 1, 3])
+with b1:
+    if st.button("Ingest a PDF", type="primary", use_container_width=True):
+        st.switch_page("pages/01_Ingest.py")
+with b2:
+    if st.button("Review queue", type="secondary", use_container_width=True):
+        st.switch_page("pages/02_Review.py")
+with b3:
+    if st.button("Generate executive brief", type="secondary", use_container_width=True):
+        st.switch_page("pages/03_Brief.py")
+
+
+# DESIGN PRINCIPLES
 st.markdown(
-    "<p style='text-align:center; font-size:0.8rem; color:#94A3B8; margin:1.5rem 0 0.5rem;'>"
-    "Briefs are rendered from approved records — never from raw documents."
+    "<p style='text-align:center; font-size:0.78rem; color:#94A3B8; margin:1.2rem 0 0.3rem; letter-spacing:0.03em;'>"
+    "One model call per document · Deterministic scoring · Human review before reporting"
+    "</p>",
+    unsafe_allow_html=True,
+)
+
+# UX CONCEPT
+st.markdown(
+    "<p style='text-align:center; font-size:0.82rem; color:#64748B; margin:0.8rem 0 0.3rem;'>"
+    "This Streamlit app is the working system. "
+    "For the intended production UX, see the "
+    "<a href='https://cognitra-mockup.lovable.app/' target='_blank' "
+    "style='color:#3B82F6; text-decoration:none; font-weight:600;'>"
+    "interactive prototype</a> (static mockup — not connected to live data)."
     "</p>",
     unsafe_allow_html=True,
 )

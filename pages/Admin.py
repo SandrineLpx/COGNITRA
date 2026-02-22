@@ -21,6 +21,8 @@ from src.ui_helpers import clear_brief_history_cache, clear_records_cache, enfor
 DEMO_SEED_DIR = Path("data") / "demo_seed"
 DEMO_BASELINE_RECORDS = DEMO_SEED_DIR / "records_baseline.jsonl"
 DEMO_BASELINE_META = DEMO_SEED_DIR / "records_baseline.meta.json"
+BRIEFS_DIR = Path("data") / "briefs"
+BRIEF_INDEX = BRIEFS_DIR / "index.jsonl"
 
 
 def _read_jsonl_rows(path: Path) -> list[dict]:
@@ -67,7 +69,7 @@ def _save_demo_baseline(records: list[dict]) -> tuple[bool, str]:
 
 
 def _clear_all_saved_briefs() -> tuple[int, int]:
-    briefs_dir = Path("data") / "briefs"
+    briefs_dir = BRIEFS_DIR
     removed_md = 0
     removed_sidecars = 0
     if briefs_dir.exists():
@@ -93,6 +95,104 @@ def _clear_all_saved_briefs() -> tuple[int, int]:
     return removed_md, removed_sidecars
 
 
+def _latest_saved_brief_file_name() -> str:
+    files = [p for p in BRIEFS_DIR.glob("brief_*.md") if p.is_file()]
+    if not files:
+        return ""
+    latest = sorted(files, key=lambda p: (p.stat().st_mtime, p.name), reverse=True)[0]
+    return latest.name
+
+
+def _delete_saved_brief_by_name(file_name: str) -> tuple[bool, str]:
+    target = Path(str(file_name or "")).name
+    if not target:
+        return False, "No brief selected."
+
+    removed_any = False
+    md_path = BRIEFS_DIR / target
+    sidecar_path = md_path.with_suffix(".meta.json")
+
+    try:
+        if md_path.exists():
+            md_path.unlink()
+            removed_any = True
+    except Exception as exc:
+        return False, f"Could not delete {target}: {exc}"
+
+    try:
+        if sidecar_path.exists():
+            sidecar_path.unlink()
+            removed_any = True
+    except Exception as exc:
+        return False, f"Deleted markdown but could not delete sidecar for {target}: {exc}"
+
+    rows = _read_jsonl_rows(BRIEF_INDEX)
+    if rows:
+        kept = [row for row in rows if Path(str(row.get("file") or "")).name != target]
+        if len(kept) != len(rows):
+            payload = "\n".join(json.dumps(r, ensure_ascii=False) for r in kept)
+            BRIEF_INDEX.write_text((payload + "\n") if payload else "", encoding="utf-8")
+            removed_any = True
+
+    clear_brief_history_cache()
+    if removed_any:
+        return True, f"Deleted latest brief: {target}"
+    return False, f"Latest brief file not found: {target}"
+
+
+def _is_demo_brief_row(row: dict) -> bool:
+    usage = row.get("usage")
+    if isinstance(usage, dict):
+        provider = str(usage.get("provider") or "").strip().lower()
+        model = str(usage.get("model") or "").strip().lower()
+        seed_file = str(usage.get("seed_file") or "").strip()
+        if provider == "demo" or model == "prebuilt-brief-md" or bool(seed_file):
+            return True
+    return False
+
+
+def _delete_demo_mode_briefs() -> tuple[int, int, int]:
+    rows = _read_jsonl_rows(BRIEF_INDEX)
+    if not rows:
+        return 0, 0, 0
+
+    keep_rows: list[dict] = []
+    remove_rows: list[dict] = []
+    for row in rows:
+        if _is_demo_brief_row(row):
+            remove_rows.append(row)
+        else:
+            keep_rows.append(row)
+
+    removed_md = 0
+    removed_sidecars = 0
+    for row in remove_rows:
+        file_name = Path(str(row.get("file") or "")).name
+        if not file_name:
+            continue
+        md_path = BRIEFS_DIR / file_name
+        sidecar_path = md_path.with_suffix(".meta.json")
+        try:
+            if md_path.exists():
+                md_path.unlink()
+                removed_md += 1
+        except OSError:
+            pass
+        try:
+            if sidecar_path.exists():
+                sidecar_path.unlink()
+                removed_sidecars += 1
+        except OSError:
+            pass
+
+    if len(keep_rows) != len(rows):
+        payload = "\n".join(json.dumps(r, ensure_ascii=False) for r in keep_rows)
+        BRIEF_INDEX.write_text((payload + "\n") if payload else "", encoding="utf-8")
+        clear_brief_history_cache()
+
+    return removed_md, removed_sidecars, len(remove_rows)
+
+
 def _reset_to_demo_baseline() -> tuple[bool, str]:
     baseline_rows = _read_jsonl_rows(DEMO_BASELINE_RECORDS)
     if not baseline_rows:
@@ -100,10 +200,12 @@ def _reset_to_demo_baseline() -> tuple[bool, str]:
     try:
         overwrite_records(baseline_rows)
         clear_records_cache()
+        removed_md, removed_sidecars, removed_index = _delete_demo_mode_briefs()
         return (
             True,
             f"Reset complete: restored {len(baseline_rows)} baseline record(s). "
-            "Saved briefs were not changed.",
+            f"Removed {removed_index} demo brief index entr{'y' if removed_index == 1 else 'ies'} "
+            f"({removed_md} markdown, {removed_sidecars} sidecar).",
         )
     except Exception as exc:
         return False, f"Reset failed: {exc}"
@@ -148,6 +250,52 @@ ui.render_page_header(
     active_step=None,
 )
 ui.render_sidebar_utilities(model_label="gemini")
+
+with ui.card("Demo baseline reset"):
+    baseline_meta = {}
+    if DEMO_BASELINE_META.exists():
+        try:
+            obj = json.loads(DEMO_BASELINE_META.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                baseline_meta = obj
+        except Exception:
+            baseline_meta = {}
+
+    baseline_rows = _read_jsonl_rows(DEMO_BASELINE_RECORDS)
+    if baseline_rows:
+        st.caption(
+            f"Baseline ready: {len(baseline_rows)} record(s) | "
+            f"saved_at={baseline_meta.get('saved_at', '-')}"
+        )
+    else:
+        st.caption("No baseline saved yet.")
+
+    st.caption(
+        "Use this to lock your demo start state (e.g., 5 records queued and not briefed), "
+        "then reset to it before each run."
+    )
+    st.caption(
+        "Reset restores baseline records and deletes demo-mode saved briefs "
+        "(prebuilt/no-API briefs) so baseline records are visible again."
+    )
+
+    controls_col, _ = st.columns([1.1, 1.9])
+    with controls_col:
+        confirm_demo_reset = st.checkbox(
+            "Confirm reset baseline records + remove demo-mode briefs",
+            value=False,
+            key="admin_confirm_demo_baseline_reset",
+        )
+        if st.button(
+            "Reset to demo baseline",
+            type="primary",
+            width='stretch',
+            disabled=not confirm_demo_reset,
+        ):
+            ok, msg = _reset_to_demo_baseline()
+            (st.success if ok else st.error)(msg)
+            if ok:
+                st.rerun()
 
 tab_quality, tab_maintenance, tab_download, tab_danger = st.tabs(
     ["Quality", "Maintenance", "Download records", "Danger Zone"]
@@ -297,56 +445,6 @@ with tab_maintenance:
                 clear_brief_history_cache()
                 st.success("Cache cleared.")
                 st.rerun()
-
-        with st.expander("Demo baseline reset", expanded=False):
-            baseline_meta = {}
-            if DEMO_BASELINE_META.exists():
-                try:
-                    obj = json.loads(DEMO_BASELINE_META.read_text(encoding="utf-8"))
-                    if isinstance(obj, dict):
-                        baseline_meta = obj
-                except Exception:
-                    baseline_meta = {}
-
-            baseline_rows = _read_jsonl_rows(DEMO_BASELINE_RECORDS)
-            if baseline_rows:
-                st.caption(
-                    f"Baseline ready: {len(baseline_rows)} record(s) | "
-                    f"saved_at={baseline_meta.get('saved_at', '-')}"
-                )
-            else:
-                st.caption("No baseline saved yet.")
-
-            st.caption(
-                "Use this to lock your demo start state (e.g., 5 records queued and not briefed), "
-                "then reset to it before each run."
-            )
-            st.caption("Reset restores records only and keeps Saved Briefs.")
-
-            d1, d2 = st.columns(2)
-            with d1:
-                if st.button("Save current records as demo baseline", type="secondary", width='stretch'):
-                    ok, msg = _save_demo_baseline(records)
-                    (st.success if ok else st.error)(msg)
-                    if ok:
-                        st.rerun()
-
-            with d2:
-                confirm_demo_reset = st.checkbox(
-                    "Confirm reset to baseline records",
-                    value=False,
-                    key="admin_confirm_demo_baseline_reset",
-                )
-                if st.button(
-                    "Reset records to demo baseline",
-                    type="primary",
-                    width='stretch',
-                    disabled=not confirm_demo_reset,
-                ):
-                    ok, msg = _reset_to_demo_baseline()
-                    (st.success if ok else st.error)(msg)
-                    if ok:
-                        st.rerun()
 
         with st.expander("Purge deleted briefs", expanded=False):
             BRIEFS_DIR = Path("data") / "briefs"
