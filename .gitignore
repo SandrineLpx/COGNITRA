@@ -1,4 +1,12 @@
 .streamlit/secrets.toml
+.claude/worktrees/
+docs/Assignment_info/
+docs/Demo/
+docs/Perso/
+# Legacy uppercase path safety (local worktrees on Windows may still preserve `Docs` casing)
+Docs/Assignment_info/
+Docs/Demo/
+Docs/Perso/
 .venv/
 .pytest_cache/
 __pycache__/

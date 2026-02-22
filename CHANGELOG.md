@@ -1,118 +1,71 @@
 # CHANGELOG
 
-## 2026-02-19 - UX Flow Upgrade (No Schema Break)
+Milestone-level project history. Detailed iteration log: `docs/ITERATION_LOG.md`.
 
-### `pages/01_Ingest.py`
-- Added explicit pipeline stepper/status covering: Upload -> extraction/cleaning -> context pack -> LLM -> postprocess -> validation -> dedupe -> save.
-- Added post-run "Saved Record Snapshot" with key metadata: title, source, publish date, record ID, priority/confidence, review status, regions vs footprint regions.
-- Consolidated advanced diagnostics under one `Advanced` expander with:
-  - bounded context/cleaned text preview
-  - raw JSON output
-  - routing + validation logs
-- Improved failure UX:
-  - clear stage failure context
-  - repair attempt status
-  - fallback provider status
-  - summarized provider errors
-- Dedupe UX update:
-  - default behavior blocks likely duplicates
-  - advanced override checkbox allows intentional separate save
-  - duplicate messaging includes likely REC match details
+## 2026-02-21 - Alignment & Documentation Pass
 
-Acceptance checks:
-- Given a normal ingest run, when pipeline completes, then user sees stepper as complete and key computed metadata immediately.
-- Given extraction/validation failure, when run stops, then user sees failed stage + repair/fallback status + error summary.
-- Given a likely duplicate, when advanced override is OFF, then save is blocked with REC match context.
-- Given a likely duplicate, when advanced override is ON, then pipeline can continue and save intentionally.
+- Rewrote README for GitHub sharing (project overview, pipeline diagram, setup instructions, architecture summary)
+- Added UX concept prototype link (Lovable mockup)
+- Replaced "weekly brief" wording with "executive brief" across codebase
+- Added anonymization note for Apex Mobility in technical report
+- Fixed 4 failing tests (time-sensitive dates, Bloomberg date override logic)
+- Moved prompt snapshot tests to `scripts/one_off/` (brittle, not CI-suitable)
+- Cleaned up stale filenames in CHANGELOG
+- Backfilled CHANGELOG with milestone history
 
-### `pages/02_Review_Approve.py`
-- Added queue-centric filter model with defaults for execution workflow:
-  - record added date range (default last 7 days)
-  - optional publish date range
-  - status, priority, footprint region, macro theme, search
-  - hide already briefed toggle (default ON)
-- Added first-class "in brief" status via saved brief metadata mapping.
-- Added summary KPI row:
-  - Pending
-  - High priority pending
-  - Low confidence pending
-  - Auto-approve eligible
-  - Macro themes detected this week
-- Reworked queue panel as left-side compact cards (title, source/date, priority/confidence, status, footprint, in-brief tag).
-- Reworked detail panel with tabs:
-  - Summary
-  - Evidence & Insights
-  - Deterministic Diagnostics
-  - Advanced
-- Added deterministic diagnostics explanations:
-  - priority explanation sentence
-  - confidence signal drivers
-  - macro theme group/gate diagnostics table
-- Decision controls remain independent of JSON editor validity:
-  - Save changes (validated JSON)
-  - Needs edit (save draft as Pending)
-  - Approve
-  - Disapprove
+## 2026-02-19 - UX Flow Upgrade
 
-Acceptance checks:
-- Given records briefed previously, when hide already briefed is ON, then those records are excluded from queue.
-- Given JSON editor has invalid JSON, when Approve/Disapprove is clicked, then lifecycle action still works.
-- Given a selected record, when opening Deterministic Diagnostics tab, then user sees why priority/confidence/themes were produced.
-- Given last-7-day default filter, when page loads, then queue focuses on current operational workload.
+Full UX rework across all pages, no schema break:
+- **Ingest**: Nine-stage pipeline stepper, saved record snapshot, consolidated diagnostics, improved failure UX, dedupe override controls
+- **Review**: Queue-centric filter model (default last 7 days), compact card queue, tabbed detail panel (Brief, Evidence, Fields, Advanced), deterministic diagnostics explaining every score
+- **Brief**: Checkbox-based record selection, coverage counters, saved brief browser with version comparison, hide-already-briefed toggle
+- **Insights**: Executive snapshot tiles (WoW momentum), drilldown views by theme/region/company, underlying record traceability
+- **Admin**: Quality run actions, schema diagnostics, macro theme rules viewer, isolated danger zone
 
-### `pages/03_Weekly_Executive_Brief.py`
-- Expanded selection workspace to align with review-style controls:
-  - days back + basis (`publish_date` or `created_at`)
-  - record added range + optional publish range
-  - status, priority, footprint region, macro theme
-  - hide already briefed toggle
-- Kept missing-date exclusion messaging for chosen date basis.
-- Upgraded record selection to checkbox workspace via data editor (include/exclude per REC row).
-- Added brief coverage counters:
-  - selected count
-  - selected by priority
-  - regions covered
-  - macro themes covered
-- Removed executive email draft UI.
-- Added Saved Brief Browser:
-  - list-style summary (created_at, week_range, record_count, key themes, file)
-  - open selected brief markdown
-  - show included REC list
-  - compare latest vs previous when applicable
-- Continued using saved brief index/sidecar metadata as source of truth for "already briefed" mapping.
+## 2026-02-17 - Region Architecture & Documentation Consolidation
 
-Acceptance checks:
-- Given time basis switch, when user selects `created_at`, then time-window filtering uses record added date.
-- Given hide already briefed is ON, when candidate list is rendered, then briefed records are hidden by default.
-- Given selected records, when coverage counters render, then counts reflect current include/exclude choices.
-- Given saved briefs exist, when selecting one in browser, then markdown and included REC list are visible.
+- Two-tier region model: `DISPLAY_REGIONS` (broad buckets) + `FOOTPRINT_REGIONS` (country-level granularity), driven by `data/new_country_mapping.csv`
+- Expanded country-to-footprint mappings (~90 countries), added Japan as standalone footprint region
+- Consolidated agent instructions into single `AGENTS.md`; removed duplicate spec files
+- Embedded topic tagging guidance and competitor list directly into extraction prompt
+- Added `pyproject.toml`, `requirements.txt`, standardized repo hygiene
 
-### `pages/04_Insights.py`
-- Added top-level Executive Snapshot tiles:
-  - macro theme momentum (WoW)
-  - footprint region signal density
-  - OEM stress/strategy signals (7d)
-  - confidence/quality health (low-confidence rate + QC high issues)
-- Added deeper drilldown views with underlying REC lists:
-  - By Theme
-  - By Region
-  - By Company
-- Kept existing analytics (histogram, heatmap, momentum, quality charts) and added REC-oriented path to inspect underlying records quickly.
+## 2026-02-16 - Deterministic Scoring & Macro Themes
 
-Acceptance checks:
-- Given filtered dataset, when opening Executive Snapshot, then user gets a quick week-over-week state summary.
-- Given a selected theme/region/company in drilldown tabs, then underlying REC rows are listed for traceability.
+- Deterministic priority boosting (`_boost_priority`) with Apex Mobility-specific criteria
+- Deterministic confidence scoring (`_compute_confidence`) from observable signals
+- Macro-theme detection engine (`_detect_macro_themes`) with keyword/company/topic/region pattern matching
+- Publisher header date parsing (Bloomberg, Reuters, S&P) with override diagnostics
+- Source-grounded `mentions_our_company` detection
+- Meta-based model routing: noise classification routes high-noise docs directly to Flash
 
-### `pages/08_Admin.py`
-- Reworked Admin into power-user operations:
-  - provider availability (Gemini enabled; others labeled Not available yet and disabled)
-  - token/model usage stats
-  - quality run actions (full + record-only) and report download
-  - schema/version diagnostics (required keys vs schema properties + fingerprint)
-  - macro theme rules read-only viewer
-  - retained advanced maintenance + isolated danger zone
+## 2026-02-14 - Analytics & Quality
 
-Acceptance checks:
-- Given non-Gemini providers are not enabled, when viewing provider config, then options are shown as not available.
-- Given quality pipeline is run from Admin, when complete, then run metadata and report download path are surfaced.
-- Given schema diagnostics section, when loaded, then guardrail mismatch visibility is explicit.
+- Trend analysis dashboards: topic momentum, company mentions, priority distribution over time
+- API quota tracker with per-model usage display
+- Priority classification rules added to extraction prompt
+- Quality monitoring pipeline (`scripts/run_quality.py`) with R1-R5 and B1-B5 KPIs
+
+## 2026-02-13 - Extraction Pipeline Hardening
+
+- Deterministic text cleanup and chunking (`src/text_clean_chunk.py`)
+- Chunked extraction with per-chunk repair and cross-chunk merge
+- Two-pass model strategy: Flash-Lite (cost-efficient) with Flash fallback on failure
+- LLM-synthesized executive brief generation from approved records
+- Bulk PDF ingest with progress tracking
+- Simplified review model: Pending/Approved with deterministic auto-approve at ingest
+
+## 2026-02-12 - Core System
+
+- End-to-end extraction pipeline: PDF upload, Gemini structured JSON extraction, postprocessing, validation, JSONL storage
+- Duplicate detection and story-level deduplication with publisher ranking
+- Executive briefing module with candidate selection and email generation
+- Comprehensive test suite (25+ scenarios)
+- Secrets management, Gemini API wiring, schema hardening
+
+## 2026-02-11 - Foundation
+
+- Initial extraction pipeline (`src/model_router.py`)
+- Two-layer geography processing (`src/postprocess.py`)
+- Schema validation (`src/schema_validate.py`)
+- Centralized constants (`src/constants.py`)

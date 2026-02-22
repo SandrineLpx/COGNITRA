@@ -1,83 +1,135 @@
 # COGNITRA — Automotive Competitive Intelligence Platform
 
-## Run locally
-1) Create a virtual environment
-2) Install dependencies:
-   - **Production**: `pip install -r requirements.txt` (or `pip install .`)
-   - **Development** (includes pytest): `pip install .[dev]`
-   - Core packages: `streamlit`, `pandas`, `matplotlib`, `altair`, `pymupdf`, `pdfplumber`, `google-genai`
-   - Test runner (included in `requirements.txt` and `.[dev]`): `pytest`
-3) Run:
-   ```bash
-   streamlit run Home.py
-   ```
+A governed intelligence system that transforms automotive industry articles into structured, analyst-reviewed executive briefs for strategic decision-making.
 
-## Model routing
-- `src/model_router.py` is wired for Gemini via `google-genai` with structured JSON output.
-- Set `GEMINI_API_KEY` in your environment before running.
-- Claude and ChatGPT providers are placeholders and not yet implemented.
+Built for **Apex Mobility**, a closure systems supplier (door latches, strikers, handles, smart entry, cinch systems), COGNITRA ensures that competitive signals reach decision-makers with full provenance, deterministic scoring, and human oversight.
 
-## Data
-- Records: `data/records.jsonl` (JSON Lines)
-- PDFs saved to: `data/pdfs/`
-- Quality logs: `data/quality/` (record_qc.jsonl, brief_qc.jsonl, quality_runs.jsonl, quality_report.xlsx)
+## How it works
 
-## Ingest behavior
-- Chunking is automatic based on cleaned document structure (`chunks_count`).
-- The app surfaces chunk-count guidance and estimated API-call impact in the Ingest UI.
+COGNITRA follows a four-stage governed pipeline — no unreviewed AI output reaches executives.
 
-## Workflow navigation
-- `01 Ingest` -> `02 Review` -> `03 Brief` -> `04 Insights` -> `Admin`
-- Record governance (approve/disapprove/edit/re-ingest/delete) is centralized in `02 Review`.
-- `03 Brief` is executive-focused output generation (no record status editing).
-- `Admin` contains developer/analyst utilities and maintenance actions.
+```
+  Extract            Score              Approve            Render
+ ─────────        ──────────         ───────────       ──────────
+ PDF / text  →    Priority ·    →    Analyst     →     Weekly
+ Gemini LLM       Confidence ·       review            executive
+ strict JSON      Macro-themes       gate              brief
+                  (deterministic)
+```
 
-## Region mapping
+**UX concept prototype:** [cognitra-mockup.lovable.app](https://cognitra-mockup.lovable.app/) — interactive mockup of the intended production UI (static, not connected to live data).
 
-Region values are defined in `data/new_country_mapping.csv` and implemented in Python constants:
+1. **Extract** — Upload a PDF or paste text. Gemini extracts structured intelligence into a strict JSON schema. One model call per document.
+2. **Score** — Deterministic Python rules assign priority, confidence, and macro-theme tags. No LLM involved.
+3. **Approve** — Analysts review, edit, and approve records through a governance queue. Low-confidence or incomplete records require human sign-off.
+4. **Render** — Executive briefs are generated from approved records only, with full citation traceability (REC links).
 
-| What | File | Variable |
-|---|---|---|
-| Valid region values | `src/constants.py` | `FOOTPRINT_REGIONS` / `DISPLAY_REGIONS` |
-| Country → footprint | `src/postprocess.py` | `COUNTRY_TO_FOOTPRINT` |
-| LLM string aliases | `src/postprocess.py` | `REGION_ALIASES` |
+## Pages
 
-**Individual Apex Mobility countries** (appear by name in both fields): Czech Republic, France, Germany, Italy, Morocco, Mexico, Portugal, Russia, Spain, Sweden, United Kingdom, United States, Thailand, India, China, Taiwan, Japan, South Korea.
+| Page | Purpose |
+|---|---|
+| **Home** | KPI dashboard — validated records, pending governance, surfaced signals, latest ingest |
+| **Ingest** | PDF upload (single or bulk), URL download, paste-text mode. Nine-stage pipeline with live progress |
+| **Review** | Analyst governance queue — filter, inspect, approve/disapprove records. Deterministic diagnostics explain every score |
+| **Brief** | Generate and manage executive briefs for any time window. Compare versions, regenerate, download markdown |
+| **Insights** | Analytics dashboards — topic signals, region coverage, company rankings, trend momentum, quality scores |
+| **Admin** | Maintenance utilities — quality checks, data export, demo state management, cache controls |
 
-**Sub-regional buckets**: West Europe, Central Europe, East Europe, Africa, Middle East, NAFTA, ASEAN, Indian Subcontinent, Andean, Mercosul, Central America, Oceania, Rest of World.
+## Setup
 
-**Generic catch-alls** (from broad LLM aliases): Europe, South America, South Asia.
+**Requirements:** Python >= 3.11
 
-### Updating the mapping
+```bash
+# 1. Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Linux/Mac
+.venv\Scripts\activate           # Windows
 
-1. Edit `data/new_country_mapping.csv` — this is the design document and source of truth.
-2. Apply the changes to the Python constants:
-   - New **country row** → add entry to `COUNTRY_TO_FOOTPRINT` in `src/postprocess.py`
-   - New **footprint_region row** → add value to `FOOTPRINT_REGIONS` in `src/constants.py`
-   - New **alias row** → add entry to `REGION_ALIASES` in `src/postprocess.py`
-3. If existing records use the old value, run the migration script:
-   ```bash
-   python scripts/migrate_region_overhaul.py          # dry run
-   python scripts/migrate_region_overhaul.py --apply  # apply
-   ```
-4. Run tests to verify: `python -m pytest -q`
+# 2. Install dependencies
+pip install -r requirements.txt          # production
+pip install .[dev]                       # development (includes pytest)
 
-**Drift detection**: the Home page warns automatically if the CSV and Python constants diverge. No manual check needed — just open the app after editing the CSV.
+# 3. Configure API key
+#    Create .streamlit/secrets.toml with:
+#    GEMINI_API_KEY = "your-key-here"
+
+# 4. Run
+streamlit run Home.py
+```
+
+### Core dependencies
+
+`streamlit` · `pandas` · `matplotlib` · `altair` · `pymupdf` · `pdfplumber` · `google-genai`
+
+## Data storage
+
+All data is file-based (no database):
+
+| Path | Contents |
+|---|---|
+| `data/records.jsonl` | Structured intelligence records (JSON Lines) |
+| `data/canonical.jsonl` | Deduplicated canonical records |
+| `data/duplicates.jsonl` | Duplicate tracking |
+| `data/pdfs/` | Stored source PDFs |
+| `data/briefs/` | Generated executive briefs + metadata |
+| `data/quality/` | QC logs and Excel reports |
+| `data/new_country_mapping.csv` | Region mapping (source of truth) |
 
 ## Quality monitoring
-- Run: `python scripts/run_quality.py` (checks latest brief + its records)
-- Checks: evidence grounding, geo determinism, macro theme rules, confidence alignment, uncertainty compliance, overreach detection
-- KPIs: R1–R5 (records) + B1–B5 (briefs), weighted scores 0–100
-- Outputs: append-only JSONL logs + Excel report in `data/quality/`
-- Standards: `References/Quality/` (QUALITY_CHECKLIST.md, QUALITY_KPIS.md, BRIEF_GENERATION_STANDARDS.md)
+
+Automated post-hoc QC checks records and briefs without modifying them:
+
+```bash
+python scripts/run_quality.py              # check latest brief + its records
+python scripts/run_quality.py --latest-brief   # explicit latest brief
+python scripts/run_quality.py --brief-id <id>  # specific brief
+```
+
+- **Record KPIs** (R1–R5): evidence grounding, geo determinism, macro-theme rules, confidence alignment, priority audit
+- **Brief KPIs** (B1–B5): citation consistency, uncertainty compliance, overreach detection
+- **Output**: append-only JSONL logs + Excel report in `data/quality/`
+- **Standards**: documented in `docs/quality/`
 
 ## Tests
-- `pytest` is required for tests.
-- Canonical command:
-  - `python -m pytest -q`
 
-## Date Extraction Semantics
-- Publisher-specific PDF header timestamps are used as source-of-truth dates when available (Bloomberg, S&P, Reuters, etc.).
-- Store `publish_date` as date-only (`YYYY-MM-DD`) with no timezone conversion.
-- This avoids PST/UTC rollover flip-flops (for example, Feb 1 PST vs Feb 2 UTC).
-- December 31 dates found in PDF headers are automatically filtered out (fiscal year-end dates, not publication dates).
+```bash
+python -m pytest tests/ -q
+```
+
+Five test suites covering macro-theme detection, region bucketing, date extraction, end-to-end scenarios, and brief QC.
+
+## Architecture
+
+Key design decisions:
+
+- **LLM boundary** — The LLM extracts facts only. Priority, confidence, and macro-themes are computed deterministically by Python rules. No interpretive fields in the extraction schema.
+- **Postprocess-before-validate** — Every code path runs `postprocess_record()` before `validate_record()`. Computed fields are always present when validation runs.
+- **Two-tier regions** — Region values are driven by `data/new_country_mapping.csv`. The Home page warns automatically if CSV and Python constants diverge.
+- **Minimal AI** — One model call per document for extraction. Brief rendering is deterministic from stored JSON. No second model call for scoring or classification.
+
+## Project structure
+
+```
+Home.py                    # Landing page and KPI dashboard
+pages/
+  01_Ingest.py             # PDF upload and extraction pipeline
+  02_Review.py             # Analyst governance queue
+  03_Brief.py              # Executive brief generation
+  04_Insights.py           # Analytics and trend dashboards
+  Admin.py                 # Maintenance and admin utilities
+src/
+  model_router.py          # Gemini LLM extraction (schema + prompt)
+  postprocess.py           # Deterministic scoring and normalization
+  constants.py             # Topics, regions, OEMs, macro-theme rules
+  schema_validate.py       # Record validation
+  briefing.py              # Brief synthesis and rendering
+  storage.py               # JSONL read/write and PDF storage
+  dedupe.py                # Duplicate detection
+  quality.py               # Post-hoc QC engine
+  pdf_extract.py           # PDF text extraction
+  text_clean_chunk.py      # Text cleaning and chunking
+  ui.py / ui_helpers.py    # Streamlit UI components
+tests/                     # pytest test suites
+scripts/                   # Migration and quality scripts
+data/                      # Records, PDFs, briefs, quality logs
+```

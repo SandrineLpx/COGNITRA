@@ -1,0 +1,1410 @@
+Simplified Project Documentation
+
+Market Intelligence Agent - Project Journey
+Date January 2026
+Student Market Analyst, Automotive Tier-1 Supplier
+Course MSIS 549 (GenAI for Business Applications)
+Timeline 4 weeks
+
+The Problem
+Reality One-person market intelligence team spending 15+ hoursweek manually searching automotive industry news across multiple sources (Bloomberg articles, Automotive News, Reuters, industry publications).
+Pain Intelligence arrives too late for strategic decisions. Colleagues ask What's happening with TeslaBYDCATL but by the time I search and synthesize, the moment has passed.
+
+The Question
+
+Can I build an AI agent that monitors automotive news and delivers daily intelligence briefings
+
+Initial Concern Not sure about data accessibility
+Breakthrough Realization I already have access to Bloomberg subscription, Automotive News, Reuters, Google Patents, press releases. The job isn't accessing secret data—it's aggregating and synthesizing public information faster than humans can manually.
+
+Project Selection Two Options
+Option A First Aid Decision Support (Ski Patrol)
+
+Pros Personal passion, humanitarian impact, emotionally compelling
+Cons Not career-relevant, no test users at work, separate from day job
+
+Option B Market Intelligence Agent
+
+Pros Solves actual work problem, built-in test users (colleagues), can work on during business hours, uses existing company infrastructure
+Cons Need manager buy-in, corporate environment constraints
+
+Decision Market Intelligence Agent
+Rationale Career impact + time efficiency + built-in validation  personal passion (First Aid remains future personal project)
+
+Scope Evolution
+Initial Idea (Too Broad)
+Monitor entire automotive industry, all companies, all topics, dailyweeklymonthly reports, financial analysis, patent tracking, regulatory monitoring
+Problem Unachievable in 4 weeks
+Refined Scope (MVP)
+Core Feature News Intelligence
+
+Monitor 3-4 sources (Bloomberg articles, Automotive News, Reuters, Google Patents)
+Track 21 companies (13 OEMs BMW, BYD, Ford, GM, etc. + 8 Tier-1 suppliers Brose, Huf, Magna, etc.)
+10 topic categories (EV Transition, Door Systems, Supply Chain, etc.)
+AI summarization Key Developments (facts) + Strategic Implications (analysis for Apex Mobility)
+Deliver via SharePoint library with searchable metadata
+
+Bonus Feature (Week 3-4) Financial Intelligence
+
+Track quarterly earnings for 3 OEMs (VW, Tesla, Toyota)
+Extract key financial metrics
+Add to same SharePoint library
+
+Result Achievable core + impressive bonus = comprehensive solution
+
+Key Architecture Decisions
+1. Two-Column Summary Format
+Evolution
+
+V1 Single AI Summary paragraph → Too dense, hard to scan
+V2 Single Key Points bullets → Better, but mixed facts with analysis
+V3 Two columns → FINAL
+
+Key Developments (3-4 bullets) What happened, who, when, numbers
+Strategic Implications (2-3 bullets) What this means for Apex Mobility
+
+
+
+Why It Works
+
+Engineers read left (tech details)
+Strategists read right (competitive implications)
+Executives read both (takes 30 seconds)
+Scannable Review 10 articles in 5 minutes
+
+Example
+Key DevelopmentsStrategic Implications• BMW investing €1B in Mexican EV facility• Partnership with Magna for door systems• 200K annual capacity by 2027• Door system opportunities in Mexico• Competitive threat Magna expanding• Potential Apex Mobility-BMW discussions
+
+2. Configuration-Driven Design
+Student Insight
+
+What about keeping company names and topics in CSV files instead of hard-coding them
+
+This showed professional engineering thinking.
+Solution
+00_Config
+├── companies.csv      (21 companies)
+├── topics.csv         (10 categories)
+├── sources.csv        (9 sources)
+├── regions.csv        (5 regions)
+└── keywords.csv       (30+ monitoring terms)
+Benefits
+
+Single source of truth Update CSV → regenerate prompt → update SharePoint
+Easy maintenance Add new company = 5 minutes vs. 2 hours of code changes
+Scalable Add 50 companies without touching code
+Audit trail Git tracks what changed when
+
+vs. Hard-Coding Everything
+
+Company list in prompt ❌
+Company list in SharePoint ❌
+Company list in documentation ❌
+Change company → update 10 places ❌
+
+
+3. Technology Stack
+Options Considered
+
+Zapier + Perplexity Easiest but limited control, monthly costs
+Custom Python Full control but requires coding skills (don't have), time-intensive
+Microsoft 365 + Azure OpenAI Leverages existing company infrastructure
+
+Decision Microsoft 365 Stack
+
+Storage SharePoint (already using site GL-MC-MarketInsights)
+Automation Power Automate (no-code)
+AI Azure OpenAI (GPT-4) or fallback to OpenAI API
+Delivery Microsoft Teams (daily digests)
+
+Why
+
+Zero additional cost (already have M365 license)
+No setup time (already have SharePoint site)
+Colleagues familiar with these tools
+Real deployment path after course
+
+
+4. SharePoint Structure
+Decision Two libraries, same site
+GL-MC-MarketInsights
+├── Digital Press (existing - keep unchanged)
+│   └── Manual white papers, webinars, presentations
+└── Auto Intelligence (new - automated)
+    └── Automated daily articles + AI summaries
+Why Not Single Library
+
+Clean testing environment
+No disruption to existing workflow
+Easy to show before vs. after
+Can merge later if successful
+
+
+5. Metadata Schema (10 Columns)
+ColumnTypeRequiredMulti-SelectWhySourceChoiceYesNoTrack provenanceCompanyChoiceYesYesArticles mention multiple companiesTopicChoiceYesYesArticles span multiple topicsRegionChoiceYesYesVW strategy for Europe + ChinaDate PublishedDateYesNATime-based filteringPriorityChoiceNoNoHighMediumLow for alertsOriginal URLHyperlinkNoNALink to sourceKey DevelopmentsRich TextNoNAFacts, timeline, playersStrategic ImplicationsRich TextNoNAAnalysis for Apex Mobility Review StatusChoiceNoNoQuality control
+Key Decision Region changed to Required + Multi-select
+Rationale Articles often cover multiple regions (China and Europe EV policies)
+
+6. SKILL.md with YAML Front Matter
+Why Document This Way
+yaml---
+name Market Intelligence Agent
+description Automated AI-powered market intelligence...
+version 0.1.0
+status Development
+technology_stack
+  - Microsoft 365
+  - Azure OpenAI
+---
+Benefits
+
+Machine-readable metadata
+Version tracking built-in
+Professional standard
+Self-documenting system
+
+
+Implementation Strategy Progressive Enhancement
+Week 1 Manual Testing (9.5 hours)
+Prove the value before building infrastructure
+
+Create SharePoint library with 10 metadata columns
+Manually summarize 5 articles using ChatGPT
+Upload to SharePoint with metadata
+Show 2 colleagues, ask Would you use this daily
+Success criteria Colleagues say yes
+
+Why Manual First
+
+Validates value before automation investment
+Learn prompt engineering in low-stakes environment
+If colleagues say meh, pivot strategy (3 weeks left)
+Understand what good output looks like
+
+Week 2 Automation Phase 1 (6-7 hours)
+Scale the proven solution
+
+Build Power Automate flows
+Connect to Azure OpenAI API
+Automate Bloomberg article monitoring
+Test with real articles
+Success criteria First automated summary delivered
+
+Week 3 Expansion (6 hours)
+Add features based on Week 1-2 learnings
+
+Add more sources (Automotive News, Reuters)
+Weekly synthesis report
+User feedback iteration
+Financial tracking (bonus if time)
+
+Week 4 Polish & Demo (7 hours)
+Make it presentation-ready
+
+Documentation complete
+Error handling
+Demo materials (poster, script)
+GenAI Fair presentation rehearsal
+
+
+Critical Insights (Thinking Process)
+1. Start with Problem, Not Technology
+Wrong I want to use AI for something cool
+Right I waste 15 hoursweek searching news. How can AI help
+Every design decision traced back to Does this save time Improve intelligence quality Help colleagues
+2. Real  Hypothetical
+Hypothetical Build intelligence system for automotive
+Real I have 5 colleagues who need this. My manager will fund it if it works. Demo to alumni judges Feb 11.
+Real stakes = real feedback = real learning
+3. Embrace Constraints, Don't Fight Them
+Constraints
+
+4 weeks timeline
+No coding background
+Must use company infrastructure
+5-8 hoursweek available
+
+How constraints helped
+
+Forced focus on MVP (no scope creep)
+Chose no-code tools (Power Automate)
+Used existing SharePoint (zero setup)
+Created urgency
+
+
+Constraints breed creativity. Infinite resources breed waste.
+
+4. Validate Early, Iterate Fast
+Week 1 Friday validation prevents Week 4 disasters
+
+Manual testing Week 1 → learn colleagues want facts separated from analysis
+Adjust to two-column format Week 2
+vs. Building automation Week 1-3, discovering Week 4 it doesn't meet needs (no time to fix)
+
+5. Configuration  Hard-Coding
+Student intuition Don't hard-code company names
+This is professional software engineering thinking
+
+Separation of concerns (data vs. code)
+Single source of truth (CSV files)
+Easy maintenance (add company = 5 min not 2 hrs)
+Scalability (100 companies without architecture change)
+
+6. Documentation as Design Tool
+Writing SKILL.md forced clarity
+
+What are configuration files
+How do they connect
+Who maintains what
+
+
+If you can't explain it simply, you don't understand it well enough.
+
+Documentation revealed design gaps, improved actual system.
+
+Why This Specific Solution Works
+1. Leverages What's Available
+
+SharePoint already exists (no setup)
+Bloomberg subscription already paid for (no new cost)
+Power Automate included in M365 (no new tool)
+Colleagues familiar with interface (no training)
+
+2. Solves Real, Measurable Problem
+
+Current state 15 hrsweek manual search
+Future state 30 minweek reviewing summaries
+ROI 14.5 hoursweek saved
+
+3. Achievable in 4 Weeks
+
+Week 1 Manual proof of concept
+Week 2 Automation working
+Week 3 Feature expansion
+Week 4 Demo polish
+
+4. Showcases AI Capabilities
+
+LLM summarization (GPT-4)
+Prompt engineering (two-column format)
+Multi-document synthesis (weekly reports)
+Human-AI collaboration (review + approve workflow)
+
+5. Professional Engineering
+
+Configuration-driven (CSV files)
+Documented (SKILL.md with YAML)
+Version controlled (git-ready)
+Maintainable long-term
+
+6. Real Deployment Path
+
+Not just academic exercise
+Company can use post-course
+Colleagues already testing
+Manager aware and supportive
+
+
+The Decision Framework (Meta)
+Every choice traced back to
+
+Does it solve the core problem (Speed + quality intelligence)
+Is it achievable in 4 weeks (Given constraints)
+Can colleagues use it (Not just demo-ware)
+Is it maintainable (After course ends)
+Does it demonstrate AI skills (For learning objectives)
+
+If answer to any question is no → reconsider the choice
+
+Key Takeaway
+
+Start with real problem. Build simplest solution that works. Test with actual users immediately. Iterate based on feedback. Ship in 4 weeks, improve forever.
+
+This is how professional AI systems get built.
+
+Document Purpose Record thinking process from initial confusion to implementable solution
+Last Updated 2026-01-29
+Status Implementation plan finalized, Week 1 starts Mondayi use python, i know pyhton. I have coding skills linked to data analysis601 PMUpdated Understanding - With Python Skills!
+Critical Correction Noted ✅
+You have Python + data analysis skills - this changes several recommendations!
+
+Quick Updates to Implementation Plan
+Technology Stack (REVISED)
+Now that you know Python
+Option 1 Power Automate (Still Recommended for Week 1-2)
+
+Why still start here Faster to MVP, tests business value first
+Then Add Python scripts Week 3-4 for advanced features
+
+Option 2 Hybrid Approach (BEST)
+
+Week 1 Manual testing (validate value)
+Week 2 Power Automate for basic automation (email monitoring → SharePoint)
+Week 3 Python scripts for
+
+Advanced AI prompt generation (prompt_generator.py)
+Data quality checks
+Financial data extraction (pandas for CSVExcel)
+Custom analytics (trend detection, sentiment analysis)
+
+
+Week 4 Polish both
+
+Option 3 Python-First (If you prefer)
+
+Skip Power Automate entirely
+Build with Python + libraries
+
+Automation schedule (cron jobs), watchdog (file monitoring)
+SharePoint Office365-REST-Python-Client or shareplum
+AI openai library (GPT-4 API)
+Data pandas, openpyxl (Excel), PyPDF2 (PDF extraction)
+
+
+
+
+Updated Week 2-3 Options (With Python)
+Week 2 Automation
+Option A Power Automate (No-Code)
+
+Faster setup (2-3 hours)
+Easy Teams integration
+Non-technical colleagues can maintain
+
+Option B Python Script (Code)
+python# Example Bloomberg email monitor
+import imaplib
+import email
+from openai import OpenAI
+import pandas as pd
+
+# Monitor inbox for Bloomberg alerts
+# Extract article text
+# Call OpenAI API for summarization
+# Write to SharePoint via API
+# Post to Teams webhook
+My Recommendation Start with Power Automate Week 2 (fast), add Python Week 3 (powerful)
+
+What Python Enables (Week 3-4 Enhancements)
+1. Financial Data Extraction (Your Bonus Feature)
+Week 3 Python Script
+pythonimport pandas as pd
+import PyPDF2
+from openai import OpenAI
+
+def extract_financials_from_earnings(pdf_path)
+    
+    Extract revenue, profit, EV sales from quarterly earnings PDF
+    
+    # Extract text from PDF
+    text = extract_pdf_text(pdf_path)
+    
+    # Use GPT-4 with structured output
+    client = OpenAI()
+    response = client.chat.completions.create(
+        model=gpt-4-turbo,
+        messages=[{
+            role user,
+            content fExtract financial metrics as JSONn{text}
+        }],
+        response_format={type json_object}
+    )
+    
+    # Parse JSON to DataFrame
+    financials = pd.DataFrame(response.json())
+    
+    # Save to CSV
+    financials.to_csv('financials.csv', index=False)
+    
+    return financials
+
+# Example usage
+tesla_q4 = extract_financials_from_earnings('Tesla_Q4_2025_Earnings.pdf')
+Output CSV
+csvCompany,Quarter,Revenue_Billions,Operating_Profit_Millions,EV_Sales_Units,R&D_Spend_Millions
+Tesla,Q4 2025,25.2,3200,485000,1100
+VW,Q4 2025,78.5,4100,175000,3800
+Toyota,Q4 2025,72.1,5200,95000,2900
+Load to SharePoint Use Office365-REST-Python-Client library
+
+2. Advanced Analytics
+Trend Detection
+pythonimport pandas as pd
+from collections import Counter
+
+def detect_emerging_trends(summaries_df, weeks=4)
+    
+    Analyze last 4 weeks of summaries for emerging keywords
+    
+    recent = summaries_df[summaries_df['Date'] = pd.Timestamp.now() - pd.Timedelta(weeks=weeks)]
+    
+    # Extract keywords from Strategic Implications
+    all_text = ' '.join(recent['Strategic_Implications'])
+    words = all_text.lower().split()
+    
+    # Count frequency
+    keyword_freq = Counter(words)
+    trending = keyword_freq.most_common(20)
+    
+    return trending
+
+# Example solid-state mentioned 15 times this month vs. 3 last month
+Competitive Intelligence Dashboard
+pythonimport matplotlib.pyplot as plt
+
+def competitor_mentions_chart(summaries_df)
+    
+    Chart How often are Magna, Brose, Huf mentioned
+    
+    competitors = ['Magna', 'Brose', 'Huf', 'Witte']
+    
+    mentions = {}
+    for comp in competitors
+        count = summaries_df['Company'].str.contains(comp).sum()
+        mentions[comp] = count
+    
+    plt.bar(mentions.keys(), mentions.values())
+    plt.title('Competitor Mentions (Last 30 Days)')
+    plt.savefig('competitor_activity.png')
+
+3. Data Quality Checks
+Automated Validation
+pythondef validate_sharepoint_data(df)
+    
+    Check data quality before publishing
+    
+    issues = []
+    
+    # Check for required fields
+    if df['Company'].isna().any()
+        issues.append(Missing company tags)
+    
+    # Check for duplicate URLs
+    if df['Original_URL'].duplicated().any()
+        issues.append(Duplicate articles detected)
+    
+    # Check summary length (should be 50-200 words)
+    df['word_count'] = df['Key_Developments'].str.split().str.len()
+    if (df['word_count']  50).any()
+        issues.append(Summaries too short)
+    
+    return issues
+
+# Run before uploading to SharePoint
+
+4. Custom Prompt Generation (Already Planned)
+Your prompt_generator.py script
+pythonimport csv
+import pandas as pd
+
+def generate_prompt_from_config()
+    
+    Read CSV configs, generate AI prompt
+    
+    companies = pd.read_csv('00_Configcompanies.csv')
+    topics = pd.read_csv('00_Configtopics.csv')
+    
+    company_list = ', '.join(companies['CompanyName'])
+    topic_list = ', '.join(topics['TopicName'])
+    
+    # Fill template
+    with open('prompt_template.txt', 'r') as f
+        template = f.read()
+    
+    prompt = template.replace('{{COMPANY_LIST}}', company_list)
+    prompt = prompt.replace('{{TOPIC_LIST}}', topic_list)
+    
+    with open('current_prompt.txt', 'w') as f
+        f.write(prompt)
+    
+    print(fGenerated prompt with {len(companies)} companies, {len(topics)} topics)
+
+generate_prompt_from_config()
+```
+
+---
+
+## Updated Project Structure (With Python)
+```
+MarketIntelligence_Project
+├── 00_Config
+│   └── [CSV files as before]
+│
+├── 01_Documentation
+│   └── SKILL.md
+│
+├── 02_Automation
+│   ├── power_automate_flows  (Week 2)
+│   │   └── [Flow exports]
+│   └── python_scripts        (Week 3)
+│       ├── email_monitor.py
+│       ├── ai_summarizer.py
+│       ├── sharepoint_uploader.py
+│       ├── financial_extractor.py
+│       ├── trend_analyzer.py
+│       └── data_validator.py
+│
+├── 03_AI_Prompts
+│   ├── prompt_template.txt
+│   └── prompt_generator.py
+│
+├── 04_SharePoint_Config
+│   └── [as before]
+│
+├── 05_Testing
+│   └── [as before]
+│
+├── 06_Demo_Materials
+│   └── [as before]
+│
+└── 07_Project_Management
+    └── [as before]
+
+Recommended Hybrid Approach (BEST for 4 weeks)
+Week 1 Manual (No Code)
+
+Validate business value
+Learn what good output looks like
+
+Week 2 Power Automate (No-Code Automation)
+
+Fast path to automated summaries
+Prove automation works
+Colleagues start using it
+
+Week 3 Python Enhancement (Your Strength!)
+
+prompt_generator.py (dynamic prompts from CSV)
+financial_extractor.py (earnings data → CSV)
+trend_analyzer.py (detect emerging topics)
+data_validator.py (quality checks)
+
+Week 4 Demo Polish
+
+Power BI dashboard (Python analytics → visualizations)
+Show both Automated workflow (Power Automate) + Advanced analytics (Python)
+
+Why Hybrid
+
+Week 2 Fast automation (business value immediate)
+Week 3 Python shows your technical depth
+Demo I built no-code automation AND custom analytics
+Portfolio Shows versatility (no-code + code)
+
+
+Python Libraries You'll Need
+Core
+bashpip install openai              # GPT-4 API
+pip install pandas              # Data manipulation
+pip install openpyxl            # Excel files
+pip install PyPDF2              # PDF extraction
+pip install requests            # HTTP requests
+SharePoint Integration
+bashpip install Office365-REST-Python-Client  # SharePoint API
+# OR
+pip install shareplum                      # Alternative
+Optional (Week 3-4)
+bashpip install matplotlib          # Charts
+pip install seaborn            # Better charts
+pip install schedule           # Cron jobs
+pip install python-dotenv      # Environment variables
+
+Week 3 Python Tasks (5-6 hours)
+Task 1 Prompt Generator (1 hour)
+✅ Already planned - you have the script
+Task 2 Financial Extractor (2 hours)
+python# Extract financials from 3 OEM earnings PDFs
+tesla_financials = extract_financials('Tesla_Q4.pdf')
+vw_financials = extract_financials('VW_Q4.pdf')
+toyota_financials = extract_financials('Toyota_Q4.pdf')
+
+# Combine and save
+all_financials = pd.concat([tesla_financials, vw_financials, toyota_financials])
+all_financials.to_csv('OEM_Financials_Q4_2025.csv', index=False)
+
+# Upload to SharePoint
+upload_to_sharepoint(all_financials, library='Auto Intelligence')
+Task 3 Trend Analyzer (1.5 hours)
+python# Analyze 3 weeks of summaries
+summaries = load_from_sharepoint(library='Auto Intelligence', weeks=3)
+trends = detect_emerging_trends(summaries)
+
+# Generate weekly report
+generate_trend_report(trends, output='Weekly_Trends.docx')
+Task 4 Data Validator (0.5 hours)
+python# Run before each upload
+issues = validate_sharepoint_data(new_summaries)
+if issues
+    print(fData quality issues {issues})
+else
+    upload_to_sharepoint(new_summaries)
+
+Updated Competitive Advantages (With Python)
+Your Demo Will Show
+
+No-Code Automation (Power Automate)
+
+Anyone can maintain this workflow
+Shows businessorganizational thinking
+
+
+Custom Python Analytics (Your scripts)
+
+But when we need advanced features, I coded them
+Shows technical depth
+
+
+Hybrid Best of Both
+
+No-code for 80% (accessibility)
+Code for 20% (power)
+Professional engineering approach
+
+
+
+Judges Will See
+
+Versatility (no-code + code)
+Pragmatism (right tool for job)
+Depth (can write Python when needed)
+Breadth (understands no-code automation)
+
+
+Updated Simplified Documentation
+Project Journey (REVISED)
+Student Profile
+
+Market analyst with Python + data analysis skills
+15+ hrsweek manual research
+Access Bloomberg subscription, Automotive News, S&P, Microsoft 365
+
+Tech Stack Decision
+
+Week 1 Manual validation
+Week 2 Power Automate (fast automation path)
+Week 3 Python scripts (advanced features)
+Week 4 Power BI dashboard (visualize Python analytics)
+
+Why Hybrid
+
+Leverages both no-code (speed) and code (power)
+Shows technical versatility
+Maximizes demo impact
+
+
+Final Recommendation
+With your Python skills
+Week 1 Manual Testing (unchanged)
+
+Validate with ChatGPT + SharePoint
+Prove business value
+
+Week 2 Power Automate Automation
+
+Build flows for email monitoring
+Automate AI summarization
+Get it working end-to-end
+Why not Python Week 2 Faster to prove automation works
+
+Week 3 Python Enhancement (Your Strength!)
+
+prompt_generator.py (already planned)
+financial_extractor.py (bonus feature)
+trend_analyzer.py (show analytics skills)
+data_validator.py (show engineering rigor)
+
+Week 4 Integration + Demo
+
+Power BI dashboard (Python data → visualizations)
+Poster Hybrid solution - no-code + custom analytics
+Demo Show both automation AND Python scripts
+
+This showcases
+
+Business thinking (no-code for accessibility)
+Technical depth (Python for advanced features)
+Engineering maturity (right tool for job)
+
+
+Does this revised approach fit better with your Pythondata analysis skills
+The hybrid strategy (Power Automate Week 2 + Python Week 3) gives you fastest path to working automation PLUS shows your technical capabilities. Best of both worlds for a 4-week demo project.so where to you place AI in this flow How AI technologies will address this problem – Be specific about how AI helps604 PMAI in the Market Intelligence Agent - Technical Deep Dive
+
+Where AI Fits The Complete Flow
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA SOURCES (Raw Input)                     │
+│  Bloomberg articles, Automotive News, Reuters, Press Releases    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              COLLECTION LAYER (Power Automate)                   │
+│  • Email monitoring (Bloomberg alerts)                           │
+│  • RSS feed polling (Automotive News)                            │
+│  • File uploads (manual articles)                                │
+│  • Web scraping (press releases) - Optional                      │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  Raw Article   │
+                    │  TextPDF      │
+                    └────────┬───────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    🤖 AI LAYER #1 EXTRACTION                   │
+│  Technology GPT-4 Turbo (Azure OpenAI or OpenAI API)           │
+│                                                                  │
+│  Task Extract structured information from unstructured text    │
+│                                                                  │
+│  Input Raw article text (500-2000 words)                       │
+│  Output Structured JSON                                        │
+│                                                                  │
+│  AI Capabilities Used                                          │
+│  ✓ Named Entity Recognition (companies, people, locations)      │
+│  ✓ Information Extraction (dates, numbers, financial metrics)   │
+│  ✓ Relationship Detection (partnerships, acquisitions)          │
+│  ✓ Context Understanding (implicit meanings)                    │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │ Structured JSON │
+                    │ {companies[],  │
+                    │  topics[],     │
+                    │  metrics{}}    │
+                    └────────┬───────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  🤖 AI LAYER #2 CATEGORIZATION                 │
+│  Technology GPT-4 Turbo + Few-Shot Learning                    │
+│                                                                  │
+│  Task Classify and tag content                                 │
+│                                                                  │
+│  AI Capabilities Used                                          │
+│  ✓ Multi-label Classification (assign multiple topics)          │
+│  ✓ Semantic Understanding (topic relevance beyond keywords)     │
+│  ✓ Priority Assessment (HighMediumLow based on business rules)│
+│  ✓ Geographic Detection (infer regions from context)            │
+│                                                                  │
+│  Example                                                        │
+│  Input BMW announces €1B investment in Mexican facility...   │
+│  Output                                                         │
+│    Companies [BMW, Magna]                                       │
+│    Topics [Vehicle Electrification, OEM Strategy, Supply Chain]│
+│    Region [Latin America, North America]                        │
+│    Priority High (OEM + door systems + competitor mentioned)   │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  🤖 AI LAYER #3 SUMMARIZATION                  │
+│  Technology GPT-4 Turbo with Custom Prompts                    │
+│                                                                  │
+│  Task Generate concise, structured summaries                   │
+│                                                                  │
+│  AI Capabilities Used                                          │
+│  ✓ Abstractive Summarization (rewrite, not extract)             │
+│  ✓ Multi-Document Compression (2000 words → 150 words)          │
+│  ✓ Perspective-Taking (analyze from Apex Mobility's viewpoint)        │
+│  ✓ Dual Output Generation (facts + implications separately)     │
+│                                                                  │
+│  Two-Stage Process                                             │
+│                                                                  │
+│  Stage 1 Key Developments (Factual Summary)                    │
+│  • What happened (main announcement)                           │
+│  • Who's involved (companies, partnerships)                    │
+│  • WhenWhere (timeline, location)                             │
+│  • Quantitative details (investment amounts, capacity numbers)  │
+│                                                                  │
+│  Stage 2 Strategic Implications (Analytical Summary)           │
+│  • Impact on Apex Mobility's market (opportunitiesthreats)           │
+│  • Competitive positioning implications                         │
+│  • Supply chain or partnership considerations                   │
+│                                                                  │
+│  Output Format Structured Bullets (not paragraphs)             │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │  AI-Generated  │
+                    │  Intelligence  │
+                    │  Summary       │
+                    └────────┬───────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              STORAGE LAYER (SharePoint)                          │
+│  • Metadata Source, Company, Topic, Region, Priority           │
+│  • Content Key Developments + Strategic Implications            │
+│  • Original URL link to source                                 │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│          🤖 AI LAYER #4 SYNTHESIS & TREND DETECTION            │
+│  Technology GPT-4 Turbo + Python Analytics                     │
+│  Frequency Weekly                                              │
+│                                                                  │
+│  Task 1 Multi-Document Synthesis                               │
+│  • Input 20-50 daily summaries from past week                  │
+│  • AI Process Aggregate → Identify themes → Synthesize         │
+│  • Output This week's top 5 themes in automotive intelligence│
+│                                                                  │
+│  AI Capabilities Used                                          │
+│  ✓ Cross-Document Pattern Recognition                           │
+│  ✓ Theme Extraction (cluster similar topics)                    │
+│  ✓ Narrative Generation (cohesive executive summary)            │
+│  ✓ Trend Identification (emerging vs. declining topics)         │
+│                                                                  │
+│  Task 2 Competitive Intelligence Analysis (Python + AI)        │
+│  • Count competitor mentions (Magna 8, Brose 3, Huf 2)       │
+│  • Detect activity spikes (Magna mentioned 3x more this week) │
+│  • Sentiment analysis (positivenegative competitive moves)     │
+│                                                                  │
+│  Output Weekly Executive Brief (automated report generation)   │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               DELIVERY LAYER (Teams  Email)                     │
+│  • Daily digest 5 new intelligence items today               │
+│  • High-priority alerts @mention for urgent items              │
+│  • Weekly synthesis Executive brief PDF                        │
+└─────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+                   ┌──────────────────┐
+                   │  Human Review     │
+                   │  & Validation     │
+                   │  (Market Analyst) │
+                   └──────────────────┘
+
+AI Technologies Specific Problem → Solution Mapping
+Problem 1 Information Overload
+Human Challenge 50-100 articlesweek across multiple sources, impossible to read everything
+AI Solution Extractive + Abstractive Summarization
+Technology GPT-4 Turbo (175B parameters, 128K context window)
+How It Works
+
+Input 1,500-word Bloomberg article
+AI Processing
+
+Identifies key sentences (extractive)
+Rewrites in concise format (abstractive)
+Maintains factual accuracy
+Removes redundancy
+
+
+Output 3-4 bullet points (100-150 words)
+
+Specific AI Capability
+
+Attention Mechanism Transformer model weighs importance of each sentence
+Semantic Compression Understands This represents a major shift in EV strategy vs. The company said this is important (removes fluff)
+
+Result
+
+Before 10 minutes to read article
+After 30 seconds to scan summary
+Time Saved 95% reduction in reading time
+
+
+Problem 2 Context Loss
+Human Challenge Articles assume industry knowledge, buried lede, implicit meanings
+AI Solution Context-Aware Analysis
+Technology Large Language Model with pre-training on automotive corpus
+Example
+Raw Article Text
+
+BMW has selected Inteva Products for its Next Generation platform door modules, marking a significant departure from its traditional supplier base.
+
+Human Analyst Might Miss
+
+Traditional supplier base = BMW historically used BroseMagna
+Significant departure = competitive threat signal
+Next Generation platform = affects multiple vehicle models (high volume)
+
+AI Analysis (GPT-4 with domain prompt)
+Key Developments
+
+BMW awards door module contract to Inteva for Next Gen platform
+Replaces incumbent suppliers Brose and Magna
+Next Gen platform 500K+ annual units across 357 Series
+
+Strategic Implications
+
+Threat BMW diversifying away from traditional German suppliers
+Opportunity Inteva's value proposition (cost innovation) worth investigating
+Context Aligns with BMW's cost reduction strategy announced Q2 2025
+
+AI Capabilities Used
+
+Implicit Relationship Understanding Knows BMW-Brose-Magna historical partnerships
+Inference Departure from traditional base → identifies who's losing
+Volume Estimation Next Gen platform → estimates production impact
+Trend Connection Links to prior BMW cost reduction announcements
+
+How AI Does This
+
+Pre-trained on automotive industry text (press releases, trade publications, earnings calls)
+Fine-tuned with Apex Mobility-specific context (competitors, customers, products)
+Retrieval Augmented Generation (RAG) pulls relevant historical context
+
+
+Problem 3 Inconsistent Categorization
+Human Challenge Same topic described differently across sources (BEV, EV, battery electric, electric vehicle, plug-in)
+AI Solution Semantic Classification
+Technology GPT-4 Multi-Label Classification + Embedding-Based Similarity
+Example Articles
+Article 1 Tesla ramps up 4680 cell production at Gigafactory Texas
+Article 2 BYD's blade battery technology gains European OEM interest
+Article 3 Solid-state batteries Toyota targets 2027 production start
+Human Categorization Problem
+
+Different keywords 4680 cell vs. blade battery vs. solid-state
+Easy to mis-categorize or tag inconsistently
+Keyword matching fails Article doesn't say Battery Technology explicitly
+
+AI Categorization
+All three tagged as Vehicle Electrification & Powertrains + Battery Technology (if that's a subcategory)
+How AI Decides
+
+Semantic Understanding Knows 4680 cell and blade battery and solid-state are all battery technologies
+Context Awareness Gigafactory + production → manufacturing topic too
+Multi-Label Assigns multiple relevant categories (not just one)
+
+Technical Implementation
+python# AI Prompt Engineering (Classification)
+prompt = f
+Analyze this article and select ALL relevant topic categories.
+
+Article {article_text}
+
+Available Categories {topic_list_from_csv}
+
+Selection Criteria
+- A category is relevant if the article substantively discusses it
+- Select multiple if article spans topics
+- Consider both explicit mentions and implicit context
+
+Output as JSON array [Category1, Category2]
+
+
+response = openai.ChatCompletion.create(
+    model=gpt-4-turbo,
+    messages=[{role user, content prompt}],
+    response_format={type json_object}  # Structured output
+)
+
+categories = json.loads(response.choices[0].message.content)
+AI Advantages Over Rule-Based
+
+Semantic matching Understands concepts, not just keywords
+Context-aware Battery in battery lawsuit ≠ battery technology
+Multi-label Correctly assigns multiple relevant categories
+Adaptive Learns from examples (few-shot learning)
+
+
+Problem 4 Lack of Strategic Insight
+Human Challenge Articles report facts, but analysts need implications
+AI Solution Perspective-Taking Analysis
+Technology GPT-4 with Custom System Prompt (Domain-Specific Reasoning)
+System Prompt Design
+pythonsystem_prompt = 
+You are a senior competitive intelligence analyst for Apex Mobility, 
+a tier-1 automotive supplier specializing in door locking systems 
+and access control.
+
+Your expertise includes
+- Door module design (mechanical, mechatronic, electronic)
+- OEM partnership dynamics (BMW, VW, Mercedes, etc.)
+- Competitive landscape (Brose, Huf, Magna, Witte)
+- Industry trends (vehicle electrification, smart access, lightweight materials)
+
+When analyzing articles, you evaluate
+1. Direct impact on Apex Mobility's productsmarkets
+2. Competitive threats or opportunities
+3. OEM strategy shifts affecting supplier relationships
+4. Technology trends requiring innovation response
+
+Provide strategic implications from Apex Mobility's perspective.
+
+Example
+Article Rivian announces partnership with Samsung SDI for cylindrical battery cells
+AI-Generated Strategic Implications
+✅ What AI Infers (Beyond Article Text)
+Direct Implications
+
+Rivian's battery partnership → vehicle design changes → potential door system integration requirements
+Cylindrical cells (vs. pouch) → different thermal management → different door sealinsulation requirements
+
+Competitive Context
+
+Samsung SDI expanding in NA → supply chain localization trend → Apex Mobility should evaluate Mexico manufacturing
+Rivian diversifying suppliers → open to new tier-1 relationships → partnership opportunity window
+
+Market Positioning
+
+Rivian scaling production (battery deal signals volume intent) → targets 200K+ units by 2027 → door system opportunity
+EV startups maturing → moving from get to market to optimize cost → price pressure on suppliers
+
+Technology Trends
+
+Battery standardization (cylindrical) → potential platform sharing across OEMs → modular door designs gain importance
+
+How AI Generates This
+
+Direct Analysis Article mentions Rivian + Samsung SDI + batteries
+Inference Chain
+
+Batteries → vehicle architecture
+Vehicle architecture → component integration
+Component integration → door systems affected
+
+
+Competitive Context Retrieval (RAG)
+
+Query memory Previous Rivian announcements
+Query memory Samsung SDI partnerships
+Synthesize This is part of larger trend...
+
+
+Perspective-Taking
+
+From Apex Mobility's view, what matters here
+Focus on door systems, partnerships, opportunities
+
+
+
+This is NOT simple text extraction - this is reasoning.
+
+Problem 5 Volume Scaling
+Human Challenge Process 5 articlesday manually = 2 hours. Scale to 20 articlesday = 8 hours (impossible)
+AI Solution Parallel Processing at Scale
+Technology API-based AI (asynchronous processing)
+Architecture
+python# Sequential (Human)
+for article in articles  # 20 articles
+    read_article(article)      # 10 min
+    analyze_implications()     # 5 min
+    write_summary()           # 5 min
+    categorize()              # 2 min
+# Total 20 articles × 22 min = 440 minutes (7.3 hours)
+
+# Parallel (AI)
+async def process_articles(articles)
+    tasks = [summarize_with_ai(article) for article in articles]
+    summaries = await asyncio.gather(tasks)
+    return summaries
+
+# Total 20 articles × ~30 seconds = 10 minutes
+Specific AI Capability
+
+Stateless Processing Each article processed independently
+No Fatigue Quality consistent for article #1 and #100
+Instant Scaling 20 articles or 200 articles, same per-unit time
+
+Real-World Impact
+
+Human 5 articlesday max (given other responsibilities)
+AI 100+ articlesday (limited only by API rate limits)
+Cost ~$0.02 per article (GPT-4 Turbo)
+
+
+Problem 6 Financial Data Extraction (Bonus Feature)
+Human Challenge Quarterly earnings PDFs (50-100 pages), extract specific metrics from tables and text
+AI Solution Multimodal Understanding + Structured Extraction
+Technology GPT-4 Turbo with Vision (or GPT-4 text for PDF text)
+Example Task
+Input Tesla Q4 2025 Earnings Report (PDF, 87 pages)
+Human Process
+
+Open PDF (1 min)
+Find financial summary table (3-5 min)
+Locate revenue figure (30 sec)
+Locate operating profit (30 sec)
+Find EV deliveries (buried in footnote, 2 min)
+Find R&D spend (different page, 1 min)
+Copy to Excel (1 min)
+Repeat for VW, Toyota
+Total ~30 min per company × 3 = 90 minutes
+
+AI Process
+pythondef extract_earnings_metrics(pdf_path)
+    
+    Extract structured financial data from earnings PDF
+    
+    # Extract text from PDF
+    text = extract_pdf_text(pdf_path)  # or use GPT-4-Vision for tables
+    
+    prompt = 
+    Extract the following financial metrics from this earnings report.
+    Return as JSON.
+    
+    Required Fields
+    - company_name
+    - quarter (e.g., Q4 2025)
+    - revenue_billions (total revenue in billions USD)
+    - operating_profit_millions (operating profit in millions USD)
+    - ev_deliveries_units (number of electric vehicles delivered)
+    - rd_spend_millions (R&D expenditure in millions USD)
+    - gross_margin_percent (gross profit margin as percentage)
+    
+    Earnings Report Text
+    {text}
+    
+    Rules
+    - If metric not found, return null
+    - Convert all currencies to USD
+    - Normalize units (e.g., €1.2B → 1200 millions → 1.2 billions)
+    
+    
+    response = openai.ChatCompletion.create(
+        model=gpt-4-turbo,
+        messages=[{role user, content prompt}],
+        response_format={type json_object}
+    )
+    
+    return json.loads(response.choices[0].message.content)
+
+# Process 3 companies
+tesla = extract_earnings_metrics('Tesla_Q4_2025.pdf')
+vw = extract_earnings_metrics('VW_Q4_2025.pdf')
+toyota = extract_earnings_metrics('Toyota_Q4_2025.pdf')
+
+# Total time ~3 minutes
+Output
+json{
+  company_name Tesla,
+  quarter Q4 2025,
+  revenue_billions 25.2,
+  operating_profit_millions 3200,
+  ev_deliveries_units 485000,
+  rd_spend_millions 1100,
+  gross_margin_percent 18.5
+}
+AI Capabilities Used
+
+Information Retrieval Find relevant sections in 87-page document
+Table Understanding Parse financial tables (rowscolumns)
+Unit Conversion €1.2B → 1.2 billion USD
+Contextual Understanding Automotive Revenue vs. Energy Revenue (extract right one)
+Structured Output Format as machine-readable JSON
+
+Result
+
+Human 90 minutes, manual, error-prone (typos, wrong row)
+AI 3 minutes, automated, consistent format
+Scalability Add 10 more companies = 30 minutes AI vs. 15 hours human
+
+
+Problem 7 Weekly Synthesis
+Human Challenge Synthesize 20-50 individual summaries into cohesive weekly report
+AI Solution Multi-Document Synthesis
+Technology GPT-4 Turbo (128K context window = ~300 pages)
+Process
+pythondef generate_weekly_synthesis(summaries_df)
+    
+    Aggregate week's intelligence into executive brief
+    
+    # Get last 7 days of summaries
+    recent = summaries_df[summaries_df['Date'] = today - timedelta(days=7)]
+    
+    # Concatenate all summaries
+    all_summaries = nn---nn.join(
+        recent['Key_Developments'] + n + recent['Strategic_Implications']
+    )
+    
+    prompt = f
+    You are preparing the weekly executive intelligence brief for Apex Mobility's 
+    leadership team.
+    
+    Below are {len(recent)} intelligence summaries from the past week.
+    
+    Synthesize these into a cohesive executive brief with the following structure
+    
+    1. TOP 3 THEMES (What dominated the week)
+    2. KEY COMPETITIVE MOVES (Brose, Huf, Magna, Witte activity)
+    3. OEM STRATEGY SHIFTS (Partnership changes, investment announcements)
+    4. TECHNOLOGY TRENDS (Emerging innovations to watch)
+    5. RECOMMENDED ACTIONS (What should Apex Mobility do)
+    
+    For each theme, cite specific examples from the summaries.
+    Keep brief 2-3 pages maximum.
+    
+    Intelligence Summaries
+    {all_summaries}
+    
+    
+    synthesis = openai.ChatCompletion.create(
+        model=gpt-4-turbo,
+        messages=[{role user, content prompt}],
+        max_tokens=2000
+    )
+    
+    return synthesis.choices[0].message.content
+```
+
+Example Output
+```
+WEEKLY INTELLIGENCE BRIEF
+Week of January 20-26, 2026
+
+TOP 3 THEMES
+
+1. Mexico Nearshoring Acceleration
+   - BMW €1B investment (door systems with Magna)
+   - Ford expanding EV production in Hermosillo
+   - 3 tier-1 suppliers announced Mexico expansion
+   → Apex Mobility should evaluate Mexico manufacturing strategy
+
+2. Solid-State Battery Timeline Compression
+   - Toyota pilot production starts Q2 2026 (ahead of schedule)
+   - Samsung SDI files 5 new solid-state patents
+   - QuantumScape announces Volkswagen trial production
+   → Door thermalsafety requirements may change by 2028
+
+3. OEM Cost Pressure Intensifies
+   - GM demands 15% supplier cost reduction
+   - Stellantis cancels 2 luxury programs
+   - Rivian delays R2 platform to 2027
+   → Price pressure on tier-1 suppliers accelerating
+...
+AI Capabilities Used
+
+Cross-Document Pattern Recognition Identifies that 3 separate articles all mention Mexico (theme)
+Temporal Reasoning Toyota ahead of schedule (compares to previous timeline)
+Synthesis Combines 25 individual summaries into 5 themes
+Hierarchy Distinguishes top themes from minor developments
+Actionability What should Apex Mobility do (strategic recommendations)
+
+Human Alternative
+
+Read 25 summaries (25 min)
+Take notes, identify themes (20 min)
+Write cohesive narrative (45 min)
+Edit and format (15 min)
+Total ~105 minutes weekly
+
+AI
+
+Processing 2-3 minutes
+Human reviewedit 10 minutes
+Total ~13 minutes weekly
+
+
+AI Technology Stack Summary
+AI TaskTechnologySpecific ModelKey CapabilitySummarizationLarge Language ModelGPT-4 TurboAbstractive summarization, compressionCategorizationLLM + Few-ShotGPT-4 TurboMulti-label classification, semantic matchingExtractionLLMGPT-4 TurboNamed entity recognition, relationship detectionAnalysisLLM + Custom PromptGPT-4 TurboDomain-specific reasoning, perspective-takingSynthesisLLM (Long Context)GPT-4 Turbo (128K)Multi-document aggregation, theme identificationFinancial DataLLM (Structured Output)GPT-4 TurboTable parsing, unit conversion, JSON generationTrend DetectionPython + LLMPandas + GPT-4Pattern recognition, time-series analysis
+
+Why These Specific AI Capabilities Matter
+1. Context Window (128K tokens)
+
+Problem Weekly synthesis requires reading 25+ summaries
+Solution GPT-4 Turbo can process all 25 in single API call
+Alternative (Claude 3) 200K context window for even more
+
+2. Few-Shot Learning
+
+Problem Need consistent categorization without training custom model
+Solution Provide 3-5 examples in prompt, AI generalizes
+Example
+
+pythonprompt = 
+Categorize this article using our topic taxonomy.
+
+Examples
+Article BMW invests €2B in battery factory
+Topics [Vehicle Electrification, Manufacturing, OEM Strategy]
+
+Article Brose unveils smart door latch with face recognition
+Topics [Door Systems & Locking Solutions, Software & Digital Innovation]
+
+Now categorize
+Article {new_article_text}
+Topics 
+
+3. Structured Output (JSON Mode)
+
+Problem Need consistent format for SharePoint upload
+Solution Force AI to return valid JSON
+
+pythonresponse = openai.ChatCompletion.create(
+    model=gpt-4-turbo,
+    response_format={type json_object},  # Guaranteed valid JSON
+    messages=[...]
+)
+4. Parallel Processing (API)
+
+Problem Process 20 articles quickly
+Solution Async API calls, all process simultaneously
+
+pythonasync def process_batch(articles)
+    tasks = [summarize(article) for article in articles]
+    return await asyncio.gather(tasks)  # All run in parallel
+5. Domain Adaptation (System Prompts)
+
+Problem Generic AI doesn't understand Apex Mobility's business
+Solution Custom system prompt with domain context
+
+pythonsystem = 
+You are an analyst for Apex Mobility (door locking systems).
+Competitors Brose, Huf, Magna, Witte
+Customers BMW, VW, Mercedes, Ford, etc.
+Products Mechatronic latches, central locking, smart access
+
+
+What AI Does That Humans Can't (at Scale)
+TaskHumanAIWhy AI WinsRead 100 articles16 hours10 minutesParallel processingConsistent categorizationSubjective, fatiguesObjective, consistentNo cognitive fatigueIdentify themes across 50 docs2 hours3 minutesCross-document pattern recognitionExtract tables from PDFs30 mindoc30 secdocAutomated parsingWork 247ImpossibleDefaultAlways onProcess multilingualRequires translatorNative multilingual (GPT-4)50+ languages
+
+Cost-Benefit AI Economics
+GPT-4 Turbo Pricing (2026)
+
+Input $0.01 per 1K tokens (~750 words)
+Output $0.03 per 1K tokens
+
+Per Article Cost
+
+Input 1,500 words ≈ 2K tokens = $0.02
+Output 200 words ≈ 300 tokens = $0.009
+Total ~$0.03 per article
+
+Monthly Cost (20 articlesday)
+
+20 articlesday × 22 working days = 440 articlesmonth
+440 × $0.03 = $13.20month
+
+Time Saved
+
+20 articlesday × 10 minarticle = 200 minday = 3.3 hoursday
+3.3 hrs × 22 days = 72.6 hoursmonth saved
+
+ROI
+
+Cost $13month
+Time saved 72 hoursmonth
+Value (at $50hr loaded cost) $3,630month
+ROI 27,500%
+
+
+Final Answer Where AI Fits
+AI is the intelligence extraction and synthesis engine in a 3-layer architecture
+
+Collection Layer (Power Automate) Gather raw articles
+AI Intelligence Layer (GPT-4) Extract, categorize, summarize, analyze, synthesize
+Delivery Layer (SharePointTeams) Store and distribute to humans
+
+AI specifically solves
+
+Information overload → Summarization
+Context loss → Domain-aware analysis
+Inconsistent categorization → Semantic classification
+Lack of strategic insight → Perspective-taking reasoning
+Volume scaling → Parallel processing
+Manual data extraction → Structured extraction
+Weekly synthesis → Multi-document aggregation
+
+Without AI 15 hoursweek manual work, limited to 5 articlesday
+With AI 30 minutesweek review, scales to 50+ articlesday
+That's the transformation.

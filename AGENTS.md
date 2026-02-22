@@ -2,7 +2,7 @@
 
 ## What this is
 
-Streamlit multipage app (Home.py + 5 pages) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces weekly executive briefs for Apex Mobility (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
+Streamlit multipage app (Home.py + 5 pages) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces executive briefs for Apex Mobility (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
 
 Minimal-AI approach: one model call per document for strict JSON extraction, deterministic postprocessing and validation, deterministic brief rendering from stored JSON (no second model call). Human review before executive reporting.
 
@@ -92,7 +92,7 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 | `src/model_router.py` | LLM extraction schema, prompt, Gemini API calls |
 | `src/postprocess.py` | All deterministic post-processing: normalization, priority, confidence, macro themes |
 | `src/schema_validate.py` | Record validation (runs after postprocess) |
-| `src/briefing.py` | Weekly brief selection, rendering, LLM synthesis prompt |
+| `src/briefing.py` | Executive brief selection, rendering, LLM synthesis prompt |
 | `src/storage.py` | JSONL read/write, record IDs, PDF storage |
 | `src/dedupe.py` | Duplicate detection and story-level dedup (canonical implementation) |
 | `src/dedup_rank.py` | Backward-compatible wrapper around `src/dedupe.py`; not actively imported |
@@ -101,7 +101,7 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 | `scripts/run_quality.py` | CLI entrypoint for quality pipeline (`--latest-brief` or `--brief-id`) |
 | `pages/01_Ingest.py` | PDF upload → LLM extraction → postprocess → validate → store |
 | `pages/02_Review.py` | Queue review, record detail/edit, approve/disapprove |
-| `pages/03_Brief.py` | Weekly brief generation and saved-brief review |
+| `pages/03_Brief.py` | Executive brief generation and saved-brief review |
 | `pages/04_Insights.py` | Analytics and trend monitoring |
 | `pages/Admin.py` | Advanced/admin utilities |
 
@@ -183,7 +183,7 @@ Automated QC runs post-hoc on records and briefs via `python scripts/run_quality
 - **Record checks**: evidence grounding (PDF text overlap), geo determinism (country→footprint completeness, display bucket leakage), macro theme rule validation (min_groups, premium gate, region requirements), confidence-evidence alignment, priority reason audit.
 - **Brief checks**: REC citation consistency, uncertainty section compliance, overreach detection.
 - **Shared constants**: `UNCERTAINTY_WORDS` and `UNCERTAINTY_TOPICS` in `constants.py` — single source of truth consumed by both `briefing.py` (synthesis prompt) and `quality.py` (QC checker). Do not define uncertainty word lists elsewhere.
-- **Quality standards**: `References/Quality/` contains QUALITY_CHECKLIST.md, QUALITY_KPIS.md, BRIEF_GENERATION_STANDARDS.md.
+- **Quality standards**: `docs/quality/` contains QUALITY_CHECKLIST.md, QUALITY_KPIS.md, BRIEF_GENERATION_STANDARDS.md.
 - **Output**: append-only JSONL logs in `data/quality/`, Excel report with 4 sheets.
 - **Read-only invariant**: the quality module never modifies records or briefs. It observes and reports.
 
@@ -197,7 +197,7 @@ Automated QC runs post-hoc on records and briefs via `python scripts/run_quality
 
 2. **Company normalization edge cases**: Extend deterministic legal-entity canonicalization beyond current covered variants (for example, additional OEM legal suffix patterns) if misses appear in real records.
 
-3. **Rollup elevation in weekly brief**: The "Premium OEM Financial/Strategy Stress" rollup is the Apex Mobility headline signal. Consider surfacing `_macro_theme_rollups` in the weekly synthesis prompt or brief rendering so it gets elevated automatically.
+3. **Rollup elevation in executive brief**: The "Premium OEM Financial/Strategy Stress" rollup is the Apex Mobility headline signal. Consider surfacing `_macro_theme_rollups` in the weekly synthesis prompt or brief rendering so it gets elevated automatically.
 
 ## External dependencies
 
