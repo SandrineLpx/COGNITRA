@@ -12,5 +12,43 @@ Docs/Perso/
 __pycache__/
 *.pyc
 *.pyo
-data/
+# Data policy:
+# - Ignore local runtime/demo artifacts by default
+# - Keep the canonical region mapping in git
+# - Keep only shareable quality summaries
+data/*
+!data/new_country_mapping.csv
+!data/quality/
+data/quality/*
+!data/quality/quality_runs.jsonl
+!data/demo_seed/
+!data/demo_seed/records_baseline.jsonl
+!data/demo_seed/records_baseline.meta.json
 *.log
+
+# Configurable architecture (local development only, not synced)
+configurable/
+
+# Ignore environment files (common place keys leak)
+.env
+.env.*
+*.env
+
+# Ignore common secret/key file types
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Ignore local IDE and OS noise (keeps repo clean)
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Ignore Python build artifacts (optional but standard)
+dist/
+build/
+*.egg-info/
