@@ -1001,7 +1001,7 @@ with queue_col:
         selected_id: str = str(st.session_state.get("selected_record_id") or "")
         if selected_id not in queue_ids:
             selected_id = queue_ids[0]
-            st.session_state["review_queue_page_idx"] = 0
+            st.session_state["selected_record_id"] = selected_id
 
         queue_total = len(queue_ids)
         page_count = max(1, (queue_total + _QUEUE_PAGE_SIZE - 1) // _QUEUE_PAGE_SIZE)

@@ -1,0 +1,36 @@
+{
+  "created_at": "2026-02-20T22:45:33+00:00",
+  "week_range": "2026-01-26 to 2026-02-11 (Publish date)",
+  "file": "data\\briefs\\brief_20260220_221645-v2.md",
+  "selected_record_ids": [
+    "b01fe54f0ab5",
+    "b2fea01bb1ec",
+    "2f16b6647a12",
+    "55bf0e08f822",
+    "c969174c6064",
+    "250834d30c37",
+    "45f54919fffa",
+    "63d44f20fae4",
+    "7fac272bd3a4",
+    "8b75b5db8a8a",
+    "9e3d05c6cb73",
+    "a216c9267f5f",
+    "9d257f291138"
+  ],
+  "usage": {
+    "model": "gemini-2.5-flash",
+    "prompt_tokens": 82021,
+    "output_tokens": 6759,
+    "total_tokens": 101268,
+    "web_check_enabled": false,
+    "provider": "gemini",
+    "repair_attempted": true,
+    "attempts": 2,
+    "validation_errors_initial": 11,
+    "validation_errors_final": 5
+  },
+  "status": "final",
+  "brief_family_id": "brief_20260220_221645",
+  "version": 2,
+  "supersedes_file": "brief_20260220_221645.md"
+}

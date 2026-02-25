@@ -1,0 +1,27 @@
+{
+  "created_at": "2026-02-21T00:26:23+00:00",
+  "week_range": "2026-01-26 to 2026-02-12 (Publish date)",
+  "file": "data\\briefs\\brief_20260221_002623.md",
+  "selected_record_ids": [
+    "b01fe54f0ab5",
+    "b2fea01bb1ec",
+    "03c70b6bc95a",
+    "0d8b2829d58b",
+    "2f16b6647a12"
+  ],
+  "usage": {
+    "model": "gemini-2.5-flash",
+    "prompt_tokens": 36607,
+    "output_tokens": 6148,
+    "total_tokens": 52465,
+    "web_check_enabled": false,
+    "provider": "gemini",
+    "repair_attempted": true,
+    "attempts": 2,
+    "validation_errors_initial": 4,
+    "validation_errors_final": 0
+  },
+  "status": "final",
+  "brief_family_id": "brief_20260221_002623",
+  "version": 1
+}

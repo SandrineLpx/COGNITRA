@@ -1,4 +1,8 @@
 ﻿{
-    "saved_at":  "2026-02-24T09:11:16Z",
-    "record_count":  28
+    "saved_at":  "2026-02-25T23:39:16Z",
+    "record_count":  28,
+    "brief_snapshot_path":  "data/demo_seed/briefs",
+    "brief_markdown_count":  3,
+    "brief_sidecar_count":  5,
+    "brief_index_copied":  true
 }
