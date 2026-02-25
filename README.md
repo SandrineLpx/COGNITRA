@@ -1,8 +1,8 @@
-# COGNITRA — Automotive Competitive Intelligence Platform
+# COGNITRA — Automotive Market Intelligence Platform
 
-A governed intelligence system that transforms automotive industry articles into structured, analyst-reviewed executive briefs for strategic decision-making.
+A governed intelligence system that transforms automotive industry doucments (reports, articles) into structured, analyst-reviewed executive briefs for strategic decision-making.
 
-Built for **Apex Mobility**, a closure systems supplier (door latches, strikers, handles, smart entry, cinch systems), COGNITRA ensures that competitive signals reach decision-makers with full provenance, deterministic scoring, and human oversight.
+Built for **Apex Mobility**, a closure systems supplier (door latches, strikers, handles, smart entry, cinch systems), COGNITRA ensures that market signals reach decision-makers with full provenance, deterministic scoring, and human oversight.
 
 ## How it works
 
@@ -11,15 +11,15 @@ COGNITRA follows a four-stage governed pipeline — no unreviewed AI output reac
 ```
   Extract            Score              Approve            Render
  ─────────        ──────────         ───────────       ──────────
- PDF / text  →    Priority ·    →    Analyst     →     Weekly
- Gemini LLM       Confidence ·       review            executive
- strict JSON      Macro-themes       gate              brief
+ PDF / text  →    Priority ·    →    Analyst     →     Executive
+ Gemini LLM       Confidence ·       review            briefs
+ strict JSON      Macro-themes       gate              
                   (deterministic)
 ```
 
 **UX concept prototype:** [cognitra-mockup.lovable.app](https://cognitra-mockup.lovable.app/) — interactive mockup of the intended production UI (static, not connected to live data).
 
-1. **Extract** — Upload a PDF or paste text. Gemini extracts structured intelligence into a strict JSON schema. One model call per document.
+1. **Extract** — Upload a PDF or paste text (OCR not supported at this stage). Gemini extracts structured intelligence into a strict JSON schema. One model call per document.
 2. **Score** — Deterministic Python rules assign priority, confidence, and macro-theme tags. No LLM involved.
 3. **Approve** — Analysts review, edit, and approve records through a governance queue. Low-confidence or incomplete records require human sign-off.
 4. **Render** — Executive briefs are generated from approved records only, with full citation traceability (REC links).
@@ -33,7 +33,9 @@ COGNITRA follows a four-stage governed pipeline — no unreviewed AI output reac
 | **Review** | Analyst governance queue — filter, inspect, approve/disapprove records. Deterministic diagnostics explain every score |
 | **Brief** | Generate and manage executive briefs for any time window. Compare versions, regenerate, download markdown |
 | **Insights** | Analytics dashboards — topic signals, region coverage, company rankings, trend momentum, quality scores |
-| **Admin** | Maintenance utilities — quality checks, data export, demo state management, cache controls |
+| **Settings (Admin)** | Maintenance utilities — quality checks, data export, demo state management, cache controls |
+
+Detailed page map (routes + modules): [`docs/streamlit_page_map.md`](docs/streamlit_page_map.md)
 
 ## Setup
 

@@ -5,6 +5,7 @@ Project documentation lives here.
 ## Structure
 
 - `technical_report_v1.0.md`: main technical report for the project.
+- `streamlit_page_map.md`: current Streamlit page map (routes, purpose, module ownership).
 - `ITERATION_LOG.md`: concise milestone log.
 - `ITERATION_LOG_FULL.md`: detailed iteration history.
 - `UI/`: UI and UX documentation.
@@ -24,4 +25,3 @@ The following are local-only and ignored from git:
 - `docs/Perso/`
 
 These folders may contain coursework prompts, proprietary demo files, or personal working materials.
-

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
-from difflib import unified_diff
+from difflib import SequenceMatcher, unified_diff
 from html import escape
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -369,10 +369,140 @@ if flash_msg:
 
 BRIEFS_DIR = Path("data") / "briefs"
 BRIEF_INDEX = BRIEFS_DIR / "index.jsonl"
+DEMO_SEED_DIR = Path("data") / "demo_seed"
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _latest_demo_seed_brief_file() -> Optional[Path]:
+    if not DEMO_SEED_DIR.exists():
+        return None
+    files = sorted(
+        [p for p in DEMO_SEED_DIR.glob("weekly_brief_*.md") if p.is_file()],
+        key=lambda p: (p.stat().st_mtime, p.name),
+    )
+    return files[-1] if files else None
+
+
+def _week_range_from_brief_text(text: str) -> str:
+    for raw in str(text or "").splitlines():
+        line = str(raw).strip()
+        if not line:
+            continue
+        if line.lower().startswith("period:"):
+            return str(line.split(":", 1)[1]).strip()
+    return ""
+
+
+def _load_demo_seed_brief() -> Tuple[str, Optional[Path], str]:
+    seed_path = _latest_demo_seed_brief_file()
+    if not seed_path:
+        return "", None, ""
+    try:
+        text = seed_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return "", seed_path, ""
+    week_range = _week_range_from_brief_text(text)
+    return text, seed_path, week_range
+
+
+def _normalize_title_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_url_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    text = re.sub(r"#.*$", "", text).rstrip("/")
+    return text
+
+
+def _pick_best_alias_match(seed_rec: Dict[str, Any], candidates: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not candidates:
+        return None
+    seed_source = str(seed_rec.get("source_type") or "").strip().lower()
+    seed_date = str(seed_rec.get("publish_date") or "").strip()
+
+    def _score(candidate: Dict[str, Any]) -> Tuple[int, str, str]:
+        score = 0
+        if seed_source and str(candidate.get("source_type") or "").strip().lower() == seed_source:
+            score += 4
+        if seed_date and str(candidate.get("publish_date") or "").strip() == seed_date:
+            score += 3
+        created = _safe_iso(candidate.get("created_at"))
+        rid = str(candidate.get("record_id") or "")
+        return score, created, rid
+
+    return sorted(candidates, key=_score, reverse=True)[0]
+
+
+def _build_demo_seed_aliases(records: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    seed_records_path = DEMO_SEED_DIR / "records_baseline.jsonl"
+    seed_rows = _read_jsonl(seed_records_path)
+    if not seed_rows:
+        return {}
+
+    by_current_id = {str(r.get("record_id") or ""): r for r in records if str(r.get("record_id") or "").strip()}
+    by_title: Dict[str, List[Dict[str, Any]]] = {}
+    by_url: Dict[str, List[Dict[str, Any]]] = {}
+
+    for rec in records:
+        title_key = _normalize_title_key(rec.get("title"))
+        if title_key:
+            by_title.setdefault(title_key, []).append(rec)
+        url_key = _normalize_url_key(rec.get("original_url"))
+        if url_key:
+            by_url.setdefault(url_key, []).append(rec)
+
+    alias_map: Dict[str, Dict[str, Any]] = {}
+    for seed_rec in seed_rows:
+        legacy_id = str(seed_rec.get("record_id") or "").strip()
+        if not legacy_id or legacy_id in by_current_id:
+            continue
+
+        candidates: List[Dict[str, Any]] = []
+        url_key = _normalize_url_key(seed_rec.get("original_url"))
+        if url_key:
+            candidates = list(by_url.get(url_key, []))
+
+        if not candidates:
+            title_key = _normalize_title_key(seed_rec.get("title"))
+            if title_key:
+                candidates = list(by_title.get(title_key, []))
+
+        if not candidates:
+            seed_title = _normalize_title_key(seed_rec.get("title"))
+            if seed_title:
+                fuzzy_matches: List[Dict[str, Any]] = []
+                for rec in records:
+                    current_title = _normalize_title_key(rec.get("title"))
+                    if not current_title:
+                        continue
+                    ratio = SequenceMatcher(None, seed_title, current_title).ratio()
+                    if ratio >= 0.93:
+                        fuzzy_matches.append(rec)
+                candidates = fuzzy_matches
+
+        match = _pick_best_alias_match(seed_rec, candidates)
+        if match:
+            alias_map[legacy_id] = match
+
+    return alias_map
+
+
+def _build_records_lookup(records: List[Dict[str, Any]]) -> Tuple[Dict[str, Dict[str, Any]], int]:
+    lookup = {str(r.get("record_id") or ""): r for r in records if str(r.get("record_id") or "").strip()}
+    alias_map = _build_demo_seed_aliases(records)
+    for legacy_id, rec in alias_map.items():
+        lookup.setdefault(legacy_id, rec)
+    return lookup, len(alias_map)
 
 
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -662,6 +792,32 @@ def _synthesize_and_store(
     st.session_state[f"{state_prefix}_text"] = brief_text
     st.session_state[f"{state_prefix}_usage"] = usage or {}
     st.session_state[f"{state_prefix}_week_range"] = week_range
+    st.session_state[f"{state_prefix}_selected_ids"] = list(selected_ids)
+    return True
+
+
+def _load_demo_seed_and_store(
+    *,
+    state_prefix: str,
+    selected_ids: List[str],
+    week_range_fallback: str,
+) -> bool:
+    seed_text, seed_path, seed_week_range = _load_demo_seed_brief()
+    if not seed_path:
+        st.error("No demo seed brief found in `data/demo_seed/weekly_brief_*.md`.")
+        return False
+    if not seed_text:
+        st.error(f"Demo seed brief is empty or unreadable: {seed_path}")
+        return False
+
+    usage = {
+        "provider": "demo",
+        "model": "prebuilt-brief-md",
+        "seed_file": str(seed_path),
+    }
+    st.session_state[f"{state_prefix}_text"] = seed_text
+    st.session_state[f"{state_prefix}_usage"] = usage
+    st.session_state[f"{state_prefix}_week_range"] = str(seed_week_range or week_range_fallback)
     st.session_state[f"{state_prefix}_selected_ids"] = list(selected_ids)
     return True
 
@@ -986,7 +1142,7 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
                     if st.button(
                         ("Opened" if is_selected else "Open"),
                         key=f"wb_saved_pick_{i}_{row_file}",
-                        use_container_width=True,
+                        width="stretch",
                         type="secondary",
                     ):
                         st.session_state["wb_saved_selected_file"] = row_file
@@ -1170,7 +1326,9 @@ if not records:
     st.info("No records yet.")
     st.stop()
 
-records_by_id = {str(r.get("record_id") or ""): r for r in records}
+records_by_id, demo_alias_count = _build_records_lookup(records)
+if demo_alias_count:
+    st.caption(f"Re-linked {demo_alias_count} legacy demo citation(s) to current records.")
 meta_seed = _brief_sidecar_meta(_latest_brief_file()) or _latest_brief_meta_for_file(_latest_brief_file())
 default_days = 30
 if isinstance(meta_seed.get("week_range"), str):
@@ -1337,9 +1495,29 @@ with tab_build:
             date_basis_field = "created_at" if basis_label == "Upload date" else "publish_date"
             st.session_state["wb_basis_prev"] = basis_label
         with q5:
+            # Avoid Streamlit key/value collision: this widget is controlled via session_state key.
+            widget_range = st.session_state.get("wb_date_range")
+            if isinstance(widget_range, tuple):
+                if len(widget_range) == 2:
+                    pass
+                elif len(widget_range) == 1:
+                    st.session_state["wb_date_range"] = (widget_range[0], widget_range[0])
+                else:
+                    st.session_state["wb_date_range"] = (basis_default_from, basis_default_to)
+            elif isinstance(widget_range, list):
+                if len(widget_range) >= 2:
+                    st.session_state["wb_date_range"] = (widget_range[0], widget_range[1])
+                elif len(widget_range) == 1:
+                    st.session_state["wb_date_range"] = (widget_range[0], widget_range[0])
+                else:
+                    st.session_state["wb_date_range"] = (basis_default_from, basis_default_to)
+            elif widget_range:
+                st.session_state["wb_date_range"] = (widget_range, widget_range)
+            else:
+                st.session_state["wb_date_range"] = (basis_default_from, basis_default_to)
+
             date_range = st.date_input(
                 "Date range",
-                value=(basis_default_from, basis_default_to),
                 key="wb_date_range",
                 label_visibility="collapsed",
             )
@@ -1421,10 +1599,10 @@ with tab_build:
     with st.expander("See included records", expanded=False):
         a1, a2 = st.columns(2)
         with a1:
-            if st.button("Select all", key="wb_select_all_rows", use_container_width=True):
+            if st.button("Select all", key="wb_select_all_rows", width="stretch"):
                 selected_seed = set(candidate_ids)
         with a2:
-            if st.button("Deselect all", key="wb_deselect_all_rows", use_container_width=True):
+            if st.button("Deselect all", key="wb_deselect_all_rows", width="stretch"):
                 selected_seed = set()
 
         selection_df = pd.DataFrame(selection_rows)
@@ -1471,12 +1649,22 @@ with tab_build:
     st.markdown("## Executive-Ready Output")
 
     can_generate = bool(selected_records)
-    generate_clicked = st.button(
-        "Generate Brief",
-        type="primary",
-        width='stretch',
-        disabled=not can_generate,
-    )
+    g1, g2 = st.columns(2)
+    with g1:
+        generate_clicked = st.button(
+            "Generate Brief",
+            type="primary",
+            width='stretch',
+            disabled=not can_generate,
+        )
+    with g2:
+        generate_demo_clicked = st.button(
+            "Generate Demo Brief",
+            type="secondary",
+            width='stretch',
+            disabled=not can_generate,
+            help="Uses a prebuilt markdown brief from data/demo_seed (no API call).",
+        )
 
     if generate_clicked:
         generated = _synthesize_and_store(
@@ -1500,6 +1688,25 @@ with tab_build:
                 st.rerun()
             except Exception as exc:
                 st.error(f"Generated, but auto-save failed: {exc}")
+    elif generate_demo_clicked:
+        generated = _load_demo_seed_and_store(
+            state_prefix="weekly_ai_brief",
+            selected_ids=selected_ids,
+            week_range_fallback=brief_week_range,
+        )
+        if generated:
+            try:
+                auto_path = _save_brief(
+                    str(st.session_state.get("weekly_ai_brief_text") or ""),
+                    str(st.session_state.get("weekly_ai_brief_week_range") or brief_week_range),
+                    list(st.session_state.get("weekly_ai_brief_selected_ids") or selected_ids),
+                    st.session_state.get("weekly_ai_brief_usage") or {},
+                )
+                st.session_state["weekly_ai_brief_last_autosave_path"] = str(auto_path)
+                st.session_state["wb_flash_message"] = f"Auto-saved demo brief: {auto_path}"
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Loaded demo brief, but auto-save failed: {exc}")
 
     saved_text = st.session_state.get("weekly_ai_brief_text")
     saved_usage = st.session_state.get("weekly_ai_brief_usage", {}) if saved_text else {}

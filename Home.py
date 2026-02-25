@@ -153,13 +153,13 @@ st.markdown("<div style='height:0.7rem;'></div>", unsafe_allow_html=True)
 # CTA (PRIMARY START)
 b1, b2, b3, _ = st.columns([1, 1, 1, 3])
 with b1:
-    if st.button("Ingest a PDF", type="primary", use_container_width=True):
+    if st.button("Ingest a PDF", type="primary", width="stretch"):
         st.switch_page("pages/01_Ingest.py")
 with b2:
-    if st.button("Review queue", type="secondary", use_container_width=True):
+    if st.button("Review queue", type="secondary", width="stretch"):
         st.switch_page("pages/02_Review.py")
 with b3:
-    if st.button("Generate executive brief", type="secondary", use_container_width=True):
+    if st.button("Generate executive brief", type="secondary", width="stretch"):
         st.switch_page("pages/03_Brief.py")
 
 

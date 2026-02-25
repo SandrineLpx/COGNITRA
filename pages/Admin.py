@@ -279,23 +279,45 @@ with ui.card("Demo baseline reset"):
         "(prebuilt/no-API briefs) so baseline records are visible again."
     )
 
+    st.session_state.setdefault("admin_demo_reset_pending", False)
+
     controls_col, _ = st.columns([1.1, 1.9])
     with controls_col:
-        confirm_demo_reset = st.checkbox(
-            "Confirm reset baseline records + remove demo-mode briefs",
-            value=False,
-            key="admin_confirm_demo_baseline_reset",
-        )
         if st.button(
             "Reset to demo baseline",
             type="primary",
+            key="admin_demo_reset_start",
             width='stretch',
-            disabled=not confirm_demo_reset,
         ):
-            ok, msg = _reset_to_demo_baseline()
-            (st.success if ok else st.error)(msg)
-            if ok:
-                st.rerun()
+            st.session_state["admin_demo_reset_pending"] = True
+
+    if st.session_state.get("admin_demo_reset_pending", False):
+        st.warning(
+            "Confirm reset: this will restore records from the saved demo baseline "
+            "and remove demo-mode saved briefs."
+        )
+        c_confirm, c_cancel = st.columns([1.1, 1.1])
+        with c_confirm:
+            if st.button(
+                "Yes, reset now",
+                type="primary",
+                key="admin_demo_reset_confirm",
+                width='stretch',
+            ):
+                st.session_state["admin_demo_reset_pending"] = False
+                ok, msg = _reset_to_demo_baseline()
+                (st.success if ok else st.error)(msg)
+                if ok:
+                    st.rerun()
+        with c_cancel:
+            if st.button(
+                "Cancel",
+                type="secondary",
+                key="admin_demo_reset_cancel",
+                width='stretch',
+            ):
+                st.session_state["admin_demo_reset_pending"] = False
+                st.info("Reset canceled.")
 
 tab_quality, tab_maintenance, tab_download, tab_danger = st.tabs(
     ["Quality", "Maintenance", "Download records", "Danger Zone"]

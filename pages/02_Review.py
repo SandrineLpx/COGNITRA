@@ -72,6 +72,44 @@ def _normalize_filter_tokens(query: str) -> List[str]:
     return [tok for tok in normalized.split(" ") if tok]
 
 
+def _unique_non_empty(values: List[Any]) -> List[str]:
+    out: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        s = str(value or "").strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def _brief_entry_file_name(entry: Dict[str, Any]) -> str:
+    return Path(str(entry.get("file") or "")).name
+
+
+def _brief_entry_label(entry: Dict[str, Any]) -> str:
+    file_name = _brief_entry_file_name(entry)
+    week_range = str(entry.get("week_range") or "").strip()
+    if file_name and week_range:
+        return f"{file_name} ({week_range})"
+    return file_name or week_range
+
+
+def _brief_membership_labels(entries: List[Dict[str, Any]]) -> List[str]:
+    labels = [_brief_entry_label(entry) for entry in entries if isinstance(entry, dict)]
+    return _unique_non_empty(labels)
+
+
+def _brief_membership_summary(entries: List[Dict[str, Any]], max_items: int = 2) -> str:
+    labels = _brief_membership_labels(entries)
+    if not labels:
+        return ""
+    if len(labels) <= max_items:
+        return "; ".join(labels)
+    return "; ".join(labels[:max_items]) + f"; +{len(labels) - max_items} more"
+
+
 def _review_filter_blob(row: pd.Series) -> str:
     parts: List[str] = []
     scalar_fields = [
@@ -84,11 +122,14 @@ def _review_filter_blob(row: pd.Series) -> str:
         "confidence",
         "review_status",
         "latest_brief_week_range",
+        "brief_membership_summary",
     ]
     list_fields = [
         "regions_relevant_to_apex_mobility",
         "macro_themes_detected",
         "topics",
+        "brief_files",
+        "brief_week_ranges",
     ]
     for key in scalar_fields:
         value = str(row.get(key) or "").strip()
@@ -629,7 +670,11 @@ for rec in records:
     )
     publish_dt = pd.to_datetime(rec.get("publish_date"), errors="coerce")
     rec_id = str(rec.get("record_id") or "")
+    shared_rows = [x for x in (brief_history.get(rec_id) or []) if isinstance(x, dict)]
     latest_shared = latest_brief_entry_for_record(brief_history, rec_id)
+    brief_labels = _brief_membership_labels(shared_rows)
+    brief_files = _unique_non_empty([_brief_entry_file_name(entry) for entry in shared_rows])
+    brief_week_ranges = _unique_non_empty([entry.get("week_range") for entry in shared_rows])
     rows.append(
         {
             "record_id": rec_id,
@@ -644,7 +689,11 @@ for rec in records:
             "regions_relevant_to_apex_mobility": safe_list(rec.get("regions_relevant_to_apex_mobility")),
             "macro_themes_detected": safe_list(rec.get("macro_themes_detected")),
             "topics": safe_list(rec.get("topics")),
-            "in_brief": bool(brief_history.get(rec_id)),
+            "in_brief": bool(shared_rows),
+            "brief_count": len(brief_labels),
+            "brief_files": brief_files,
+            "brief_week_ranges": brief_week_ranges,
+            "brief_membership_summary": _brief_membership_summary(shared_rows),
             "latest_brief_file": str(latest_shared.get("file") or ""),
             "latest_brief_week_range": str(latest_shared.get("week_range") or ""),
             "_auto_approve_eligible": _auto_approve_eligible(rec),
@@ -793,6 +842,11 @@ with f5:
     else:
         filter_date_from = filter_date_to = date_range
 
+hide_briefed = st.checkbox(
+    "Hide records already included in a brief",
+    key="review_hide_briefed",
+)
+
 with st.expander("Advanced", expanded=False):
     mf1, mf2 = st.columns(2)
     with mf1:
@@ -816,10 +870,6 @@ with st.expander("Advanced", expanded=False):
             options=["All Sources"] + source_vals,
             key="review_adv_source",
         )
-        hide_briefed = st.checkbox(
-            "Hide records already included in a brief",
-            key="review_hide_briefed",
-        )
     with mf2:
         adv_regions = st.multiselect(
             "Regions (multi-select override)",
@@ -837,7 +887,7 @@ with st.expander("Advanced", expanded=False):
             key="review_sel_topics",
         )
     
-    if st.button("Clear", key="review_clear_filters", type="secondary", use_container_width=True):
+    if st.button("Clear", key="review_clear_filters", type="secondary", width="stretch"):
         st.session_state["review_clear_filters_requested"] = True
         st.rerun()
 
@@ -984,11 +1034,18 @@ with queue_col:
                     title = _truncate(row.get("title"), 96) or "Untitled"
                     title_style = "font-weight:700;" if rid == selected_id else "font-weight:600;"
                     meta = f"{source} | {date_label} | Priority {prio} | Confidence {conf}"
+                    brief_summary = str(row.get("brief_membership_summary") or "").strip()
+                    brief_line = (
+                        f"<div style='font-size:0.74rem;color:#475569;'>In briefs: {html.escape(brief_summary)}</div>"
+                        if bool(row.get("in_brief")) and brief_summary
+                        else ""
+                    )
                     st.markdown(
                         (
                             "<div style='line-height:1.15;margin-bottom:0.15rem;'>"
                             f"<div style='{title_style}'>{html.escape(title)}</div>"
                             f"<div style='font-size:0.76rem;color:#64748b;'>{html.escape(meta)}</div>"
+                            f"{brief_line}"
                             "</div>"
                         ),
                         unsafe_allow_html=True,
@@ -1011,7 +1068,7 @@ with queue_col:
                         badge_kind = "danger"
                     ui.status_badge(status, kind=badge_kind)
                     if bool(row.get("in_brief")):
-                        st.caption("Briefed")
+                        st.caption(f"Briefed ({int(row.get('brief_count') or 1)})")
                 with row_action:
                     if st.button(
                         "",
@@ -1107,6 +1164,26 @@ with detail_col:
             if bool(brief_history.get(record_id)):
                 ui.status_badge("Briefed", kind="info")
 
+        shared_entries = [x for x in (brief_history.get(record_id) or []) if isinstance(x, dict)]
+        st.markdown("**Included in saved briefs**")
+        if shared_entries:
+            shown = list(reversed(shared_entries))
+            max_rows = 6
+            for entry in shown[:max_rows]:
+                file_name = _brief_entry_file_name(entry) or "(unknown brief)"
+                week_range = str(entry.get("week_range") or "").strip()
+                created_label = _created_date_pt_label(entry.get("created_at"))
+                parts = [f"`{file_name}`"]
+                if week_range:
+                    parts.append(week_range)
+                if created_label != "-":
+                    parts.append(f"created {created_label}")
+                st.markdown("- " + " | ".join(parts))
+            if len(shown) > max_rows:
+                st.caption(f"+ {len(shown) - max_rows} older brief entr{'y' if len(shown) - max_rows == 1 else 'ies'}")
+        else:
+            st.caption("Not included in any saved brief yet.")
+
         decision_status_key = f"decision_status_{record_id}"
         if decision_status_key not in st.session_state:
             st.session_state[decision_status_key] = current_status if current_status in status_options else "Pending"
@@ -1118,7 +1195,7 @@ with detail_col:
                 options=status_options,
                 key=decision_status_key,
             )
-            if st.button("Update Status", type="primary", key=f"update_status_{record_id}", use_container_width=True):
+            if st.button("Update Status", type="primary", key=f"update_status_{record_id}", width="stretch"):
                 changed = False
                 updated = {
                     "review_status": selected_status,
@@ -1186,6 +1263,8 @@ with detail_col:
             st.success(st.session_state.pop("reingest_success_msg"))
         if "reingest_info_msg" in st.session_state:
             st.info(st.session_state.pop("reingest_info_msg"))
+        if "review_save_success_msg" in st.session_state:
+            st.success(st.session_state.pop("review_save_success_msg"))
 
         tab_brief, tab_evidence, tab_fields, tab_advanced = st.tabs(["Brief", "Evidence", "Fields", "Advanced"])
 
@@ -1241,7 +1320,12 @@ with detail_col:
         with tab_advanced:
             with st.expander("JSON Editor", expanded=False):
                 st.toggle("Edit mode", value=edit_mode, key=edit_mode_key)
-                st.toggle("Enable advanced tools", value=raw_json_tools_enabled, key=raw_json_tools_key)
+                st.toggle(
+                    "Enable advanced tools",
+                    value=raw_json_tools_enabled,
+                    key=raw_json_tools_key,
+                    help="Parses JSON live for preview/diagnostics without saving to records.jsonl.",
+                )
                 rc1, rc2 = st.columns(2)
                 with rc1:
                     st.selectbox(
@@ -1273,7 +1357,7 @@ with detail_col:
                         for hint in hints:
                             st.caption(f"- {hint}")
                 if edit_mode:
-                    if st.button("Save edits", type="secondary", disabled=not ok or rec_obj is None, key=f"save_adv_{record_id}", use_container_width=True):
+                    if st.button("Save edits", type="secondary", disabled=not ok or rec_obj is None, key=f"save_adv_{record_id}", width="stretch"):
                         changed = False
                         for idx, row in enumerate(records):
                             if str(row.get("record_id") or "") == record_id:
@@ -1284,7 +1368,7 @@ with detail_col:
                         if changed:
                             overwrite_records(records)
                             clear_records_cache()
-                            st.success("Saved.")
+                            st.session_state["review_save_success_msg"] = "Changes saved."
                             st.rerun()
                         else:
                             st.info("No changes.")
@@ -1301,7 +1385,7 @@ with detail_col:
                 st.markdown("**Macro themes**")
                 macro_rows = _macro_theme_diag(rec)
                 if macro_rows:
-                    st.dataframe(pd.DataFrame(macro_rows), use_container_width=True, hide_index=True)
+                    st.dataframe(pd.DataFrame(macro_rows), width="stretch", hide_index=True)
                 else:
                     st.caption("No themes detected.")
 
@@ -1329,7 +1413,7 @@ with detail_col:
                     type="primary",
                     disabled=(not pdf_exists or not reingest_confirm),
                     key=f"reingest_{record_id}",
-                    use_container_width=True,
+                    width="stretch",
                 ):
                     try:
                         pdf_bytes = pdf_path.read_bytes() if pdf_path else b""
@@ -1413,7 +1497,7 @@ with detail_col:
                         type="secondary",
                         key=f"delete_record_{record_id}",
                         disabled=(not delete_record_confirm),
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         delete_record_pdf_too = True
                         filtered_records = [r for r in records if str(r.get("record_id") or "") != record_id]
@@ -1446,7 +1530,7 @@ with detail_col:
                         type="secondary",
                         key=f"delete_pdf_only_{record_id}",
                         disabled=(not pdf_exists or not delete_pdf_confirm),
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         deleted_file = False
                         if pdf_path and pdf_path.exists():
@@ -1481,7 +1565,7 @@ with pdf_col:
                     "Open source URL",
                     source_url,
                     type="tertiary",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
             if pdf_exists and pdf_path is not None:
