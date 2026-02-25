@@ -128,33 +128,104 @@ def _first_nonempty_line(values: Any) -> str:
 
 
 def _source_tooltip_for_record(rec: Dict[str, Any], rid: str) -> str:
-    _ = rid  # keep signature stable for call sites
-    snippet = _first_nonempty_line(rec.get("evidence_bullets")) or _first_nonempty_line(rec.get("key_insights"))
-    if not snippet:
-        snippet = str(rec.get("title") or "").strip()
-    snippet = re.sub(r"\s+", " ", snippet).strip()
-    return snippet or "Evidence snippet unavailable."
+    rec_id = str(rec.get("record_id") or "").strip() or str(rid or "").strip()
+    title = re.sub(r"\s+", " ", str(rec.get("title") or "").strip())
+    source = str(rec.get("source_type") or "").strip() or "Source"
+    publish_date = str(rec.get("publish_date") or "").strip()
+    evidence = [re.sub(r"\s+", " ", str(x).strip()) for x in (rec.get("evidence_bullets") or []) if str(x).strip()]
+    if evidence:
+        header = [f"REC:{rec_id}", f"Source: {source}"]
+        if publish_date:
+            header.append(f"Publish date: {publish_date}")
+        if title:
+            header.append(f"Title: {title}")
+        return "\n".join(header + ["Evidence bullets:"] + [f"- {b}" for b in evidence])
+
+    insights = [re.sub(r"\s+", " ", str(x).strip()) for x in (rec.get("key_insights") or []) if str(x).strip()]
+    if insights:
+        return "\n".join([f"REC:{rec_id}", f"Source: {source}", "Key insights:"] + [f"- {x}" for x in insights[:3]])
+
+    if title:
+        return f"REC:{rec_id}\nSource: {source}\nTitle: {title}"
+    return f"REC:{rec_id}\nEvidence snippet unavailable."
 
 
 def _wrap_tooltip_lines(text: str, width: int = 64) -> str:
-    words = str(text or "").split()
-    if not words:
+    _ = width
+    if not str(text or "").strip():
         return ""
-    lines: List[str] = []
-    current: List[str] = []
-    current_len = 0
-    for w in words:
-        wlen = len(w)
-        if current and (current_len + 1 + wlen) > width:
-            lines.append(" ".join(current))
-            current = [w]
-            current_len = wlen
-        else:
-            current.append(w)
-            current_len = (current_len + 1 + wlen) if current_len else wlen
-    if current:
-        lines.append(" ".join(current))
-    return "\n".join(lines)
+    out: List[str] = []
+    for raw in str(text).splitlines():
+        s = re.sub(r"\s+", " ", str(raw or "").strip())
+        if s:
+            out.append(s)
+    if not out:
+        return re.sub(r"\s+", " ", str(text or "")).strip()
+    return "\n".join(out)
+
+
+def _collect_cited_record_ids(text: str) -> List[str]:
+    ordered: List[str] = []
+    for rid in _REC_ID_RE.findall(str(text or "")):
+        rs = str(rid or "").strip()
+        if rs and rs not in ordered:
+            ordered.append(rs)
+    return ordered
+
+
+def _open_record_in_review(record_id: str) -> None:
+    rid = str(record_id or "").strip()
+    if not rid:
+        return
+    st.session_state["selected_record_id"] = rid
+    try:
+        st.switch_page("pages/02_Review.py")
+    except Exception:
+        st.session_state["wb_flash_message"] = f"Selected REC:{rid}. Open Review page to view it."
+        st.rerun()
+
+
+def _render_cited_sources_panel(
+    brief_text: str,
+    record_lookup: Dict[str, Dict[str, Any]],
+    *,
+    key_prefix: str,
+) -> None:
+    cited_ids = _collect_cited_record_ids(brief_text)
+    if not cited_ids:
+        return
+    with st.expander("Cited Sources", expanded=False):
+        for i, rid in enumerate(cited_ids):
+            rec = record_lookup.get(rid) or {}
+            resolved_id = str(rec.get("record_id") or "").strip()
+            nav_id = resolved_id or ""
+            source = str(rec.get("source_type") or "-")
+            pub_date = str(rec.get("publish_date") or "-")
+            title = str(rec.get("title") or "(record missing)")
+            evidence = [str(x).strip() for x in (rec.get("evidence_bullets") or []) if str(x).strip()]
+
+            with st.container(border=True):
+                c1, c2 = st.columns([4.2, 1.2], vertical_alignment="top")
+                with c1:
+                    row_head = f"**REC:{rid}** | {source} | {pub_date}"
+                    if nav_id and nav_id != rid:
+                        row_head += f" | mapped to REC:{nav_id}"
+                    st.markdown(row_head)
+                    st.caption(title)
+                    if evidence:
+                        for bullet in evidence:
+                            st.markdown(f"- {bullet}")
+                    else:
+                        st.caption("No evidence bullets found.")
+                with c2:
+                    if st.button(
+                        "Open in Review",
+                        key=f"{key_prefix}_open_review_{i}_{rid}",
+                        width="stretch",
+                        disabled=not bool(nav_id),
+                        type="secondary",
+                    ):
+                        _open_record_in_review(nav_id)
 
 
 def _replace_rec_citations_with_sources(text: str, record_lookup: Optional[Dict[str, Dict[str, Any]]]) -> str:
@@ -181,8 +252,10 @@ def _replace_rec_citations_with_sources(text: str, record_lookup: Optional[Dict[
             label = _source_label_for_record(rec) if rec else f"REC:{rid}"
             tooltip = _source_tooltip_for_record(rec, rid) if rec else f"REC:{rid}"
             tooltip_multiline = _wrap_tooltip_lines(tooltip)
+            # Keep attribute value single-line; encode newlines for CSS tooltip rendering.
+            tooltip_attr = escape(tooltip_multiline, quote=True).replace("\r\n", "&#10;").replace("\n", "&#10;")
             tags.append(
-                f'<span class="brief-source" data-tooltip="{escape(tooltip_multiline, quote=True)}" '
+                f'<span class="brief-source" data-tooltip="{tooltip_attr}" '
                 f'tabindex="0">{escape(label)}</span>'
             )
         return "(" + ", ".join(tags) + ")"
@@ -219,7 +292,7 @@ def _ensure_brief_source_css() -> None:
   padding: 8px 10px;
   max-width: 420px;
   min-width: 180px;
-  white-space: normal;
+  white-space: pre-line;
   line-height: 1.3;
   font-weight: 400;
   font-size: 0.85rem;
@@ -1169,6 +1242,11 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
             if chosen_path.exists():
                 chosen_text = chosen_path.read_text(encoding="utf-8")
                 _render_brief_collapsible(chosen_text, record_lookup=records_by_id)
+                _render_cited_sources_panel(
+                    chosen_text,
+                    records_by_id,
+                    key_prefix=f"wb_saved_cited_{idx}_{chosen_path.stem}",
+                )
                 st.download_button(
                     "Download saved brief (.md)",
                     data=chosen_text.encode("utf-8"),
@@ -1726,6 +1804,7 @@ with tab_build:
         if auto_saved_path:
             st.caption(f"Auto-saved to `{auto_saved_path}`")
         _render_brief_collapsible(saved_text, record_lookup=records_by_id)
+        _render_cited_sources_panel(saved_text, records_by_id, key_prefix="wb_live_cited")
         st.caption(
             f"Model: {saved_usage.get('model', 'unknown')} | "
             f"prompt={saved_usage.get('prompt_tokens', '?')} "

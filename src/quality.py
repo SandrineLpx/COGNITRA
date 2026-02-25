@@ -580,7 +580,9 @@ def _action_specificity_score(actions_text: str) -> int:
 
 
 EVIDENCE_GROUNDING_THRESHOLD = 0.60
-EVIDENCE_NEAR_MISS_THRESHOLD = 0.45
+# Set equal to the grounding threshold to enforce strict 60% cutoff:
+# overlap < 60% => hard miss.
+EVIDENCE_NEAR_MISS_THRESHOLD = 0.60
 
 _DISPLAY_SET = set(DISPLAY_REGIONS)
 _FOOTPRINT_SET = set(FOOTPRINT_REGIONS)

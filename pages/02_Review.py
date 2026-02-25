@@ -46,6 +46,7 @@ _RULE_LABELS = {
 }
 _PT_TZ = ZoneInfo("America/Los_Angeles")
 _HAS_STREAMLIT_PDF = bool(importlib.util.find_spec("streamlit_pdf"))
+_QUEUE_PAGE_SIZE = 5
 
 def _friendly_rule_name(rule: str) -> str:
     key = str(rule or "")
@@ -747,6 +748,7 @@ if st.session_state.pop("review_clear_filters_requested", False):
     st.session_state["review_publish_from"] = default_publish_from
     st.session_state["review_publish_to"] = default_publish_to
     st.session_state["review_date_basis"] = "Upload date"
+    st.session_state["review_queue_page_idx"] = 0
 
 st.session_state.setdefault("review_query", "")
 st.session_state.setdefault("review_hide_briefed", True)
@@ -765,6 +767,7 @@ st.session_state.setdefault("review_apply_publish_range", False)
 st.session_state.setdefault("review_publish_from", default_publish_from)
 st.session_state.setdefault("review_publish_to", default_publish_to)
 st.session_state.setdefault("review_date_basis", "Upload date")
+st.session_state.setdefault("review_queue_page_idx", 0)
 
 # One-time defaults migration so existing sessions pick up current filter defaults
 # and don't keep stale query/date/region values from prior UI versions.
@@ -786,6 +789,7 @@ if not st.session_state.get("_review_filter_defaults_v6_applied", False):
     st.session_state["review_publish_from"] = default_publish_from
     st.session_state["review_publish_to"] = default_publish_to
     st.session_state["review_date_basis"] = "Upload date"
+    st.session_state["review_queue_page_idx"] = 0
     st.session_state["_review_filter_defaults_v6_applied"] = True
 
 quick_region_options = ["All Regions"] + all_regions
@@ -997,8 +1001,17 @@ with queue_col:
         selected_id: str = str(st.session_state.get("selected_record_id") or "")
         if selected_id not in queue_ids:
             selected_id = queue_ids[0]
+            st.session_state["review_queue_page_idx"] = 0
 
-        display_queue = queue
+        queue_total = len(queue_ids)
+        page_count = max(1, (queue_total + _QUEUE_PAGE_SIZE - 1) // _QUEUE_PAGE_SIZE)
+        requested_page_idx = int(st.session_state.get("review_queue_page_idx", 0) or 0)
+        page_idx = max(0, min(requested_page_idx, page_count - 1))
+        st.session_state["review_queue_page_idx"] = page_idx
+
+        start = page_idx * _QUEUE_PAGE_SIZE
+        end = min(start + _QUEUE_PAGE_SIZE, queue_total)
+        display_queue = queue.iloc[start:end]
 
         st.markdown(
             f"**Pending: {pending_count} | "
@@ -1006,6 +1019,31 @@ with queue_col:
             f"High priority: {int((fdf['priority'] == 'High').sum())} | "
             f"Marked duplicate: {int(fdf['is_duplicate'].fillna(False).sum())}**"
         )
+        p1, p2, p3, p4 = st.columns([1.1, 1.2, 1.1, 2.6], vertical_alignment="center")
+        with p1:
+            if st.button(
+                "Previous",
+                key="review_queue_prev_page",
+                type="secondary",
+                disabled=page_idx == 0,
+                width="stretch",
+            ):
+                st.session_state["review_queue_page_idx"] = max(0, page_idx - 1)
+                st.rerun()
+        with p2:
+            st.caption(f"Page {page_idx + 1} of {page_count}")
+        with p3:
+            if st.button(
+                "Next",
+                key="review_queue_next_page",
+                type="secondary",
+                disabled=page_idx >= (page_count - 1),
+                width="stretch",
+            ):
+                st.session_state["review_queue_page_idx"] = min(page_count - 1, page_idx + 1)
+                st.rerun()
+        with p4:
+            st.caption(f"Showing {start + 1} to {end} of {queue_total} records")
 
         st.markdown("<div style='height:0.2rem'></div>", unsafe_allow_html=True)
         with st.container(border=False):
@@ -1079,12 +1117,14 @@ with queue_col:
                         width="content",
                     ):
                         st.session_state["selected_record_id"] = rid
+                        st.session_state["review_queue_page_idx"] = queue_ids.index(rid) // _QUEUE_PAGE_SIZE
                         st.rerun()
 
         selected_id = str(st.session_state.get("selected_record_id") or selected_id)
         if selected_id not in queue_ids:
             selected_id = queue_ids[0]
             st.session_state["selected_record_id"] = selected_id
+            st.session_state["review_queue_page_idx"] = 0
 
         current_idx = queue_ids.index(selected_id)
 
@@ -1098,11 +1138,15 @@ if rec:
     navd1, navd2, navd3 = st.columns([1, 1, 5])
     with navd1:
         if st.button("Previous", type="secondary", disabled=current_idx == 0, key="review_detail_prev"):
-            st.session_state["selected_record_id"] = queue_ids[current_idx - 1]
+            next_idx = current_idx - 1
+            st.session_state["selected_record_id"] = queue_ids[next_idx]
+            st.session_state["review_queue_page_idx"] = next_idx // _QUEUE_PAGE_SIZE
             st.rerun()
     with navd2:
         if st.button("Next", type="secondary", disabled=current_idx >= (len(queue_ids) - 1), key="review_detail_next"):
-            st.session_state["selected_record_id"] = queue_ids[current_idx + 1]
+            next_idx = current_idx + 1
+            st.session_state["selected_record_id"] = queue_ids[next_idx]
+            st.session_state["review_queue_page_idx"] = next_idx // _QUEUE_PAGE_SIZE
             st.rerun()
     with navd3:
         st.caption(f"Record {current_idx + 1} of {len(queue_ids)}")
@@ -1514,8 +1558,10 @@ with detail_col:
                         if remaining_ids:
                             new_idx = min(current_idx, len(remaining_ids) - 1)
                             st.session_state["selected_record_id"] = remaining_ids[new_idx]
+                            st.session_state["review_queue_page_idx"] = new_idx // _QUEUE_PAGE_SIZE
                         else:
                             st.session_state.pop("selected_record_id", None)
+                            st.session_state["review_queue_page_idx"] = 0
                         st.success("Record deleted.")
                         st.rerun()
 
