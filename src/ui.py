@@ -231,13 +231,41 @@ def _inject_css() -> None:
   font-weight: 600;
 }
 
+.stButton > button {
+  background: #FFFFFF;
+  color: #0F172A;
+  border: 1px solid #CBD5E1;
+}
+
+.stButton > button:hover {
+  background: #F8FAFC;
+  color: #0F172A;
+  border-color: #94A3B8;
+}
+
+.stButton > button[kind="secondary"],
+.stButton > button[kind="secondaryFormSubmit"] {
+  background: #FFFFFF;
+  color: #0F172A;
+  border: 1px solid #CBD5E1;
+}
+
+.stButton > button[kind="secondary"]:hover,
+.stButton > button[kind="secondaryFormSubmit"]:hover {
+  background: #F8FAFC;
+  color: #0F172A;
+  border-color: #94A3B8;
+}
+
 .stButton > button[kind="primary"] {
   background: var(--cg-accent);
+  color: #FFFFFF;
   border-color: var(--cg-accent);
 }
 
 .stButton > button[kind="primary"]:hover {
   background: #1D4ED8;
+  color: #FFFFFF;
   border-color: #1D4ED8;
 }
 

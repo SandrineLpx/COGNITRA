@@ -1,6 +1,6 @@
 # CHANGELOG
 
-Milestone-level project history. Detailed iteration log: `docs/ITERATION_LOG.md`.
+Milestone-level project history (curated summary). Detailed logs: `Docs/ITERATION_LOG.md` (clean) and `Docs/ITERATION_LOG_FULL.md` (full historical, not fully mirrored here).
 
 ## 2026-02-21 - Alignment & Documentation Pass
 

@@ -536,6 +536,60 @@ class TestMacroThemePriorityEscalation:
         assert out.get("priority") == "High"
         assert out.get("priority_reason") == "footprint_and_key_oem"
 
+    def test_magna_with_footprint_hits_key_supplier_priority_path(self):
+        rec = _base_record(
+            title="Magna expands manufacturing operations in Italy",
+            priority="Medium",
+            actor_type="supplier",
+            companies_mentioned=["Magna International", "Magna Closures Inc."],
+            keywords=["plant expansion", "capacity", "supplier", "investment", "automotive"],
+            country_mentions=["Italy"],
+            regions_mentioned=[],
+            regions_relevant_to_apex_mobility=[],
+        )
+        out = postprocess_record(rec)
+
+        assert "Italy" in out.get("regions_relevant_to_apex_mobility", [])
+        assert out.get("priority") == "High"
+        assert out.get("priority_reason") == "footprint_and_key_supplier"
+
+    def test_key_supplier_without_footprint_remains_medium(self):
+        rec = _base_record(
+            title="Magna updates global product portfolio",
+            priority="Medium",
+            actor_type="supplier",
+            companies_mentioned=["Magna International"],
+            topics=["Market & Competition"],
+            keywords=["supplier", "portfolio", "automotive"],
+            country_mentions=[],
+            regions_mentioned=[],
+            regions_relevant_to_apex_mobility=[],
+        )
+        out = postprocess_record(rec)
+
+        assert out.get("regions_relevant_to_apex_mobility") == []
+        assert out.get("priority") == "Medium"
+        assert out.get("priority_reason") != "missing_footprint_region"
+
+    def test_key_supplier_with_closure_keyword_without_footprint_escalates_high(self):
+        rec = _base_record(
+            title="Magna launches new door handle architecture",
+            priority="Medium",
+            actor_type="supplier",
+            companies_mentioned=["Magna International"],
+            topics=["Market & Competition"],
+            country_mentions=[],
+            regions_mentioned=[],
+            regions_relevant_to_apex_mobility=[],
+            evidence_bullets=["The supplier introduced a new door handle product line."],
+            key_insights=["The closure subsystem launch could pressure incumbents in future programs."],
+        )
+        out = postprocess_record(rec)
+
+        assert out.get("regions_relevant_to_apex_mobility") == []
+        assert out.get("priority") == "High"
+        assert out.get("priority_reason") == "key_supplier_and_closure_keyword"
+
 
 # ============================================================================
 # Regression: Mercedes Bloomberg issues

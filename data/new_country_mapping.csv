@@ -1,0 +1,103 @@
+﻿country,entry,region,market,relevant to Kieket,display
+country,Czech Republic,Europe,Central Europe,Czech Republic,Czech Republic
+country,Hungary,Europe,Central Europe,,Central Europe
+country,Poland,Europe,Central Europe,,Central Europe
+country,Romania,Europe,Central Europe,,Central Europe
+country,Serbia,Europe,Central Europe,,Central Europe
+country,Slovakia,Europe,Central Europe,,Central Europe
+country,Slovenia,Europe,Central Europe,,Central Europe
+country,Belarus,Europe,East Europe,,East Europe
+country,Kazakhstan,Europe,East Europe,,East Europe
+country,Russia,Europe,East Europe,Russia,Russia
+country,Turkey,Europe,East Europe,,East Europe
+country,Ukraine,Europe,East Europe,,East Europe
+country,Uzbekistan,Europe,East Europe,,East Europe
+country,Austria,Europe,West Europe,,West Europe
+country,Belgium,Europe,West Europe,,West Europe
+country,Finland,Europe,West Europe,,West Europe
+country,France,Europe,West Europe,France,France
+country,Germany,Europe,West Europe,Germany,Germany
+country,Italy,Europe,West Europe,Italy,Italy
+country,Portugal,Europe,West Europe,Portugal,Portugal
+country,Spain,Europe,West Europe,Spain,Spain
+country,Sweden,Europe,West Europe,Sweden,Sweden
+country,United Kingdom,Europe,West Europe,United Kingdom,United Kingdom
+country,China,Greater China,China,China,China
+country,Taiwan,Greater China,Taiwan,Taiwan,Taiwan
+country,Japan,Japan/Korea,Japan,Japan,Japan
+country,South Korea,Japan/Korea,South Korea,South Korea,South Korea
+country,Algeria,Middle East/Africa,Africa,,Africa
+country,Egypt,Middle East/Africa,Africa,,Africa
+country,Morocco,Middle East/Africa,Africa,Morocco,Morocco
+country,South Africa,Middle East/Africa,Africa,,Africa
+country,Iran,Middle East/Africa,Middle East,,Middle East
+country,Saudi Arabia,Middle East/Africa,Middle East,,Middle East
+country,Canada,North America,NAFTA,,NAFTA
+country,Mexico,North America,NAFTA,Mexico,Mexico
+country,United States,North America,NAFTA,United States,United States
+country,Colombia,South America,Andean,,Andean
+country,Ecuador,South America,Andean,,Andean
+country,Argentina,South America,Mercosul,,Mercosul
+country,Brazil,South America,Mercosul,,Mercosul
+country,Uruguay,South America,Mercosul,,Mercosul
+country,Indonesia,South Asia,ASEAN,,ASEAN
+country,Malaysia,South Asia,ASEAN,,ASEAN
+country,Philippines,South Asia,ASEAN,,ASEAN
+country,Singapore,South Asia,ASEAN,,ASEAN
+country,Thailand,South Asia,ASEAN,Thailand,Thailand
+country,Vietnam,South Asia,ASEAN,,ASEAN
+country,India,South Asia,Indian Subcontinent,India,India
+country,Pakistan,South Asia,Indian Subcontinent,,Indian Subcontinent
+country,Switzerland,Europe,West Europe,,West Europe
+country,Norway,Europe,West Europe,,West Europe
+country,Netherlands,Europe,West Europe,,West Europe
+country,Denmark,Europe,West Europe,,West Europe
+country,Ireland,Europe,West Europe,,West Europe
+country,Bulgaria,Europe,Central Europe,,Central Europe
+country,Croatia,Europe,Central Europe,,Central Europe
+country,Nigeria,Middle East/Africa,Africa,,Africa
+country,Kenya,Middle East/Africa,Africa,,Africa
+country,Chile,South America,Andean,,Andean
+country,Peru,South America,Andean,,Andean
+country,Paraguay,South America,Mercosul,,Mercosul
+country,Bolivia,South America,Andean,,Andean
+country,Venezuela,South America,Andean,,Andean
+country,Guatemala,South America,Central America,,Central America
+country,Costa Rica,South America,Central America,,Central America
+country,Panama,South America,Central America,,Central America
+country,Honduras,South America,Central America,,Central America
+country,El Salvador,South America,Central America,,Central America
+country,Nicaragua,South America,Central America,,Central America
+country,Australia,South Asia,Oceania,,Oceania
+country,New Zealand,South Asia,Oceania,,Oceania
+alias,u.s.,North America,NAFTA,United States,United States
+alias,usa,North America,NAFTA,United States,United States
+alias,united states,North America,NAFTA,United States,United States
+alias,latin america,South America,,,South America
+alias,latam,South America,,,South America
+alias,eu,Europe,,Europe,Europe
+alias,e.u.,Europe,,Europe,Europe
+alias,western europe,Europe,West Europe,West Europe,West Europe
+alias,eastern europe,Europe,East Europe,East Europe,East Europe
+alias,europe (including russia),Europe,,Europe,Europe
+alias,asia,South Asia,,,South Asia
+alias,asia-pacific,South Asia,,,South Asia
+alias,asia pacific,South Asia,,,South Asia
+alias,apac,South Asia,,,South Asia
+footprint_region,Africa,Middle East/Africa,Africa,Africa,Africa
+footprint_region,Andean,South America,Andean,,Andean
+footprint_region,ASEAN,South Asia,ASEAN,ASEAN,ASEAN
+footprint_region,Central America,South America,Central America,,Central America
+footprint_region,Central Europe,Europe,Central Europe,Central Europe,Central Europe
+footprint_region,China,Greater China,China,China,China
+footprint_region,East Europe,Europe,East Europe,East Europe,East Europe
+footprint_region,Indian Subcontinent,South Asia,Indian Subcontinent,Indian Subcontinent,Indian Subcontinent
+footprint_region,Japan,Japan/Korea,Japan,Japan,Japan
+footprint_region,Mercosul,South America,Mercosul,,Mercosul
+footprint_region,Middle East,Middle East/Africa,Middle East,,Middle East
+footprint_region,NAFTA,North America,NAFTA,NAFTA,NAFTA
+footprint_region,Oceania,South Asia,Oceania,,Oceania
+footprint_region,Rest of World,Rest of World,Rest of World,,Rest of World
+footprint_region,South Korea,Japan/Korea,South Korea,South Korea,South Korea
+footprint_region,Taiwan,Greater China,Taiwan,Taiwan,Taiwan
+footprint_region,West Europe,Europe,West Europe,West Europe,West Europe

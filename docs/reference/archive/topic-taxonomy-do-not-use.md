@@ -399,7 +399,7 @@ Article: "New UN-R155 cybersecurity regulation for digital keys"
 When articles span multiple areas:
 - Prioritize the closure systems angle
 - Note OEM context (customer intelligence)
-- Track competitor context (competitive intelligence)
+- Track competitor context (market intelligence)
 
 ### Keyword Matching for Relevance
 
@@ -450,7 +450,7 @@ When articles span multiple areas:
 
 ### High Priority for Closure Systems Business
 
-**Competitive Intelligence:**
+**Market Intelligence:**
 - Direct competitor wins at your OEMs (especially Hi-Lex, Aisin, Brose, Huf, Magna, Inteva)
 - New technology launches by competitors (e.g., Huf digital key, Brose power cinch)
 - Competitor capacity expansions (signals big program wins)

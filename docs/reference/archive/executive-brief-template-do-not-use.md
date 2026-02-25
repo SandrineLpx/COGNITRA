@@ -5,7 +5,7 @@ Standard format for weekly and monthly automotive market intelligence reports.
 ## Weekly Intelligence Brief
 
 ```markdown
-AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF
+AUTOMOTIVE MARKET INTELLIGENCE BRIEF
 Week of [Start Date] - [End Date], [Year]
 Prepared by: Market Intelligence Agent
 
@@ -238,7 +238,7 @@ Sources Used: Bloomberg, Automotive News, Reuters, [other sources]
 ## Monthly Intelligence Brief
 
 ```markdown
-AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF
+AUTOMOTIVE MARKET INTELLIGENCE BRIEF
 Month of [Month Year]
 Prepared by: Market Intelligence Agent
 

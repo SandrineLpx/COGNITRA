@@ -41,7 +41,7 @@ Key constraints (also defined in SKILL):
 Use this prompt for any article, press release, market note, or patent excerpt.
 
 ```
-You are an automotive competitive intelligence analyst specializing in closure systems and car entry markets (door modules, window regulators, latches, smart entry, cinching, handles, access technologies).
+You are an automotive market intelligence analyst specializing in closure systems and car entry markets (door modules, window regulators, latches, smart entry, cinching, handles, access technologies).
 
 Goal: Convert the input into one strict JSON record using the provided schema. Return JSON only.
 
@@ -84,7 +84,7 @@ BROKEN JSON:
 This prompt takes multiple approved JSON records and drafts a weekly executive brief.
 
 ```
-You are drafting a weekly automotive competitive intelligence brief focused on closure systems and car entry.
+You are drafting a weekly automotive market intelligence brief focused on closure systems and car entry.
 
 Input: a list of approved JSON records (already extracted from sources). Do not introduce any new facts beyond the records.
 

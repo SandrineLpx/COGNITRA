@@ -19,7 +19,7 @@ COGNITRA is a minimal-token AI market intelligence triage system for the automot
 
 > **Note:** "Apex Mobility" is an anonymized company name used throughout this project to represent a real Tier-1 automotive closure systems supplier. The domain scope, competitor landscape, and operational footprint are representative of the actual use case.
 
-The core design philosophy is "minimal AI": the LLM handles only extraction and cross-record synthesis; all classification, prioritization, confidence scoring, deduplication, and quality checks are deterministic Python rules. This makes the system auditable, cost-predictable, and reliable for production use.
+The core design philosophy is "minimal AI": the LLM handles factual extraction and cross-record synthesis, while deterministic Python rules handle priority, confidence, macro-theme detection, normalization, deduplication, and quality checks. This makes the system auditable, cost-predictable, and reliable for production use.
 
 ### Tools & Technologies
 
@@ -47,7 +47,7 @@ The core design philosophy is "minimal AI": the LLM handles only extraction and 
 
 This project builds an AI-powered market intelligence triage system for the automotive closure systems and car entry domain. The system is designed for environments where teams already pay for high-quality information—such as Bloomberg, Automotive News, S&P Global, and MarkLines—as well as public sources like press releases and regulatory announcements. The problem is not access to content; it is the lack of a scalable way to convert these sources into consistent, decision-ready intelligence.
 
-Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (OEM/supplier/regulator), assigns controlled taxonomy topics, applies a two-tier footprint region architecture (display-level buckets like Asia, Western/Eastern Europe; Apex Mobility operational footprint with country-level granularity like India, China, Japan, Thailand), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets and key insights. Reliability and adoption are built in through strict JSON schema validation, a single repair step, strict multi-model fallback routing, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
+Rather than packaging press releases or generating generic summaries, the tool converts unstructured documents (PDFs/text) into evidence-backed intelligence records that are searchable and comparable over time. It identifies relevant companies and actors (oem/supplier/technology/industry/other), assigns controlled taxonomy topics, applies the current region architecture (display and footprint values share the same canonical set, including labels like West Europe, East Europe, South Asia, and individual countries such as India, China, Japan, and Thailand), and outputs priority and computed confidence (based on observable extraction quality signals, not LLM self-assessment) alongside verifiable evidence bullets and key insights. Reliability and adoption are built in through strict JSON schema validation, a single repair step, model-tier fallback/repair within Gemini, and a human-in-the-loop approval gate before executive reporting. The result is a scalable workflow that increases signal capture from premium intelligence streams while keeping token costs predictable.
 
 ## 1. Problem Statement and Significance
 
@@ -101,11 +101,11 @@ A lightweight tool that takes an input document (PDF/text) and generates:
 3. A filterable "inbox" view for analysts (priority/topic/region/company)
 4. Human review controls (Pending/Approved/Disapproved) with auto-approve heuristics at ingest
 5. **AI-generated Weekly Executive Brief** synthesized across multiple records using Gemini Flash, following a structured executive report template (executive summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions)
-6. **Trend analysis dashboard** with topic momentum, company mention tracking, and priority distribution over time
+6. **An Insights page** with interactive trend analytics (topic momentum, company mentions, region-topic signal matrix, and quality score trend over QC runs)
 
 ### 2.2 Target users
 
-* Market/competitive intelligence analyst (primary user)
+* Market intelligence analyst (primary user)
 * Strategy/product/sourcing stakeholders consuming weekly outputs
 * Executives consuming a weekly digest
 
@@ -191,7 +191,7 @@ Everything else is deterministic:
   * **AI-generated Weekly Executive Brief:** LLM synthesis (Gemini Flash) across up to 20 selected records, following structured executive report template (executive summary, high-priority developments, footprint region signals, topic developments, emerging trends, recommended actions); token usage displayed
   * Analyst-driven item selection with one-click suggestions
 * **Priority classification:**
-  * LLM prompt rules define High/Medium/Low criteria with Apex Mobility-specific signals
+  * Priority is computed deterministically in postprocess (no LLM priority rule in the current prompt)
   * Deterministic `_boost_priority()` postprocess: upgrades to High when `mentions_our_company`, footprint region + closure topic/keyword, or footprint region + key OEM customer
   * **Computed confidence scoring:** deterministic `_compute_confidence()` replaces LLM self-assessed confidence with score from observable signals (field completeness, evidence count, postprocess corrections, date provenance); audit trail in `_confidence_detail`
   * Auto-approve heuristic at ingest: computed confidence not Low, publish_date present, source_type not Other, 2+ evidence bullets → auto-Approved; otherwise Pending for manual review
@@ -284,7 +284,7 @@ A dedicated refactoring session identified the gap and consolidated everything:
 
 3. **Apex Mobility identity added to the prompt** — the extraction prompt now opens with "You are extracting structured intelligence for Apex Mobility, an automotive closure systems supplier (door latches, strikers, handles, smart entry, cinch systems)." This gives the LLM domain context for all classification decisions.
 
-4. **Reference files reduced to one** — `topic-taxonomy.md` was deleted (content now lives in code). `context-watchlist.md` was cleaned of outdated region/priority sections and renamed to `company-watchlist.md` (purely competitive intelligence, no code duplication). `SKILL.md` was archived.
+4. **Reference files reduced to one** — `topic-taxonomy.md` was deleted (content now lives in code). `context-watchlist.md` was cleaned of outdated region/priority sections and renamed to `company-watchlist.md` (purely market intelligence, no code duplication). `SKILL.md` was archived.
 
 5. **`AGENTS.md` as the single operator manual** — all architecture invariants, pipeline constraints, postprocess rules, region architecture, macro-theme howto, and priority heuristics were consolidated into a single `AGENTS.md` file at the repo root. This file serves as the canonical instruction set for any AI agent (Claude Code, Copilot, or future tools) working on the codebase — it is what the AI reads before making any code change. `CLAUDE.md` was reduced to a 3-line pointer: "This repository uses `AGENTS.md` as the canonical AI agent instruction file." This means there is exactly one file that defines how the system works, what boundaries must be respected (LLM-extracted vs computed fields, postprocess pipeline order, region tiers), and what not to do (never add interpretive fields back to the LLM schema, never reorder the postprocess steps). Any engineer — human or AI — reads `AGENTS.md` and has the full operational picture.
 
@@ -439,7 +439,7 @@ For the MVP, the solution is implemented as a multi-page Streamlit web app that 
 7. Postprocess/normalize model output (dedupe lists, canonicalize country names, enforce footprint region buckets, infer publish_date and source_type from text patterns, remove invalid regulator entities)
 8. **Deterministic priority classification** (`_boost_priority()` in `src/postprocess.py`):
    * Upgrades to High when: `mentions_our_company` is true, footprint region + closure topic/keyword, or footprint region + key OEM customer (Volkswagen, BMW, Hyundai/Kia, Ford, GM, Stellantis, Toyota, Mercedes-Benz, etc.)
-   * LLM prompt also includes priority criteria (rule 8) for initial classification
+   * Priority is governed by deterministic postprocess rules in the current architecture (no active prompt-side priority rule)
 9. Validate JSON against schema; if invalid, repair prompt with error details → revalidate
 10. **Computed confidence:** `_compute_confidence()` overwrites LLM self-assessed confidence with a deterministic score based on field completeness, evidence quality, rule corrections, and date provenance (see §7.5.6); audit trail stored in `_confidence_detail`
 11. **Auto-approve heuristic:** computed confidence not Low + publish_date present + source_type not Other + 2+ evidence bullets → auto-Approved; otherwise Pending
@@ -832,7 +832,7 @@ Our company: Apex Mobility (set mentions_our_company=true if mentioned)
 
 **Root cause:** The `government_entities` field in the schema had no corresponding extraction rule in `extraction_prompt()`. The LLM had to guess what to put in this field based only on the field name, with no instruction about whether to extract explicitly named entities or to infer from context.
 
-**Approach chosen:** Added explicit rule 7 to `extraction_prompt()`:
+**Approach chosen:** Added an explicit `government_entities` rule to `extraction_prompt()` (currently rule 8):
 
 ```
 7) government_entities: list ONLY government bodies, regulators, or agencies explicitly named
@@ -866,7 +866,7 @@ The former rules 7 and 8 (list deduplication and software/AI features) were renu
   "regions_relevant_to_apex_mobility": ["Western Europe"]
 }
 ```
-*With rule 7 in place, the model returns an empty list because no government body is explicitly named in the text.*
+*With this rule in place, the model returns an empty list because no government body is explicitly named in the text.*
 
 **Why this works:** The rule explicitly prohibits inference from country context — the most common hallucination pattern for this field. The example of "France/Spain context but never names the EU" directly mirrors the observed failure. The `return []` instruction gives the model a clear safe default when no entity is explicitly named. Combined with the postprocess canonicalization in `postprocess.py` (which normalizes "european union" → "EU", etc.), the field now only contains genuinely extracted entities.
 
@@ -946,7 +946,7 @@ The article covers registration data for Germany, France, Spain, Italy, and the 
 ]
 ```
 
-**Why it matters:** Keywords are the primary free-text signal for macro theme matching, Insights search, and trend analysis. Polluting them with countries and regions inflated wrong geographic signals — as demonstrated by the China/Asia false-positive documented in §7.5.13. Including brand names ensures competitive intelligence embedded in a market article is not lost to structured fields alone.
+**Why it matters:** Keywords are the primary free-text signal for macro theme matching, Insights search, and trend analysis. Polluting them with countries and regions inflated wrong geographic signals — as demonstrated by the China/Asia false-positive documented in §7.5.13. Including brand names ensures market intelligence embedded in a market article is not lost to structured fields alone.
 
 #### 7.5.13 China/Asia false region and macro theme — root cause and fix
 
@@ -1234,7 +1234,7 @@ Three representative document types cover the main extraction challenge categori
 
 **Test Case C — Government / Regulatory Release (Actor type and topic driven)**
 *Document type:* Government press release or regulatory announcement (e.g., NHTSA safety rule, EU regulation affecting vehicle access systems).
-*Challenge:* Correct `actor_type='other'` or entity classification; `government_entities` extraction without hallucination (rule 7); `Regulatory & Safety` topic assignment; no US/China geo distortion from regulatory backdrop language.
+*Challenge:* Correct `actor_type='other'` or entity classification; `government_entities` extraction without hallucination (explicit no-inference rule); `Regulatory & Safety` topic assignment; no US/China geo distortion from regulatory backdrop language.
 
 | Field | Expected | Extracted | Score |
 |---|---|---|---|
@@ -1245,7 +1245,7 @@ Three representative document types cover the main extraction challenge categori
 | `country_mentions` | Countries with reported regulatory scope only | [fill] | [0–5] |
 | Evidence grounding | All bullets grounded to source | [fill] | [0–5] |
 
-*Observed behavior:* [fill — describe any hallucination of government entities, how rule 7 constrained the output, review outcome]
+*Observed behavior:* [fill — describe any hallucination of government entities, how the explicit no-inference rule constrained the output, review outcome]
 
 ---
 
@@ -1278,7 +1278,7 @@ Three representative document types cover the main extraction challenge categori
 
 Key failure modes observed during testing:
 
-1. **Government entity hallucination (pre-fix):** Before adding rule 7 to the extraction prompt, the pipeline returned `government_entities = ["EU"]` for Western European market reports where the EU was never explicitly named. Root cause: the model inferred entity membership from country context. Fix: explicit prompt rule prohibiting context-based inference. Residual risk: hallucination can still occur for less common government bodies not covered by the example.
+1. **Government entity hallucination (pre-fix):** Before adding the explicit `government_entities` rule to the extraction prompt, the pipeline returned `government_entities = ["EU"]` for Western European market reports where the EU was never explicitly named. Root cause: the model inferred entity membership from country context. Fix: explicit prompt rule prohibiting context-based inference. Residual risk: hallucination can still occur for less common government bodies not covered by the example.
 
 2. **Publisher confusion (pre-fix):** The model classified `source_type = "Reuters"` for S&P Global articles that cited Reuters in the body. Root cause: no publisher-vs-cited-source distinction in the prompt. Fix: rules 1–2 in the extraction prompt. Residual risk: articles with multiple publisher headers may still confuse the rule.
 
@@ -1306,7 +1306,7 @@ Key failure modes observed during testing:
 * **Consolidated Review & Approve page** (v3.6-3.7, consolidated v6.2) dramatically reduced review friction: unified queue with filters, title-first expandable cards with inline approve/review buttons, record detail with Next/Previous navigation, Quick Approve with auto-advance, and full JSON editing — all in a single page. The simplified review model (Pending/Approved/Disapproved with auto-approve) matches the single-analyst workflow.
 * **Bulk PDF ingest** (v3.8) enabled processing multiple articles in one session with progress tracking, per-file deduplication, and summary tables — critical for weekly batches of 10-20 articles from premium sources.
 * **Trend analysis charts** (v4.0-4.1) added the temporal dimension that makes a CI tool useful for spotting change over time: Topic Momentum with weighted counting and Emerging/Expanding/Fading/Stable classification, Top Company Mentions with canonicalization, and Priority Distribution with High-Ratio and Volatility Index. All computed deterministically (zero token cost) via pandas aggregations and Altair visualizations.
-* **Priority classification** (v4.3) — the two-layer approach (prompt rules + deterministic `_boost_priority()` postprocess) ensured that business-critical signals are never missed even when the model underestimates priority. The deterministic boost acts as a safety net that catches footprint-region + closure-tech or key-OEM combinations.
+* **Priority classification** (v4.3, later simplified) — an earlier two-layer approach (prompt rules + deterministic `_boost_priority()` postprocess) was later simplified to deterministic-only priority because postprocess rules produced more consistent Apex Mobility-aligned outcomes. The deterministic boost remains the safety net that catches footprint-region + closure-tech or key-OEM combinations.
 * **Computed confidence** (v4.6) replaced the LLM's self-assessed confidence (which skewed toward "High" regardless of extraction quality) with a deterministic score based on observable signals (field completeness, postprocess corrections, date backfill). This fixed the overconfidence bias that was allowing weak extractions to be auto-approved and surface in executive briefs. The `_confidence_detail` audit trail enables ongoing calibration analysis.
 * **Meta-based model routing** (v4.5) cut API consumption by 30-50% compared to the per-chunk two-pass approach. Noisy documents skip Flash-Lite entirely (avoiding wasted calls), while clean documents complete on Flash-Lite in a single pass. This was essential for staying within the 20 RPD free-tier limit during daily workflows.
 * **API quota tracking** (v4.4) with smart chunk recommendations gave analysts the visibility to manage their daily API budget. The sidebar progress bars and pre-run estimates prevent mid-batch quota exhaustion.
@@ -1326,10 +1326,10 @@ Key failure modes observed during testing:
 * **Publisher-vs-cited-source confusion** was a persistent extraction error that required explicit prompt rules to fix. The model would see "Reuters" in an S&P article body and set source_type="Reuters" despite S&P being the publisher. This was not fixable by postprocessing alone — it required changing the extraction prompt.
 * **Balancing cleanup aggressiveness:** too-aggressive text cleaning risks removing legitimate content (e.g., short lines that are actually article subheadings). The safety fallback (preserve original if cleaned text drops below 2K chars) and the diagnostic display in the UI help the analyst catch over-cleaning.
 * **Chunk boundary effects:** when a document is split into chunks, entities or dates that span a chunk boundary can be missed. The 800-char overlap mitigates this but does not eliminate it entirely.
-* **Priority defaulting to Medium:** without explicit priority criteria in the prompt, the model defaulted every record to "Medium" — a safe but useless classification. Fixing this required both prompt-side rules (defining what High/Medium/Low mean for Apex Mobility) and code-side deterministic overrides. The lesson is that business-specific classifications need explicit criteria; the model cannot infer domain-specific priority without guidance.
+* **Priority defaulting to Medium:** when priority depended on model self-classification, records frequently defaulted to "Medium" — a safe but low-value pattern. The final fix was deterministic postprocess priority classification (`_boost_priority()` + macro-theme escalation), which removed dependence on prompt-side priority rules. The lesson is that business-specific priority should be rule-governed, not model self-assessed.
 * **API rate limits on free tier:** the Gemini free tier's 20 RPD per model constraint required rethinking the entire chunked extraction approach. The original per-chunk two-pass strategy (Flash-Lite → Flash for each chunk) could consume 6-8 calls for a single multi-chunk document. Meta-based routing and two-phase repair were necessary to stay within budget.
 * **LLM confidence self-assessment bias:** the model consistently rated its own confidence as "High" even for poorly extracted records (missing dates, unknown source types, sparse evidence). This was invisible until we compared model-reported confidence against actual field completeness. The fix required replacing self-assessment entirely with a computed score — a reminder that LLMs cannot reliably judge the quality of their own outputs without external grounding signals.
-* **Spec drift during iterative AI-assisted development:** The project started with carefully authored Markdown specification files (SKILL.md, topic-taxonomy.md, company-watchlist.md) that defined the system's taxonomy, regions, and competitive context. As the codebase evolved through dozens of iterations — adding new region tiers, removing schema fields, changing actor types — these spec files were never updated. Within weeks, every reference document contained outdated information while the code had moved on. Worse, the topic tagging guidance and competitor context that lived in these files were never wired into the LLM's extraction prompt, meaning the model was flying blind on domain-specific classification decisions. The fix was to consolidate all domain guidance into the code itself (constants.py comments + extraction prompt instructions) and reduce the reference files to a single competitive intelligence document. The lesson: in iterative AI-assisted development, treat the code as the single source of truth from the start, not the spec documents.
+* **Spec drift during iterative AI-assisted development:** The project started with carefully authored Markdown specification files (SKILL.md, topic-taxonomy.md, company-watchlist.md) that defined the system's taxonomy, regions, and market context. As the codebase evolved through dozens of iterations — adding new region tiers, removing schema fields, changing actor types — these spec files were never updated. Within weeks, every reference document contained outdated information while the code had moved on. Worse, the topic tagging guidance and competitor context that lived in these files were never wired into the LLM's extraction prompt, meaning the model was flying blind on domain-specific classification decisions. The fix was to consolidate all domain guidance into the code itself (constants.py comments + extraction prompt instructions) and reduce the reference files to a single market intelligence document. The lesson: in iterative AI-assisted development, treat the code as the single source of truth from the start, not the spec documents.
 * **Weighted counting for trend charts:** naive topic counting double-counts multi-topic records, inflating signals for broadly-tagged articles. Implementing 1/n weighted counting per topic (where n is the number of topics on a record) required restructuring the chart data pipeline and adopting Altair for interactive visualizations with classification labels.
 * **UTC-aware datetime handling:** mixing timezone-aware (from storage timestamps) and timezone-naive (from date inputs) datetimes caused Dashboard crashes. Required systematic UTC normalization across Dashboard, Inbox, and Weekly Brief pages.
 
@@ -1352,7 +1352,7 @@ The system works reliably for clean or semi-clean PDF content from known publish
 - **Single-analyst workflow:** The current UI and storage model assume one active user at a time. Multi-analyst environments need role management, conflict resolution on concurrent approvals, and per-analyst review history.
 
 **Failure modes that require prompt or rule updates:**
-- **Hallucinated government entities for unnamed bodies:** Even with rule 7, the model may produce plausible government entity names that appear in training data but are not explicitly in the document. Mitigated by keeping rule 7 strict, but not fully eliminated.
+- **Hallucinated government entities for unnamed bodies:** Even with the explicit no-inference rule, the model may produce plausible government entity names that appear in training data but are not explicitly in the document. Mitigated by keeping the rule strict, but not fully eliminated.
 - **Chunk boundary effects:** When long documents are split into overlapping chunks, entities or dates that span a boundary can be missed. The 800-char overlap reduces but does not eliminate this risk.
 - **Taxonomy drift:** New vehicle technologies or regulatory topics not covered by the 9 canonical topics will be misclassified into the nearest existing topic. The taxonomy should be reviewed quarterly (process in `docs/reference/QUARTERLY_REVIEW.md`).
 - **Publisher identification on branded PDFs:** Whitelabel PDFs or reports with embedded third-party branding may confuse the publisher identification rules. The current rule set covers known S&P, Bloomberg, Automotive News, and MarkLines formats; new publisher patterns require manual rule additions.
@@ -1422,7 +1422,7 @@ This project demonstrates that a minimal-token GenAI workflow can deliver real b
 
 AI tools (Claude Code / Claude Sonnet) were used extensively in this project in the following ways:
 
-**Code development (primary use):** The majority of the codebase was written through iterative AI-assisted coding sessions using Claude Code. Prompts were provided for each feature (e.g., "add a noise classification function that examines removed_ratio and top_removed_patterns from the cleanup metadata and routes to Flash directly for high-noise documents"). The AI generated initial implementations which were then reviewed, tested against the 97-test suite, and iteratively refined. All architectural decisions (e.g., the LLM-extracted vs. computed fields boundary, the postprocess pipeline order, the region architecture) were made by the author and enforced as constraints on AI code generation.
+**Code development (primary use):** The majority of the codebase was written through iterative AI-assisted coding sessions using Claude Code. Prompts were provided for each feature (e.g., "add a noise classification function that examines removed_ratio and top_removed_patterns from the cleanup metadata and routes to Flash directly for high-noise documents"). The AI generated initial implementations which were then reviewed, tested against the 105-test suite, and iteratively refined. All architectural decisions (e.g., the LLM-extracted vs. computed fields boundary, the postprocess pipeline order, the region architecture) were made by the author and enforced as constraints on AI code generation.
 
 **Report writing (limited use):** AI assistance was used to help structure and draft portions of this report, particularly to ensure technical accuracy in describing implemented features. All factual claims about system behavior were verified against the codebase. Problem framing, design rationale, and evaluation criteria reflect the author's own analysis. The author reviewed and edited all AI-generated text before inclusion.
 
@@ -1445,10 +1445,10 @@ AI tools (Claude Code / Claude Sonnet) were used extensively in this project in 
 - **Chunking behavior is automatic in Ingest UI:** the manual chunk-mode toggle was removed; extraction path is selected from cleaned-document chunk metadata.
 - **Macro-theme matching is source-grounded:** `notes` are excluded from macro-theme matching text fields.
 - **Weekly synthesis prompt tightened:** numeric grounding, Tier-1 implication enforcement, tone hardening, and length-scaling by record count were added at prompt level only.
-- **Government entities hallucination fix (2026-02-18):** Added explicit rule 7 to `extraction_prompt()` — `government_entities` must now be extracted verbatim from named entities in the text; inference from country context alone is explicitly prohibited.
+- **Government entities hallucination fix (2026-02-18):** Added explicit `government_entities` extraction rule to `extraction_prompt()` (currently rule 8) — `government_entities` must now be extracted verbatim from named entities in the text; inference from country context alone is explicitly prohibited.
 - **Noisy PDF cleaning improvements (2026-02-18):** Five targeted additions to `text_clean_chunk.py`: narrowed `terms` junk pattern, new `legal` pattern group (copyright/disclaimers), `_PAGE_NUM_RE` (standalone page numbers), `_BARE_URL_RE` (mid-document bare URLs), `_BYLINE_RE` (short bylines).
 - **`routing_metrics` extended (2026-02-18):** Every record JSON now includes `raw_chars` and `clean_chars` in `routing_metrics`, enabling analysis of cleaning impact per document.
-- **Priority and confidence rules removed from extraction prompt:** Both are now computed entirely by deterministic postprocess; the extraction prompt now has 10 rules focused on factual extraction only.
+- **Priority and confidence rules removed from extraction prompt:** Both are now computed entirely by deterministic postprocess; the extraction prompt currently has 13 rules focused on factual extraction only.
 - **Insights page simplified (2026-02-18):** Priority Distribution Over Time, Confidence Distribution, High-Ratio chart, and LLM Override Rate metrics removed; Quality Score Trend chart added.
 - **Country mentions geo signal distortion fix (2026-02-18):** Added rule 10 to `extraction_prompt()` — `country_mentions` now requires countries to be explicit operational markets only.
 

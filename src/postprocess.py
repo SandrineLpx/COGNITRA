@@ -395,6 +395,24 @@ _KEY_OEMS = {
     "tata", "mahindra", "byd", "geely", "chery", "great wall",
 }
 
+_KEY_SUPPLIER_MATCH_TOKENS = (
+    "hi-lex",
+    "aisin",
+    "brose",
+    "huf",
+    "magna",
+    "inteva",
+    "mitsui kinzoku",
+    "ushin",
+    "witte",
+    "mitsuba",
+    "fudi",
+    "pha",
+    "cebi",
+    "tri-circle",
+    "tricircle",
+)
+
 _OEM_CANONICAL_BY_LOWER = {
     "bmw": "BMW",
     "byd": "BYD",
@@ -420,6 +438,16 @@ _COMPANY_SPECIAL_CANONICAL = {
     "volkswagen group ag": "Volkswagen",
     "volkswagen ag": "Volkswagen",
 }
+
+
+def _has_key_supplier_company(companies: List[str]) -> bool:
+    for company in companies:
+        name = str(company or "").strip().lower()
+        if not name:
+            continue
+        if any(token in name for token in _KEY_SUPPLIER_MATCH_TOKENS):
+            return True
+    return False
 
 
 def _apply_field_policy(
@@ -1166,9 +1194,21 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
     has_footprint = bool(regions)
     has_any_region_signal = bool(regions or display_regions)
     has_closure_topic = "closure technology & innovation" in topics_lower
+    companies = rec.get("companies_mentioned") or []
+    companies_lower = {c.lower() for c in companies if isinstance(c, str)}
+    has_key_oem = bool(companies_lower & _KEY_OEMS)
+    has_key_supplier = _has_key_supplier_company(companies)
+
+    if has_key_supplier and has_footprint:
+        set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_key_supplier")
+        return rec
 
     if has_footprint and has_closure_topic:
         set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_closure_topic")
+        return rec
+
+    if has_key_supplier and has_closure_topic:
+        set_field(rec, "priority", "High", source="postprocess", reason="key_supplier_and_closure_topic")
         return rec
 
     text_parts = []
@@ -1184,9 +1224,9 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
         set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_closure_keyword")
         return rec
 
-    companies = rec.get("companies_mentioned") or []
-    companies_lower = {c.lower() for c in companies if isinstance(c, str)}
-    has_key_oem = bool(companies_lower & _KEY_OEMS)
+    if has_key_supplier and has_closure_keyword:
+        set_field(rec, "priority", "High", source="postprocess", reason="key_supplier_and_closure_keyword")
+        return rec
 
     if has_footprint and has_key_oem:
         set_field(rec, "priority", "High", source="postprocess", reason="footprint_and_key_oem")
@@ -1194,7 +1234,13 @@ def _boost_priority(rec: Dict[str, Any]) -> Dict[str, Any]:
 
     # Empty footprint coverage is a priority concern (not a confidence signal):
     # weak, non-footprint records should default to Low priority.
-    if (not has_any_region_signal) and (not has_closure_topic) and (not has_closure_keyword) and (not has_key_oem):
+    if (
+        (not has_any_region_signal)
+        and (not has_closure_topic)
+        and (not has_closure_keyword)
+        and (not has_key_oem)
+        and (not has_key_supplier)
+    ):
         set_field(rec, "priority", "Low", source="postprocess", reason="missing_footprint_region")
         return rec
 

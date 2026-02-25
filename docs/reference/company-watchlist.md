@@ -2,7 +2,7 @@
 
 > **Apex Mobility domain scope and region architecture are defined in `AGENTS.md`.**
 > **Region enums and country mappings live in `src/constants.py` and `src/postprocess.py`.**
-> This file tracks companies, competitive landscape, and technology ecosystem only.
+> This file tracks companies, market landscape, and technology ecosystem only.
 
 Key companies tracked for automotive closure systems market intelligence. Primary focus: **door modules and window regulators** (high relevance), plus latches, smart entry, door drives, cinching, radar sensors, and related closure applications.
 
@@ -10,20 +10,22 @@ Key companies tracked for automotive closure systems market intelligence. Primar
 ## Our Company
 - **Apex Mobility** - Latches and closure systems
 
-## Direct Competitors (Closure Systems Tier-1 Suppliers)
+## Core Direct Competitors – Door Latch Specialists
 
 ### Top-Tier Global Competitors
 - **Hi-Lex** - Japanese, global door and closure systems, cables and latches (acquired Mitsui Kinzoku closure business)
-- **Aisin** - Japanese (Toyota Group), comprehensive closure systems and mechatronics
-- **Brose SE (Brose)** - German, mechatronics specialist, door systems and latches
-- **Huf** - German, access and authorization systems, electronic latches, keyless entry
-- **Magna Mechatronics** - Canadian (Magna International division), complete closure systems
-- **Inteva** - US, latches and closure systems, door modules
+- **Aisin (Aisin Seiki, Aisin Corporation)** - Japanese (Toyota Group), comprehensive closure systems and mechatronics. Increasing presence in smart / powered systems
+- **Brose (Brose SE)** - German, mechatronics specialist, door systems and latches. 
+- **Huf (HUF Hülsbeck & Fürst)** - German, access and authorization systems, electronic latches, keyless entry. Less dominant in core latch mechanics, but overlaps in smart access.
+- **Magna (Magna Mechatronics, Magna Closures, Magna International)** - Canadian (Magna International division), complete closure systems
+-  **U‑Shin (MinebeaMitsumi Group)** - door latches & access systems. Strong electronics + mechatronics integration. Strong in Asia, expanding globally.
+- **Inteva (Inteva Products)** - US, latches and closure systems, door modules. Often competes at module level rather than latch‑only.
+
 
 ### Mid-Tier & Regional Competitors
 - **Mitsui Kinzoku (Mitsui Mining & Smelting)** - Japanese, door latches and automotive locks (closure business acquired by Hi-Lex)
-- **Ushin** - Japanese, door latches and locking systems
-- **Witte Automotive** - German, latches and locking systems
+- **Ushin** - Japanese, door latches and locking systems. Strong in Asia, expanding globally.
+- **Witte Automotive** - German, latches and locking systems.  Strong in Europe and with German OEMs
 - **Mitsuba** - Japanese, power window motors and closure actuators
 
 ### Emerging & Asian Competitors
@@ -144,7 +146,7 @@ Key companies tracked for automotive closure systems market intelligence. Primar
 - **Integration**: Door modules, complete closure systems
 - **Cybersecurity**: Secure access, digital key vulnerabilities
 
-### Competitive Intelligence Priorities
+### Market Intelligence Priorities
 
 **Critical Signals:**
 1. **New OEM Awards**: Who won what platform? (Scope, value, timeline)

@@ -24,6 +24,9 @@ data/quality/*
 !data/demo_seed/
 !data/demo_seed/records_baseline.jsonl
 !data/demo_seed/records_baseline.meta.json
+!data/demo_seed/pdfs/
+data/demo_seed/pdfs/*
+!data/demo_seed/pdfs/.gitkeep
 *.log
 
 # Configurable architecture (local development only, not synced)

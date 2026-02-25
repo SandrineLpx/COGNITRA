@@ -57,7 +57,7 @@ Notes (optional): [free text]
 ## B) Weekly Executive Report (digest)
 
 ```markdown
-AUTOMOTIVE COMPETITIVE INTELLIGENCE BRIEF
+AUTOMOTIVE MARKET INTELLIGENCE BRIEF
 Period: [Start Date] to [End Date]
 Prepared by: [Name/Role]
 

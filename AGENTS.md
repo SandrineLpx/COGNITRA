@@ -1,4 +1,4 @@
-# COGNITRA — Automotive Competitive Intelligence Platform
+# COGNITRA — Automotive Market Intelligence Platform
 
 ## What this is
 
@@ -98,7 +98,20 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 | `src/dedup_rank.py` | Backward-compatible wrapper around `src/dedupe.py`; not actively imported |
 | `src/render_brief.py` | Single-record intelligence brief markdown rendering |
 | `src/quality.py` | Post-hoc QC engine: record + brief checks, KPI computation, Excel export |
+| `src/pdf_extract.py` | PDF text extraction (PyMuPDF + pdfplumber fallback); publish date extraction from document header and PDF metadata |
+| `src/text_clean_chunk.py` | Canonical text cleaning and chunking: noise/nav/legal line filtering, paragraph chunking with overlap; `clean_and_chunk()` |
+| `src/context_pack.py` | Relevance-scored chunk selection for LLM context window; builds structured header+body context pack; `build_context_pack()` |
+| `src/quota_tracker.py` | Lightweight Gemini API daily RPD tracker; persists to `data/api_usage.json`, resets at midnight PT |
+| `src/ui.py` | Global CSS, page header/workflow bar, sidebar brand+nav+utilities (API quota display); `init_page()` is the shared page setup entry point |
+| `src/ui_helpers.py` | Shared Streamlit helpers: record/brief cache, brief history lookup, navigation lock, review status normalization, list/link utilities |
+| `src/clean_text.py` | Legacy wrapper around `text_clean_chunk.clean_and_chunk`; exposes `clean_extracted_text()` for backward compatibility |
+| `src/text_cleanup.py` | Legacy wrapper around `text_clean_chunk.clean_and_chunk`; exposes `clean_text_for_llm()` for backward compatibility |
 | `scripts/run_quality.py` | CLI entrypoint for quality pipeline (`--latest-brief` or `--brief-id`) |
+| `scripts/migrate_region_overhaul.py` | One-time migration: rewrites old region values in `records.jsonl` to canonical names (dry-run by default, `--apply` to write) |
+| `scripts/dedupe_jsonl.py` | CLI to run deduplication on a JSONL file and export canonical + duplicate sets (optional CSV) |
+| `scripts/demo_clean_chunk.py` | Dev utility: inspect `clean_and_chunk` output on a raw text file |
+| `scripts/demo_dedup.py` | Dev utility: test deduplication logic with hardcoded sample records |
+| `scripts/fix_renault_date.py` | Compatibility shim pointing to `scripts/one_off/fix_renault_date.py` (one-off data fix) |
 | `pages/01_Ingest.py` | PDF upload → LLM extraction → postprocess → validate → store |
 | `pages/02_Review.py` | Queue review, record detail/edit, approve/disapprove |
 | `pages/03_Brief.py` | Executive brief generation and saved-brief review |
