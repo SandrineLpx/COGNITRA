@@ -1416,9 +1416,9 @@ if isinstance(meta_seed.get("week_range"), str):
 today = date.today()
 created_dates = [d for d in (_parse_created_at(r.get("created_at")) for r in records) if d]
 publish_dates = [d for d in (_parse_publish_date(r.get("publish_date")) for r in records) if d]
-default_record_from = today - timedelta(days=7)
+default_record_from = today - timedelta(days=default_days)
 default_record_to = today
-default_publish_from = today - timedelta(days=7)
+default_publish_from = today - timedelta(days=default_days)
 default_publish_to = max([today, *publish_dates]) if publish_dates else today
 
 
