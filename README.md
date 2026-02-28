@@ -22,7 +22,7 @@ COGNITRA follows a four-stage governed pipeline — no unreviewed AI output reac
 1. **Extract** — Upload a PDF or paste text (OCR not supported at this stage). Gemini extracts structured intelligence into a strict JSON schema. One model call per document.
 2. **Score** — Deterministic Python rules assign priority, confidence, and macro-theme tags. No LLM involved.
 3. **Approve** — Analysts review, edit, and approve records through a governance queue. Low-confidence or incomplete records require human sign-off.
-4. **Render** — Executive briefs are generated from approved records only, with full citation traceability (REC links).
+4. **Render** — Executive briefs are generated from approved records only, with full citation traceability (REC links). Weekly synthesis uses Gemini on approved JSON records, with one optional repair pass when validation flags issues.
 
 ## Pages
 
@@ -107,7 +107,7 @@ Key design decisions:
 - **LLM boundary** — The LLM extracts facts only. Priority, confidence, and macro-themes are computed deterministically by Python rules. No interpretive fields in the extraction schema.
 - **Postprocess-before-validate** — Every code path runs `postprocess_record()` before `validate_record()`. Computed fields are always present when validation runs.
 - **Two-tier regions** — Region values are driven by `data/new_country_mapping.csv`. The Home page warns automatically if CSV and Python constants diverge.
-- **Minimal AI** — One model call per document for extraction. Brief rendering is deterministic from stored JSON. No second model call for scoring or classification.
+- **Minimal AI** — One model call per document for extraction. Scoring/classification stay deterministic in Python; weekly executive synthesis is an LLM step over approved stored JSON with an optional single repair call.
 
 ## Project structure
 

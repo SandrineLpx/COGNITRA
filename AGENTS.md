@@ -4,7 +4,7 @@
 
 Streamlit multipage app (Home.py + 5 pages) that ingests PDFs of automotive industry articles, extracts structured intelligence records via Gemini LLM, and produces executive briefs for Apex Mobility (closure systems supplier: door latches, strikers, handles, smart entry, cinch systems).
 
-Minimal-AI approach: one model call per document for strict JSON extraction, deterministic postprocessing and validation, deterministic brief rendering from stored JSON (no second model call). Human review before executive reporting.
+Minimal-AI approach: one model call per document for strict JSON extraction, deterministic postprocessing and validation, and weekly executive synthesis from approved stored JSON (Gemini with optional single repair pass). Human review before executive reporting.
 
 Storage: file-based JSONL (`data/records.jsonl`). No database.
 
@@ -46,8 +46,9 @@ The prompt in `model_router.py` → `extraction_prompt()` uses 13 numbered rules
 1. Set defaults (`priority`, `confidence` via `setdefault`)
 2. Normalize fields (publish_date, URL, actor_type, countries, regions, companies, government_entities)
 3. `_boost_priority()` — rule-based priority escalation
-4. `_compute_confidence()` — deterministic confidence from observable signals
-5. `_detect_macro_themes()` — keyword/company/topic/region pattern matching
+4. `_detect_macro_themes()` — keyword/company/topic/region pattern matching
+5. `_escalate_priority_from_macro_themes()` — priority escalation when macro-theme + footprint criteria are met
+6. `_compute_confidence()` — deterministic confidence from observable signals
 
 `_publisher_date_override_applied` / `_publisher_date_override_source` are computed diagnostics for publisher header parsing.
 `_region_migrations` / `_region_ambiguity` are optional diagnostics for legacy region migration and generic-Europe defaulting.
@@ -82,7 +83,7 @@ Ingest chunking is automatic (derived from cleaned-document chunk metadata); the
 4. Model routing executes extraction: one model call → schema validation → single repair attempt if needed → fallback provider on schema failure.
 5. Output is postprocessed (`postprocess_record`) and validated (`validate_record`).
 6. Duplicate check (exact title + similar story dedup).
-7. Record stored in JSONL; brief rendered deterministically from JSON.
+7. Record stored in JSONL; weekly brief synthesized by Gemini from approved records (optional one-pass repair on validation failure).
 
 ## Key files
 
