@@ -2,11 +2,11 @@
 
 A governed intelligence system that transforms automotive industry documents (reports, articles) into structured, analyst-reviewed executive briefs for strategic decision-making.
 
-Built for **Apex Mobility**, a closure systems supplier (door latches, strikers, handles, smart entry, cinch systems), COGNITRA ensures that market signals reach decision-makers with full provenance, deterministic scoring, and human oversight.
+Built around a fictional automotive supplier, **Apex Mobility** (closure systems: door latches, strikers, handles, smart entry, cinch systems), COGNITRA ensures that market signals reach decision-makers with full provenance, deterministic scoring, and human oversight.
 
 ## Business Problem
 
-Apex Mobility's strategy team monitors a high volume of automotive industry reports, OEM announcements, and trade publications to stay ahead of shifts in closure systems demand — electrification, software-defined vehicles, smart entry, and regional supply chain changes. The challenge: raw documents pile up, manual review is inconsistent, and unvalidated AI summaries risk introducing errors into executive decision-making.
+Apex Mobility's (fictional) strategy team monitors a high volume of automotive industry reports, OEM announcements, and trade publications to stay ahead of shifts in closure systems demand — electrification, software-defined vehicles, smart entry, and regional supply chain changes. The challenge: raw documents pile up, manual review is inconsistent, and unvalidated AI summaries risk introducing errors into executive decision-making.
 
 COGNITRA solves this by enforcing a strict governance pipeline:
 - All AI extraction is scoped to factual fields only — no AI-generated interpretation or scoring
@@ -194,4 +194,4 @@ The PDF and DOCX versions of the technical report (`COGNITRA_Technical_Report_20
 
 MIT License — see [LICENSE](LICENSE).
 
-This project was developed for MSIS 549B (AI & Machine Learning) as an academic proof of concept and a prototype for Apex Mobility. Source PDFs ingested during development are not included in this repository.
+This project was developed for MSIS 549B (AI & Machine Learning) as an academic proof of concept around a fictional automotive supplier scenario (Apex Mobility). Source PDFs ingested during development are not included in this repository.
