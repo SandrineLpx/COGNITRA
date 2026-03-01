@@ -183,7 +183,6 @@ docs/                      # Documentation and technical reports
 |---|---|
 | [`docs/technical_report_v1.0.md`](docs/technical_report_v1.0.md) | Full technical report — design decisions, pipeline details, evaluation |
 | [`docs/ITERATION_LOG.md`](docs/ITERATION_LOG.md) | Concise milestone log |
-| [`docs/ITERATION_LOG_FULL.md`](docs/ITERATION_LOG_FULL.md) | Detailed iteration history |
 | [`docs/streamlit_page_map.md`](docs/streamlit_page_map.md) | Page routes and module ownership |
 | [`docs/quality/`](docs/quality/) | KPI definitions and QC standards |
 | [cognitra-mockup.lovable.app](https://cognitra-mockup.lovable.app/) | UX concept prototype — interactive mockup of the intended production UI (static, not connected to live data) |
