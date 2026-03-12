@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 import src.ui as ui
+from src.brief_to_docx import markdown_to_docx
 from src.briefing import (
     select_weekly_candidates,
     synthesize_weekly_brief_llm,
@@ -1255,6 +1256,17 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
                     key=f"wb_saved_download_{idx}_{chosen_path.name}",
                 )
 
+                # Generate and offer .docx download
+                docx_io = markdown_to_docx(chosen_text, title="Executive Brief")
+                docx_filename = str(chosen.get("file_name") or chosen_path.name).replace(".md", ".docx")
+                st.download_button(
+                    "Download saved brief (.docx)",
+                    data=docx_io.getvalue(),
+                    file_name=docx_filename,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    key=f"wb_saved_download_docx_{idx}_{chosen_path.name}",
+                )
+
                 delete_key = f"wb_saved_delete_confirm_{idx}_{chosen_path.name}"
                 confirm_delete = st.checkbox("Confirm delete selected brief", value=False, key=delete_key)
                 if st.button(
@@ -1385,6 +1397,17 @@ def _render_saved_brief_browser(records_by_id: Dict[str, Dict[str, Any]]) -> Non
                 file_name=str(compare_new_file or _next_regenerated_brief_path(current_file).name),
                 mime="text/markdown",
                 key=f"wb_saved_regen_dl_{idx}",
+            )
+
+            # Generate and offer .docx download for regenerated brief
+            docx_io = markdown_to_docx(compare_after_text, title="Executive Brief")
+            docx_filename = str(compare_new_file or _next_regenerated_brief_path(current_file).name).replace(".md", ".docx")
+            st.download_button(
+                "Download regenerated .docx",
+                data=docx_io.getvalue(),
+                file_name=docx_filename,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"wb_saved_regen_dl_docx_{idx}",
             )
 
     latest_path = _latest_brief_file()
@@ -1813,7 +1836,7 @@ with tab_build:
             f"attempts={saved_usage.get('attempts', 1)} | "
             f"validation_err={saved_usage.get('validation_errors_final', 0)}"
         )
-        a1, a2 = st.columns(2)
+        a1, a2, a3 = st.columns(3)
         with a1:
             if st.button("Save another copy", type="secondary"):
                 path = _save_brief(saved_text, saved_week_range, list(saved_ids), saved_usage)
@@ -1822,10 +1845,18 @@ with tab_build:
         with a2:
             download_text = _to_saved_collapsible_markdown(saved_text)
             st.download_button(
-                "Download brief",
+                "Download .md",
                 data=download_text.encode("utf-8"),
                 file_name=f"executive_brief_{saved_week_range.replace(' ', '_')}.md",
                 mime="text/markdown",
+            )
+        with a3:
+            docx_io = markdown_to_docx(saved_text, title="Executive Brief")
+            st.download_button(
+                "Download .docx",
+                data=docx_io.getvalue(),
+                file_name=f"executive_brief_{saved_week_range.replace(' ', '_')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             )
         with st.expander("Copy / Export (raw text)", expanded=False):
             st.text_area("Copy-friendly version", value=saved_text, height=280)

@@ -24,6 +24,7 @@ def _inject_css() -> None:
         """
 <style>
 :root {
+  color-scheme: light;
   --cg-app-bg: #F5F7FA;
   --cg-card-bg: #FFFFFF;
   --cg-sidebar-bg: #111827;
@@ -36,9 +37,33 @@ def _inject_css() -> None:
   --cg-danger: #DC2626;
 }
 
+html,
+body,
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"],
+[data-testid="stSidebar"] {
+  color-scheme: light;
+}
+
+html,
+body,
+[data-testid="stAppViewContainer"],
+[data-testid="stHeader"] {
+  background: var(--cg-app-bg);
+  color: var(--cg-text-primary);
+}
+
 .stApp {
   background: var(--cg-app-bg);
   color: var(--cg-text-primary);
+}
+
+input,
+textarea,
+select,
+button {
+  color-scheme: light;
 }
 
 .main .block-container {
@@ -229,6 +254,47 @@ def _inject_css() -> None:
 [data-testid="stMetricValue"] {
   color: #1E293B;
   font-weight: 600;
+}
+
+.stTextInput input,
+.stTextArea textarea,
+.stNumberInput input,
+.stDateInput input,
+.stTimeInput input,
+[data-baseweb="input"] > div,
+[data-baseweb="base-input"] > div,
+[data-baseweb="textarea"] > div,
+[data-baseweb="select"] > div,
+[data-testid="stTextInputRootElement"] > div,
+[data-testid="stDateInputField"],
+[data-testid="stDateInputField"] input {
+  background: #FFFFFF !important;
+  color: #0F172A !important;
+  border-color: #CBD5E1 !important;
+}
+
+.stTextInput input::placeholder,
+.stTextArea textarea::placeholder,
+.stNumberInput input::placeholder,
+.stDateInput input::placeholder,
+.stTimeInput input::placeholder {
+  color: #94A3B8 !important;
+  -webkit-text-fill-color: #94A3B8;
+}
+
+[data-baseweb="select"] input,
+[data-baseweb="select"] span,
+[data-baseweb="tag"],
+[data-baseweb="tag"] span {
+  color: #0F172A !important;
+}
+
+[data-testid="stDataFrame"],
+[data-testid="stDataEditor"],
+[data-testid="stFileUploader"],
+[data-testid="stTabs"],
+[data-testid="stExpander"] {
+  color-scheme: light;
 }
 
 .stButton > button {
